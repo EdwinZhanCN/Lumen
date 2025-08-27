@@ -367,4 +367,4 @@ PYTHONPATH=$(pwd)/src uv run -p python3.12 python -m grpc_tools.protoc \
 
 ## License
 
-This project is licensed under the GPL-3.0 license. See the LICENSE file for details.
+This project is licensed under the MIT license. See the LICENSE file for details.
