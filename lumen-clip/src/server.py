@@ -81,7 +81,7 @@ def serve(port: int) -> None:
             }
             mdns_info = ServiceInfo(
                 type_="_homenative-node._tcp.local.",
-                name="CLIP-Image-Proccesor._homenative-node._tcp.local.",
+                name="CLIP-Image._homenative-node._tcp.local.",
                 addresses=[socket.inet_aton(ip)],
                 port=port,
                 properties=props,

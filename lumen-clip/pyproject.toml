@@ -19,6 +19,7 @@ dependencies = [
     "importlib-resources",
     "colorama",
     "pygbif",
+    "zeroconf",
 ]
 
 [project.optional-dependencies]
