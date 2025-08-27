@@ -7,8 +7,9 @@ from typing import Dict, Iterable, Tuple
 import grpc
 from google.protobuf import empty_pb2
 
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
+# 这里就是用"新的proto"生成的模块
+from proto import ml_service_pb2 as pb
+from proto import ml_service_pb2_grpc as rpc
 from .bioclip_model import BioCLIPModelManager
 
 logger = logging.getLogger(__name__)

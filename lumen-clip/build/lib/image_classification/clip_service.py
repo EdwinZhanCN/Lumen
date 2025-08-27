@@ -17,8 +17,8 @@ from typing import Dict, Iterable, Tuple
 import grpc
 from google.protobuf import empty_pb2
 
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
+from proto import ml_service_pb2 as pb
+from proto import ml_service_pb2_grpc as rpc
 from .clip_model import CLIPModelManager
 
 logger = logging.getLogger(__name__)

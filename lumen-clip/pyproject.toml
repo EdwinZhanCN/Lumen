@@ -20,12 +20,14 @@ dependencies = [
     "colorama",
     "pygbif",
     "zeroconf",
+    "onnxruntime",         # cross-platform ONNX Runtime support
 ]
 
 [project.optional-dependencies]
 cpu = ["torch", "torchvision", "torchaudio"]
 gpu = ["torch", "torchvision", "torchaudio"]
 osx = ["torch", "torchvision", "torchaudio"]
+rknn = ["rknn-toolkit2==2.3.2; platform_system == \"Linux\""]
 
 [tool.setuptools.packages.find]
 where = ["src"]

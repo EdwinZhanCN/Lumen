@@ -41,9 +41,9 @@ lumen-clip/
 
 Notes:
 - The unified server in `src/server.py` starts `UnifiedMLService` (see `src/service_registry/service.py`).
-- Caches:
-  - CLIP: downloads ImageNet-1k labels and precomputes text embeddings to `data/clip`.
-  - BioCLIP: downloads TreeOfLife-10M labels and precomputes text embeddings to `data/bioclip`.
+- Caches (per-backend/runtime):
+  - CLIP: downloads ImageNet-1k labels and precomputes text embeddings to `data/clip/<runtime>/<model_id>/text_vectors.npz` with sidecar `text_vectors.meta.json`. Example: `data/clip/torch/ViT-B-32_laion2b_s34b_b79k/`.
+  - BioCLIP: downloads TreeOfLife-10M labels and precomputes text embeddings to `data/bioclip/<runtime>/<model_id>/text_vectors.npz` with sidecar `text_vectors.meta.json`.
 - The standalone `clip_service.py` and `bioclip_service.py` implement the same proto one-service-per-model; they are kept as references but are not started by the unified server.
 
 
@@ -91,7 +91,7 @@ Capabilities and health:
 - Health returns Empty when the service is healthy.
 
 mDNS advertisement:
-- If zeroconf is available, the server publishes `_homenative-node._tcp.local.` with service name `CLIP-Image-Proccesor._homenative-node._tcp.local.` and TXT props:
+- If zeroconf is available, the server publishes service type `_homenative-node._tcp.local.` with instance name `CLIP-Image-Processor`. You can override the service type and instance via `CLIP_MDNS_TYPE` and `CLIP_MDNS_NAME`. TXT props:
   - uuid: CLIP_MDNS_UUID or randomly generated
   - status: CLIP_MDNS_STATUS (default “ready”)
   - version: CLIP_MDNS_VERSION (default “1.0.0”)
@@ -108,17 +108,21 @@ This project uses uv for dependency management.
 ````bash
 uv pip install '.[osx]'
 ````
+Note: RKNN (rknn-toolkit2) is Linux-only; it will not install on macOS.
 
 - NVIDIA GPU (CUDA 12.6):
 ````bash
 uv pip install --index-url https://download.pytorch.org/whl/cu126 '.[gpu]'
+````
+Linux-only RKNN extra (optional, for Rockchip NPU support):
+````bash
+uv pip install --index-url https://download.pytorch.org/whl/cu126 '.[gpu,rknn]'
 ````
 
 - CPU-only:
 ````bash
 uv pip install '.[cpu]'
 ````
-
 
 ## Running locally
 
@@ -136,6 +140,25 @@ export CLIP_MDNS_VERSION=1.0.0
 # Start the server
 python -m src.server --port 50051
 ````
+
+### Environment-based backend selection
+
+The server selects model backends at startup via environment variables:
+- CLIP_BACKEND: torch (default) | onnxrt | rknn
+- BIOCLIP_BACKEND: torch (default). If unset, falls back to CLIP_BACKEND.
+- CLIP_DEVICE, BIOCLIP_DEVICE: Device hints (e.g., cuda, mps, cpu).
+- CLIP_MAX_BATCH_SIZE, BIOCLIP_MAX_BATCH_SIZE: Optional batch size hints for backends.
+- ONNX Runtime:
+  - CLIP_ONNX_IMAGE, CLIP_ONNX_TEXT (and BIOCLIP_ONNX_IMAGE, BIOCLIP_ONNX_TEXT)
+  - CLIP_ORT_PROVIDERS, BIOCLIP_ORT_PROVIDERS (comma-separated; e.g., "CUDAExecutionProvider,CPUExecutionProvider")
+- RKNN:
+  - CLIP_RKNN_MODEL, BIOCLIP_RKNN_MODEL
+  - CLIP_RKNN_TARGET, BIOCLIP_RKNN_TARGET (default "rk3588")
+- Service runtime:
+  - BATCH_SIZE: server-side request batch size (default 8)
+- mDNS:
+  - CLIP_MDNS_TYPE, CLIP_MDNS_NAME to override service type and instance name
+  - ADVERTISE_IP to override the advertised IP
 
 Quick checks with grpcurl:
 ````bash
@@ -190,10 +213,10 @@ docker run --rm -p 50051:50051 \
   -e CLIP_MDNS_UUID \
   -e CLIP_MDNS_STATUS=ready \
   -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:cpu python -m src.server --port 50051
+  lumen-clip:cpu
 ````
 
-- NVIDIA CUDA 12.6 image:
+- NVIDIA CUDA 12.6 image (includes RKNN extra):
 ````bash
 docker build -f Dockerfiles/cuda/Dockerfile -t lumen-clip:cuda .
 docker run --rm --gpus all -p 50051:50051 \
@@ -201,10 +224,10 @@ docker run --rm --gpus all -p 50051:50051 \
   -e CLIP_MDNS_UUID \
   -e CLIP_MDNS_STATUS=ready \
   -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:cuda python -m src.server --port 50051
+  lumen-clip:cuda
 ````
 
-- AMD ROCm 6.3 image:
+- AMD ROCm 6.3 image (includes RKNN extra):
 ````bash
 docker build -f Dockerfiles/rocm/Dockerfile -t lumen-clip:rocm .
 docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
@@ -214,12 +237,12 @@ docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
   -e CLIP_MDNS_UUID \
   -e CLIP_MDNS_STATUS=ready \
   -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:rocm python3 -m src.server --port 50051
+  lumen-clip:rocm
 ````
 
 Notes:
-- The Docker build stages install dependencies with uv. The runtime entrypoint above uses `python -m src.server` to match the source layout (`src/server.py`).
-- The images copy the project into `/app` and set `PYTHONPATH=/app`. Adjust bind mounts and volumes as needed to persist `data/*` caches between runs.
+- The Docker build stages install dependencies with uv. The images set their CMD to run the unified server (`python -m src.server`), so you don't need to pass a command.
+- The images copy the project into `/app` and set `PYTHONPATH=/app/src`. Adjust bind mounts and volumes as needed to persist `data/*` caches between runs.
 
 
 ## Development workflow
@@ -233,7 +256,7 @@ Notes:
     - Text embeddings: `data/bioclip/text_vectors.npz`
 - Unified service
   - Routes tasks and applies server-side batching where possible.
-  - High-performance image preprocessing uses `torchvision.io.decode_image` with a fallback to Pillow for less common formats (e.g., WebP).
+  - Image decoding and preprocessing are handled inside the selected backend; for image-embed tasks the service calls `backend.image_batch_to_vectors()` which may fall back to sequential processing if a backend doesn’t support true batching.
   - Scene routing in `smart_classify`: CLIP scene prompts → if animal-like, delegate to BioCLIP.
 - Regenerating gRPC stubs (only if you modify `ml_service.proto`):
 ````bash
@@ -248,7 +271,7 @@ python -m grpc_tools.protoc \
 - Logging
   - The server logs to stdout; additional logs can be directed as needed. You may see `pml_service.log` if you configure file-based logging.
 - Performance tuning
-  - Batch size is currently fixed at 8 in the unified service. Increase cautiously based on device memory and throughput requirements.
+  - Batch size defaults to 8 in the unified service (override via `BATCH_SIZE`). Increase cautiously based on device memory and throughput requirements.
 
 
 ## Data sources and caching
@@ -311,6 +334,36 @@ Additionally:
 - Protocol compatibility
   - Use the provided proto to generate stubs in your client language. Respect `payload_mime` and `result_mime` fields so both sides negotiate payload schemas correctly.
 
+```shell
+PYTHONPATH=$(pwd)/src uv run -p python3.12 python -m grpc_tools.protoc \
+  -I src/proto \
+  --python_out=src \
+  --pyi_out=src \
+  --grpc_python_out=src \
+  src/proto/ml_service.proto
+```
+
+
+## Project structure details
+
+- Backends
+  - Torch (default): Fully implemented via open-clip + PyTorch. Supports batched image embedding and standard CLIP prompt templating applied by managers (not the backend).
+  - ONNX Runtime: Present as a scaffold (`ONNXRTBackend`). Environment wiring and capability reporting are implemented, but text/image encode methods are not yet implemented.
+  - RKNN (Linux-only): Provided as a typed placeholder (`RKNNBackend`) to enable env wiring and capability reporting without breaking non-Linux platforms. It raises an ImportError at runtime unless you build/run on Linux with a proper RKNN implementation (planned) and install the Linux-only extra.
+- Cache layout (per backend/runtime and model)
+  - CLIP: `data/clip/<runtime>/<model_id>/text_vectors.npz` with `text_vectors.meta.json`
+  - BioCLIP: `data/bioclip/<runtime>/<model_id>/text_vectors.npz` with `text_vectors.meta.json`
+  - Legacy caches (pre-refactor) are migrated automatically on first run when the per-backend cache is missing.
+- Environment-driven backend selection
+  - CLIP_BACKEND, BIOCLIP_BACKEND: torch (default) | onnxrt | rknn
+  - Device hints: CLIP_DEVICE, BIOCLIP_DEVICE (e.g., cuda, mps, cpu)
+  - Batch hints: CLIP_MAX_BATCH_SIZE, BIOCLIP_MAX_BATCH_SIZE
+  - ONNX paths/providers: CLIP_ONNX_IMAGE, CLIP_ONNX_TEXT, CLIP_ORT_PROVIDERS (and BIOCLIP_* equivalents)
+  - RKNN paths/target (Linux-only): CLIP_RKNN_MODEL, CLIP_RKNN_TARGET (and BIOCLIP_* equivalents)
+- Capability reporting
+  - The unified service reports an effective runtime. If CLIP and BioCLIP use different backends, runtime is reported as “mixed”.
+- mDNS
+  - Service type and instance name are configurable via `CLIP_MDNS_TYPE` and `CLIP_MDNS_NAME`, with TXT properties for uuid/status/version. Use `ADVERTISE_IP` to override the advertised address.
 
 ## License
 

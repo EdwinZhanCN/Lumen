@@ -27,8 +27,8 @@ from google.protobuf import empty_pb2
 from backends import TorchBackend, ONNXRTBackend, RKNNBackend
 
 # Import the service definition and model managers
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
+from proto import ml_service_pb2 as pb
+from proto import ml_service_pb2_grpc as rpc
 from biological_atlas import BioCLIPModelManager
 from image_classification import CLIPModelManager
 

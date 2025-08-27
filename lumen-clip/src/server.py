@@ -18,7 +18,7 @@ import uuid
 from zeroconf import Zeroconf, ServiceInfo
 
 # Import the service definition and the unified service class
-from proto import ml_service_pb2_grpc as rpc
+import ml_service_pb2_grpc as rpc
 from service_registry import UnifiedMLService
 
 # --- Logging Configuration ---
@@ -79,9 +79,13 @@ def serve(port: int) -> None:
                 "status": os.getenv("CLIP_MDNS_STATUS", "ready"),
                 "version": os.getenv("CLIP_MDNS_VERSION", "1.0.0"),
             }
+            # Allow overriding mDNS service type and instance name via env
+            service_type = os.getenv("CLIP_MDNS_TYPE", "_homenative-node._tcp.local.")
+            instance_name = os.getenv("CLIP_MDNS_NAME", "CLIP-Image-Processor")
+            full_name = f"{instance_name}.{service_type}"
             mdns_info = ServiceInfo(
-                type_="_homenative-node._tcp.local.",
-                name="CLIP-Image._homenative-node._tcp.local.",
+                type_=service_type,
+                name=full_name,
                 addresses=[socket.inet_aton(ip)],
                 port=port,
                 properties=props,
@@ -89,7 +93,7 @@ def serve(port: int) -> None:
             )
             zeroconf = Zeroconf()
             zeroconf.register_service(mdns_info)
-            logger.info("mDNS advertised: CLIP-Image-Proccesor._homenative-node._tcp.local. at %s:%d", ip, port)
+            logger.info("mDNS advertised: %s at %s:%d", full_name, ip, port)
         else:
             logger.warning("Zeroconf not installed; skipping mDNS advertisement.")
     except Exception as e:
