@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class UnifiedMLService(rpc.InferenceServicer):
+class CLIPService(rpc.InferenceServicer):
     """A single gRPC service that intelligently routes requests to CLIP or BioCLIP models."""
 
     SERVICE_NAME = "unified-ml-service"

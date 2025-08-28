@@ -1,3 +1,3 @@
-from .service import UnifiedMLService
+from .service import CLIPService
 
-__all__ = ["UnifiedMLService"]
+__all__ = ["CLIPService"]

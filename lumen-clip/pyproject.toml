@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lumen-clip"
 version = "0.1.0"
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
+readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "open-clip-torch",

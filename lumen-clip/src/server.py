@@ -19,7 +19,7 @@ from zeroconf import Zeroconf, ServiceInfo
 
 # Import the service definition and the unified service class
 import ml_service_pb2_grpc as rpc
-from service_registry import UnifiedMLService
+from service_registry import CLIPService
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -38,7 +38,7 @@ def serve(port: int) -> None:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
     # 2. Instantiate and initialize the unified service
-    service_instance = UnifiedMLService()
+    service_instance = CLIPService()
     rpc.add_InferenceServicer_to_server(service_instance, server)
 
     try:
