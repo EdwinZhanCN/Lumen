@@ -1,7 +1,25 @@
 [project]
 name = "lumen-face"
 version = "0.1.0"
-description = "Add your description here"
+description = "Face embeddings with ONNX Runtime and RKNN backends"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+onnxrt = ["onnxruntime>=1.14.0"]
+onnxrt-gpu = ["onnxruntime-gpu>=1.14.0"]
+# RKNN Toolkit is generally installed from vendor distributions. Keep this extra empty and install manually as needed.
+rknn = []
+
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["face_recognition*", "backends*"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,49 @@
+server:
+    port: 50051
+    max_workers: 16
+    mdns:
+        enabled: true
+        type: "_homenative-node._tcp.local."
+        name: "Lumen-AI-Hub"
+        advertise_ip: "" # optional; can be empty to auto-detect
+
+# Optional “global” dependencies to pre-install before services
+dependencies:
+    # Pip/uv specs (local path, VCS, or versioned)
+    - "lumen-clip @ file:///abs/path/to/lumen-clip"
+    - "lumen-face @ file:///abs/path/to/lumen-face"
+    # - "lumen-ocr @ file:///abs/path/to/lumen-ocr"
+
+services:
+    - name: clip
+      enabled: true
+      package: "lumen-clip" # If not already present, install from dependencies list above
+      import:
+          servicer_class: "lumen_clip.service_registry.UnifiedMLService"
+          add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+      env:
+          CLIP_BACKEND: "torch"
+          CLIP_DEVICE: "cpu" # cuda|mps|cpu
+          BATCH_SIZE: "8"
+
+    - name: face
+      enabled: true
+      package: "lumen-face"
+      import:
+          servicer_class: "lumen_face.service_registry.FaceService"
+          add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+      env:
+          FACE_BACKEND: "insightface"
+          FACE_PACK: "buffalo_l"
+          FACE_ORT_PROVIDERS: "CPUExecutionProvider"
+          FACE_MODEL_ROOT: "/app/models" # pre-baked models or mounted volume
+
+    - name: ocr
+      enabled: false
+      package: "lumen-ocr"
+      import:
+          servicer_class: "lumen_ocr.service_registry.OCRService"
+          add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+      env:
+          OCR_BACKEND: "onnxrt"
+          OCR_DEVICE: "cpu"
