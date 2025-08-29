@@ -28,7 +28,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install project + deps (ROCm wheels for PyTorch)
 # Uses optional dependency group [gpu] defined in pyproject.toml
-RUN uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/rocm6.3 '.[gpu,rknn]'
+RUN uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/rocm6.3 --extra-index-url https://pypi.org/simple '.[gpu]'
 
 # Stage 2: Runtime image (ROCm 6.3 + Python 3.12)
 FROM rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release-2.5.0

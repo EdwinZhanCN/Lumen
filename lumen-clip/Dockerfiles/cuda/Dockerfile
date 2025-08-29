@@ -28,7 +28,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install project dependencies (GPU build) into the system interpreter (Python 3.12)
 # Use PyTorch CUDA 12.6 wheel index
-RUN uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/cu126 '.[gpu,rknn]'
+RUN uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu]'
 
 # Stage 2: Runtime image (CUDA 12.6 + Python 3.12)
 FROM nvidia/cuda:12.6.0-base-ubuntu22.04

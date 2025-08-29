@@ -112,11 +112,15 @@ Note: RKNN (rknn-toolkit2) is Linux-only; it will not install on macOS.
 
 - NVIDIA GPU (CUDA 12.6):
 ````bash
-uv pip install --index-url https://download.pytorch.org/whl/cu126 '.[gpu]'
+uv pip install --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu]'
+````
+Linux-only ROCm6.3 support
+````bash
+uv pip install --index-url https://download.pytorch.org/whl/rocm6.3 --extra-index-url https://pypi.org/simple '.[gpu]'
 ````
 Linux-only RKNN extra (optional, for Rockchip NPU support):
 ````bash
-uv pip install --index-url https://download.pytorch.org/whl/cu126 '.[gpu,rknn]'
+uv pip install --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu,rknn]'
 ````
 
 - CPU-only:
