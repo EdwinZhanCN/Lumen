@@ -1,0 +1,48 @@
+{
+    "name": "MobileCLIP-L-14",
+    "version": "1.0.0",
+    "description": "MobileCLIP model for efficient CLIP inference",
+    "model_type": "clip",
+    "embedding_dim": 768,
+    "runtimes": {
+        "torch": {
+            "available": true,
+            "files": [
+                "torch/model.pt"
+            ]
+        },
+        "onnx": {
+            "available": true,
+            "files": [
+                "onnx/text.onnx",
+                "onnx/vision.onnx"
+            ]
+        },
+        "rknn": {
+            "available": true,
+            "devices": [
+                "rk3566",
+                "rk3588"
+            ],
+            "files": {
+                "rk3566": [
+                    "rknn/rk3566/text.rknn",
+                    "rknn/rk3566/vision.rknn"
+                ],
+                "rk3588": [
+                    "rknn/rk3588/text.rknn",
+                    "rknn/rk3588/vision.rknn"
+                ]
+            }
+        }
+    },
+    "datasets": {
+        "ImageNet_10k": "ImageNet_10k.npz"
+    },
+    "metadata": {
+        "license": "MIT",
+        "author": "Lumilio Photos",
+        "created_at": "2024-01-01",
+        "homepage": "https://github.com/lumilio/models"
+    }
+}

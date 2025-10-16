@@ -14,9 +14,12 @@ Usage notes:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
+from typing_extensions import override
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .base import BaseClipBackend, BackendInfo
 import onnxruntime as ort
@@ -56,16 +59,16 @@ class ONNXRTBackend(BaseClipBackend):
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        pretrained: Optional[str] = None,
-        model_id: Optional[str] = None,
-        onnx_image_path: Optional[str] = None,
-        onnx_text_path: Optional[str] = None,
-        providers: Optional[List[str]] = None,
-        provider_options: Optional[List[Dict[str, Any]]] = None,
-        device_preference: Optional[str] = None,
-        max_batch_size: Optional[int] = None,
-        cache_dir: Optional[str] = None,
+        model_name: str | None = None,
+        pretrained: str | None = None,
+        model_id: str | None = None,
+        onnx_image_path: str | None = None,
+        onnx_text_path: str | None = None,
+        providers: list[str] | None = None,
+        provider_options: list[dict[str, Any]] | None = None,
+        device_preference: str | None = None,
+        max_batch_size: int | None = None,
+        cache_dir: str | None = None,
     ) -> None:
         super().__init__(
             model_name=model_name,
@@ -81,15 +84,16 @@ class ONNXRTBackend(BaseClipBackend):
         self._provider_options = provider_options
 
         # Sessions to be created in initialize()
-        self._sess_image: Optional[Any] = None
-        self._sess_text: Optional[Any] = None
+        self._sess_image: Any | None = None
+        self._sess_text: Any | None = None
 
         # Derive model_id if missing
         if self._model_id is None:
-            base = (self._model_name or "onnx-model")
-            pt = (self._pretrained or "default")
+            base = self._model_name or "onnx-model"
+            pt = self._pretrained or "default"
             self._model_id = f"{base}_{pt}"
 
+    @override
     def initialize(self) -> None:
         """
         Prepare ORT sessions. This skeleton marks the backend initialized but does
@@ -102,7 +106,8 @@ class ONNXRTBackend(BaseClipBackend):
         # self._sess_text = ort.InferenceSession(self._onnx_text_path, so, providers=self._providers, provider_options=self._provider_options)
         self._initialized = True
 
-    def text_to_vector(self, text: str) -> np.ndarray:
+    @override
+    def text_to_vector(self, text: str) -> NDArray[np.float32]:
         """
         Tokenize and encode text into a unit-normalized float32 vector.
         """
@@ -111,7 +116,8 @@ class ONNXRTBackend(BaseClipBackend):
             "Implement tokenization and session run to produce a (D,) float32 vector."
         )
 
-    def image_to_vector(self, image_bytes: bytes) -> np.ndarray:
+    @override
+    def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         """
         Preprocess image bytes and encode into a unit-normalized float32 vector.
         """
@@ -120,6 +126,7 @@ class ONNXRTBackend(BaseClipBackend):
             "Implement image preprocessing and session run to produce a (D,) float32 vector."
         )
 
+    @override
     def get_info(self) -> BackendInfo:
         """
         Report ONNX Runtime metadata and configuration hints.
@@ -146,7 +153,7 @@ class ONNXRTBackend(BaseClipBackend):
         )
 
     @staticmethod
-    def _default_providers(device_pref: Optional[str]) -> List[str]:
+    def _default_providers(device_pref: str | None) -> list[str]:
         pref = (device_pref or "").lower().strip()
         if pref == "cuda":
             return ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -156,7 +163,7 @@ class ONNXRTBackend(BaseClipBackend):
         return ["CPUExecutionProvider"]
 
     @staticmethod
-    def _infer_device_from_providers(providers: Optional[Sequence[str]]) -> str:
+    def _infer_device_from_providers(providers: Sequence[str] | None) -> str:
         provs = [p.lower() for p in (providers or [])]
         if any("cuda" in p for p in provs):
             return "cuda"

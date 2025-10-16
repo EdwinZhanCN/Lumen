@@ -9,7 +9,7 @@ can remain unchanged. A backend is responsible for:
 - Converting raw inputs to unit-normalized embedding vectors:
   - text_to_vector(str) -> np.ndarray[float32, (D,)]
   - image_to_vector(bytes) -> np.ndarray[float32, (D,)]
-  - optionally: image_batch_to_vectors(List[bytes]) -> np.ndarray[float32, (N, D)]
+  - optionally: image_batch_to_vectors(list[bytes]) -> np.ndarray[float32, (N, D)]
 - Reporting runtime/device metadata via get_info()
 
 Notes:
@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import abc
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 __all__ = [
@@ -36,18 +37,48 @@ __all__ = [
 ]
 
 
+class BackendError(Exception):
+    """Base class for all backend errors."""
+
+    pass
+
+
+class BackendNotInitializedError(BackendError):
+    """Raised when backend is used before initialization."""
+
+    pass
+
+
+class InvalidInputError(BackendError):
+    """Raised when input data is invalid or malformed."""
+
+    pass
+
+
+class InferenceError(BackendError):
+    """Raised when inference operation fails."""
+
+    pass
+
+
+class ModelLoadingError(BackendError):
+    """Raised when model loading fails."""
+
+    pass
+
+
+class DeviceUnavailableError(BackendError):
+    """Raised when requested device is not available."""
+
+    pass
+
+
 class RuntimeKind(str, enum.Enum):
     """Enumerates the primary runtime families for backends."""
 
     TORCH = "torch"
     ONNXRT = "onnxrt"
     RKNN = "rknn"
-    TENSORRT = "tensorrt"
-    COREML = "coreml"
-    DIRECTML = "directml"
-    OPENVINO = "openvino"
-    CPU = "cpu"  # generic CPU runtime if needed
-    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -58,20 +89,23 @@ class BackendInfo:
     All fields are optional except `runtime`. Populate as much as possible so the
     gRPC capability message can surface accurate details.
     """
-    runtime: str
-    device: Optional[str] = None  # e.g., "cuda:0", "mps", "cpu", "rk3588-npu"
-    model_id: Optional[str] = None  # a stable identifier (e.g., "ViT-B-32_laion2b_s34b_b79k")
-    model_name: Optional[str] = None  # human-friendly name ("ViT-B-32")
-    pretrained: Optional[str] = None  # e.g., "laion2b_s34b_b79k"
-    version: Optional[str] = None  # backend or model version string
-    image_embedding_dim: Optional[int] = None
-    text_embedding_dim: Optional[int] = None
-    precisions: List[str] = field(default_factory=list)  # e.g., ["fp32","fp16","int8"]
-    max_batch_size: Optional[int] = None  # backend hint (if any)
-    supports_image_batch: bool = False
-    extra: Dict[str, str] = field(default_factory=dict)  # arbitrary key/value pairs
 
-    def as_dict(self) -> Dict[str, object]:
+    runtime: str
+    device: str | None = None  # e.g., "cuda:0", "mps", "cpu", "rk3588-npu"
+    model_id: str | None = (
+        None  # a stable identifier (e.g., "ViT-B-32_laion2b_s34b_b79k")
+    )
+    model_name: str | None = None  # human-friendly name ("ViT-B-32")
+    pretrained: str | None = None  # e.g., "laion2b_s34b_b79k"
+    version: str | None = None  # backend or model version string
+    image_embedding_dim: int | None = None
+    text_embedding_dim: int | None = None
+    precisions: list[str] = field(default_factory=list)  # e.g., ["fp32","fp16","int8"]
+    max_batch_size: int | None = None  # backend hint (if any)
+    supports_image_batch: bool = False
+    extra: dict[str, str] = field(default_factory=dict)  # arbitrary key/value pairs
+
+    def as_dict(self) -> dict[str, object]:
         """Convert to a plain dict (safe for JSON serialization)."""
         return {
             "runtime": self.runtime,
@@ -105,12 +139,12 @@ class BaseClipBackend(abc.ABC):
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        pretrained: Optional[str] = None,
-        model_id: Optional[str] = None,
-        device_preference: Optional[str] = None,
-        max_batch_size: Optional[int] = None,
-        cache_dir: Optional[str] = None,
+        model_name: str | None = None,
+        pretrained: str | None = None,
+        model_id: str | None = None,
+        device_preference: str | None = None,
+        max_batch_size: int | None = None,
+        cache_dir: str | None = None,
     ) -> None:
         """
         Construct a backend with optional hints.
@@ -125,12 +159,12 @@ class BaseClipBackend(abc.ABC):
             cache_dir: Optional writable directory for any cached assets.
         """
         self._initialized: bool = False
-        self._model_name = model_name
-        self._pretrained = pretrained
-        self._model_id = model_id
-        self._device_pref = device_preference
-        self._max_batch_size = max_batch_size
-        self._cache_dir = cache_dir
+        self._model_name: str | None = model_name
+        self._pretrained: str | None = pretrained
+        self._model_id: str | None = model_id
+        self._device_pref: str | None = device_preference
+        self._max_batch_size: int | None = max_batch_size
+        self._cache_dir: str | None = cache_dir
 
     # ---------- Lifecycle ----------
 
@@ -152,7 +186,7 @@ class BaseClipBackend(abc.ABC):
     # ---------- Encoding API (unit-normalized float32) ----------
 
     @abc.abstractmethod
-    def text_to_vector(self, text: str) -> np.ndarray:
+    def text_to_vector(self, text: str) -> NDArray[np.float32]:
         """
         Encode a text string to a unit-normalized embedding vector.
 
@@ -162,7 +196,7 @@ class BaseClipBackend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def image_to_vector(self, image_bytes: bytes) -> np.ndarray:
+    def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         """
         Encode image bytes to a unit-normalized embedding vector.
 
@@ -171,7 +205,7 @@ class BaseClipBackend(abc.ABC):
         """
         raise NotImplementedError
 
-    def image_batch_to_vectors(self, images: Sequence[bytes]) -> np.ndarray:
+    def image_batch_to_vectors(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         """
         Encode a list of image bytes into a batch of unit-normalized vectors.
 
@@ -183,14 +217,74 @@ class BaseClipBackend(abc.ABC):
         """
         if not images:
             return np.empty((0, 0), dtype=np.float32)
+        try:
+            vecs: list[NDArray[np.float32]] = []
+            for img in images:
+                try:
+                    vec = self.image_to_vector(img)
+                    vecs.append(vec)
+                except (BackendError, RuntimeError) as e:
+                    import logging
 
-        vecs = [self.image_to_vector(img) for img in images]
-        # Validate consistent dims
-        dim = vecs[0].shape[0]
-        out = np.stack(vecs, axis=0).astype(np.float32, copy=False)
-        if out.ndim != 2 or out.shape[1] != dim:
-            raise RuntimeError("image_batch_to_vectors: inconsistent vector dimensions.")
-        return out
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to encode one image in batch: {e}")
+                    continue
+
+            if not vecs:
+                raise InferenceError("All images in batch failed to encode")
+
+            # Validate consistent dims
+            dim = vecs[0].shape[0]
+            out = np.stack(vecs, axis=0).astype(np.float32, copy=False)
+            if out.ndim != 2 or out.shape[1] != dim:
+                raise InferenceError(
+                    "image_batch_to_vectors: inconsistent vector dimensions."
+                )
+            return out
+
+        except Exception as e:
+            raise InferenceError(f"Batch image encoding failed: {e}") from e
+
+    def text_batch_to_vectors(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        """
+        Encode a list of text strings into a batch of unit-normalized vectors.
+
+        Defaults to a sequential fallback using text_to_vector(). Backends that
+        support true batched execution should override for better throughput.
+
+        Returns:
+            np.ndarray with shape (N, D) and dtype float32, each row L2-normalized.
+        """
+        if not texts:
+            return np.empty((0, 0), dtype=np.float32)
+
+        try:
+            vecs: list[NDArray[np.float32]] = []
+            for text in texts:
+                try:
+                    vec = self.text_to_vector(text)
+                    vecs.append(vec)
+                except (BackendError, RuntimeError) as e:
+                    import logging
+
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to encode one text in batch: {e}")
+                    continue
+
+            if not vecs:
+                raise InferenceError("All texts in batch failed to encode")
+
+            # Validate consistent dims
+            dim = vecs[0].shape[0]
+            out = np.stack(vecs, axis=0).astype(np.float32, copy=False)
+            if out.ndim != 2 or out.shape[1] != dim:
+                raise InferenceError(
+                    "text_batch_to_vectors: inconsistent vector dimensions."
+                )
+            return out
+
+        except Exception as e:
+            raise InferenceError(f"Batch text encoding failed: {e}") from e
 
     # ---------- Metadata ----------
 
@@ -205,7 +299,9 @@ class BaseClipBackend(abc.ABC):
     # ---------- Utilities (reusable across backends/managers) ----------
 
     @staticmethod
-    def unit_normalize(vec: np.ndarray, axis: int = -1, eps: float = 1e-8) -> np.ndarray:
+    def unit_normalize(
+        vec: NDArray[np.float32], axis: int = -1, eps: float = 1e-8
+    ) -> NDArray[np.float32]:
         """
         L2-normalize vectors along the given axis.
 
@@ -221,55 +317,3 @@ class BaseClipBackend(abc.ABC):
         norm = np.linalg.norm(v, ord=2, axis=axis, keepdims=True)
         norm = np.maximum(norm, eps)
         return v / norm
-
-    @staticmethod
-    def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
-        """
-        Numerically stable softmax for numpy arrays.
-        """
-        x_max = np.max(x, axis=axis, keepdims=True)
-        e = np.exp(x - x_max)
-        return e / np.sum(e, axis=axis, keepdims=True)
-
-    @staticmethod
-    def classify_with_text_embeddings(
-        image_vec: np.ndarray,
-        text_embeddings: np.ndarray,
-        labels: Sequence[str],
-        top_k: int = 5,
-        temperature: float = 1.0,
-    ) -> List[Tuple[str, float]]:
-        """
-        Compute label probabilities from an image vector and a matrix of label text embeddings.
-
-        Args:
-            image_vec: Shape (D,), unit-normalized
-            text_embeddings: Shape (N, D), unit-normalized rows
-            labels: Sequence of N labels corresponding to the rows of text_embeddings
-            top_k: Number of predictions to return (clamped to N)
-            temperature: Optional scaling on logits (e.g., 100.0 for CLIP-like sharpening)
-
-        Returns:
-            List of (label, probability) tuples, length top_k
-        """
-        if text_embeddings.ndim != 2 or image_vec.ndim != 1:
-            raise ValueError("Invalid shapes: expected image_vec (D,), text_embeddings (N, D).")
-
-        # Ensure float32 and unit-normalized
-        img = BaseClipBackend.unit_normalize(image_vec.astype(np.float32, copy=False))
-        txt = BaseClipBackend.unit_normalize(text_embeddings.astype(np.float32, copy=False), axis=1)
-
-        # Cosine similarities -> logits
-        logits = np.dot(img, txt.T)  # shape (N,)
-        if temperature != 1.0:
-            logits = logits * float(temperature)
-
-        probs = BaseClipBackend.softmax(logits, axis=0)  # shape (N,)
-        n = probs.shape[0]
-        k = int(max(1, min(top_k, n)))
-
-        # Arg-partition top-k
-        idxs = np.argpartition(-probs, k - 1)[:k]
-        # Sort selected indices by descending prob
-        idxs = idxs[np.argsort(-probs[idxs])]
-        return [(str(labels[i]), float(probs[i])) for i in idxs]

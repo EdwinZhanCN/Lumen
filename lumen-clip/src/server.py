@@ -78,6 +78,7 @@ def serve(port: int) -> None:
                 "uuid": os.getenv("CLIP_MDNS_UUID", str(uuid.uuid4())),
                 "status": os.getenv("CLIP_MDNS_STATUS", "ready"),
                 "version": os.getenv("CLIP_MDNS_VERSION", "1.0.0"),
+                "svc": os.getenv("CLIP_MDNS_SVC", "clip")
             }
             # Allow overriding mDNS service type and instance name via env
             service_type = os.getenv("CLIP_MDNS_TYPE", "_homenative-node._tcp.local.")

@@ -2,7 +2,8 @@
 import json
 import logging
 import time
-from typing import Dict, Iterable, Tuple
+from collections.abc import Iterable
+from typing_extensions import override
 
 import grpc
 from google.protobuf import empty_pb2
@@ -25,12 +26,12 @@ class BioClipService(rpc.InferenceServicer):
       - BioAtlas 分类：task="classify", meta.namespace="bioatlas"
     """
 
-    MODEL_VERSION = "bioclip2"
+    MODEL_VERSION: str = "bioclip2"
 
     def __init__(self) -> None:
-        self.model = BioCLIPModelManager()
-        self.start_time = time.time()
-        self.is_initialized = False
+        self.model: BioCLIPModelManager = BioCLIPModelManager()
+        self.start_time: float = time.time()
+        self.is_initialized: bool = False
 
     # -------- lifecycle ----------
     def initialize(self) -> None:
@@ -38,10 +39,17 @@ class BioClipService(rpc.InferenceServicer):
         self.model.initialize()
         self.is_initialized = True
         info = self.model.info()
-        logger.info("BioCLIP ready on %s (load %.2fs)", info.get("device"), info.get("load_time"))
+        logger.info(
+            "BioCLIP ready on %s (load %.2fs)",
+            info.get("device"),
+            info.get("load_time"),
+        )
 
     # -------- Inference ----------
-    def Infer(self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext):
+    @override
+    def Infer(
+        self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext
+    ):
         """
         双向流的服务端实现（同步 style：生成器按需 yield 响应）。
         embed / classify 都是一发一收；如客户端使用了分片 seq/total，这里也支持重组。
@@ -49,7 +57,7 @@ class BioClipService(rpc.InferenceServicer):
         if not self.is_initialized:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Model not initialized")
 
-        buffers: Dict[str, bytearray] = {}  # correlation_id -> buffer
+        buffers: dict[str, bytearray] = {}  # correlation_id -> buffer
 
         for req in request_iterator:
             cid = req.correlation_id or f"cid-{_now_ms()}"
@@ -64,14 +72,21 @@ class BioClipService(rpc.InferenceServicer):
 
                 # --- 路由任务 ---
                 if req.task == "embed":
-                    result_bytes, result_mime, extra_meta = self._handle_embed(req.payload_mime, payload, dict(req.meta))
+                    result_bytes, result_mime, extra_meta = self._handle_embed(
+                        req.payload_mime, payload, dict(req.meta)
+                    )
                 elif req.task == "classify":
-                    result_bytes, result_mime, extra_meta = self._handle_classify(req.payload_mime, payload, dict(req.meta))
+                    result_bytes, result_mime, extra_meta = self._handle_classify(
+                        req.payload_mime, payload, dict(req.meta)
+                    )
                 else:
                     yield pb.InferResponse(
                         correlation_id=cid,
                         is_final=True,
-                        error=pb.Error(code=pb.ERROR_CODE_INVALID_ARGUMENT, message=f"Unknown task: {req.task}"),
+                        error=pb.Error(
+                            code=pb.ERROR_CODE_INVALID_ARGUMENT,
+                            message=f"Unknown task: {req.task}",
+                        ),
                     )
                     continue
 
@@ -83,12 +98,12 @@ class BioClipService(rpc.InferenceServicer):
                     correlation_id=cid,
                     is_final=True,
                     result=result_bytes,
-                    result_mime=result_mime,      # e.g. application/json;schema=embedding_v1
+                    result_mime=result_mime,  # e.g. application/json;schema=embedding_v1
                     meta=meta,
                     seq=0,
                     total=1,
                     offset=0,
-                    result_schema="",              # 可留空；有需要再填 "embedding_v1"/"labels_v1"
+                    result_schema="",  # 可留空；有需要再填 "embedding_v1"/"labels_v1"
                 )
 
             except grpc.RpcError:
@@ -105,16 +120,20 @@ class BioClipService(rpc.InferenceServicer):
     def GetCapabilities(self, request, context) -> pb.Capability:
         return self._build_capability()
 
+    @override
     def StreamCapabilities(self, request, context):
         # 单实例就发一条；如果后续有动态热更，可以定时/按需再发
         yield self._build_capability()
 
+    @override
     def Health(self, request, context):
         # 需要更细的健康信息可以扩展；当前协议就是 Empty
         return empty_pb2.Empty()
 
     # -------- 具体任务：embed / classify ----------
-    def _handle_embed(self, payload_mime: str, payload: bytes, meta: Dict[str, str]) -> Tuple[bytes, str, Dict[str, str]]:
+    def _handle_embed(
+        self, payload_mime: str, payload: bytes, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """
         文本嵌入：
           - 期望 payload_mime: "text/plain;charset=utf-8"
@@ -124,7 +143,7 @@ class BioClipService(rpc.InferenceServicer):
         if not payload_mime.startswith("text/"):
             raise ValueError(f"embed expects text/* payload, got {payload_mime!r}")
         text = payload.decode("utf-8")
-        vec = self.model.encode_text([text])[0].tolist()  # type: ignore[attr-defined]
+        vec = self.model.encode_text(text).tolist()  # type: ignore[attr-defined]
         obj = {"vector": vec, "dim": len(vec), "model_id": self.MODEL_VERSION}
         return (
             json.dumps(obj, separators=(",", ":")).encode("utf-8"),
@@ -132,7 +151,9 @@ class BioClipService(rpc.InferenceServicer):
             {"dim": str(len(vec))},
         )
 
-    def _handle_classify(self, payload_mime: str, payload: bytes, meta: Dict[str, str]) -> Tuple[bytes, str, Dict[str, str]]:
+    def _handle_classify(
+        self, payload_mime: str, payload: bytes, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """
         BioAtlas 分类：
           - 期望 payload_mime: "image/jpeg" / "image/png"
@@ -146,10 +167,12 @@ class BioClipService(rpc.InferenceServicer):
 
         namespace = (meta or {}).get("namespace", "bioatlas")
         if namespace != "bioatlas":
-            raise ValueError(f"unsupported namespace {namespace!r}, expected 'bioatlas'")
+            raise ValueError(
+                f"unsupported namespace {namespace!r}, expected 'bioatlas'"
+            )
 
         topk = int((meta or {}).get("topk", "5"))
-        pairs = self.model.classify_image(payload)[:topk]  # List[Tuple[str, float]]
+        pairs = self.model.classify_image(payload)[:topk]  # list[tuple[str, float]]
 
         obj = {
             "labels": [{"label": name, "score": float(score)} for name, score in pairs],
@@ -162,7 +185,9 @@ class BioClipService(rpc.InferenceServicer):
         )
 
     # -------- buffers / 分片重组 ----------
-    def _assemble(self, cid: str, req: pb.InferRequest, buffers: Dict[str, bytearray]) -> Tuple[bytes, bool]:
+    def _assemble(
+        self, cid: str, req: pb.InferRequest, buffers: dict[str, bytearray]
+    ) -> tuple[bytes, bool]:
         """
         返回 (payload_bytes, ready)
         - 若客户端不使用 seq/total：直接 ready=True

@@ -1,367 +1,492 @@
 """
 clip_model.py
 
-Refactored CLIPModelManager to align with BioCLIP's elegant design.
-- Implements a clear initialize() pattern.
-- Downloads and caches ImageNet text embeddings to a local NPZ file.
-- Uses cached text embeddings for fast, default classification.
-- Standardizes API for encoding and classification.
+Refactored CLIPModelManager to align with Lumen architecture contracts.
+- Separates concerns between Model Manager and Backend layers
+- Uses standard types (np.ndarray) instead of torch-specific types
+- Implements proper error handling according to Lumen contracts
+- Focuses on business logic: data preparation, caching, and result formatting
 """
 
 import json
 import logging
 import os
 import time
-import hashlib
-import shutil
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
-import torch
 from huggingface_hub import hf_hub_download
+from numpy.typing import NDArray
 
-from backends import BaseClipBackend, TorchBackend, ONNXRTBackend, RKNNBackend
+from backends import BaseClipBackend
 
 logger = logging.getLogger(__name__)
 
 
+class ModelDataNotFoundError(Exception):
+    """Raised when model-specific data (labels, embeddings) cannot be found or loaded."""
+
+    pass
+
+
+class CacheCorruptionError(Exception):
+    """Raised when cached data is corrupted or incompatible."""
+
+    pass
+
+
+class LabelMismatchError(Exception):
+    """Raised when cached embeddings don't match current labels."""
+
+    pass
+
+
 class CLIPModelManager:
     """
-    Manages an OpenCLIP model for image classification using cached ImageNet labels.
+    Manages CLIP model business logic for image classification using cached ImageNet labels.
 
-    This class mirrors the design of the BioCLIPModelManager, providing a streamlined
-    interface for loading a model, caching text embeddings for ImageNet classes,
-    and performing inference.
+    This class follows Lumen architecture contracts:
+    - Receives a BaseClipBackend instance for inference
+    - Manages model-specific labels and embeddings cache
+    - Handles data preprocessing/postprocessing
+    - Returns business-level results using standard types
     """
 
     def __init__(
         self,
+        backend: BaseClipBackend,
         model_name: str = "ViT-B-32",
         pretrained: str = "laion2b_s34b_b79k",
         batch_size: int = 512,
-        backend: Optional[BaseClipBackend] = None,
     ) -> None:
-        # Resolve config from args with environment overrides
-        self.model_name = os.getenv("CLIP_MODEL_NAME", model_name)
-        self.pretrained = os.getenv("CLIP_PRETRAINED", pretrained)
-        self.model_id = f"{self.model_name}_{self.pretrained}"
+        """
+        Initialize CLIP Model Manager.
+
+        Args:
+            backend: Backend instance implementing BaseClipBackend interface
+            model_name: Model architecture name
+            pretrained: Pretrained weights identifier
+            batch_size: Batch size for processing
+        """
+        # Backend dependency injection (following Lumen contracts)
+        self.backend: BaseClipBackend = backend
+
+        # Model configuration from args with environment overrides
+        self.model_name: str = os.getenv("CLIP_MODEL_NAME", model_name)
+        self.pretrained: str = os.getenv("CLIP_PRETRAINED", pretrained)
+        self.model_id: str = f"{self.model_name}_{self.pretrained}"
+
         bs_env = os.getenv("CLIP_MAX_BATCH_SIZE")
-        self.batch_size = int(bs_env) if bs_env and bs_env.isdigit() else batch_size
+        self.batch_size: int = (
+            int(bs_env) if bs_env and bs_env.isdigit() else batch_size
+        )
 
-        # Define local data paths (names shared; vectors per-backend)
+        # Data management paths
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        self._base_data_dir = os.path.join(base_dir, "data", "clip")
+        self._base_data_dir: str = os.path.join(base_dir, "data", "clip")
         os.makedirs(self._base_data_dir, exist_ok=True)
-        self.names_filename = os.path.join(self._base_data_dir, "imagenet_class_names.json")
 
-        # Legacy cache path (for migration only)
-        self._legacy_vectors_filename = os.path.join(self._base_data_dir, f"{self.model_id}_imagenet_vectors.npz")
+        # ImageNet labels file (shared across backends)
+        self.names_filename: str = os.path.join(
+            self._base_data_dir, "imagenet_labels.json"
+        )
 
-        # Per-backend cache paths (resolved after backend.initialize())
-        self._cache_runtime_dir: Optional[str] = None
-        self._vectors_npz_path: Optional[str] = None
-        self._vectors_meta_path: Optional[str] = None
+        # Per-backend cache paths (resolved after backend initialization)
+        self._cache_runtime_dir: str | None = None
+        self._vectors_npz_path: str | None = None
+        self._vectors_meta_path: str | None = None
 
-        # Backend (env-driven selection if not provided)
-        if backend is None:
-            env_backend = (os.getenv("CLIP_BACKEND", "torch") or "torch").lower()
-            device_pref = os.getenv("CLIP_DEVICE")
-            if env_backend == "onnxrt":
-                onnx_image = os.getenv("CLIP_ONNX_IMAGE")
-                onnx_text = os.getenv("CLIP_ONNX_TEXT")
-                providers = os.getenv("CLIP_ORT_PROVIDERS")
-                providers_list = [p.strip() for p in providers.split(",")] if providers else None
-                self.backend = ONNXRTBackend(
-                    model_name=self.model_name,
-                    pretrained=self.pretrained,
-                    onnx_image_path=onnx_image,
-                    onnx_text_path=onnx_text,
-                    providers=providers_list,
-                    device_preference=device_pref,
-                    max_batch_size=self.batch_size,
-                )
-            elif env_backend == "rknn":
-                rknn_path = os.getenv("CLIP_RKNN_MODEL")
-                target = os.getenv("CLIP_RKNN_TARGET", "rk3588")
-                self.backend = RKNNBackend(
-                    model_name=self.model_name,
-                    pretrained=self.pretrained,
-                    rknn_model_path=rknn_path,
-                    target=target,
-                    device_preference=device_pref,
-                    max_batch_size=self.batch_size,
-                )
-            else:
-                self.backend = TorchBackend(
-                    model_name=self.model_name,
-                    pretrained=self.pretrained,
-                    device_preference=device_pref,
-                    max_batch_size=self.batch_size,
-                )
-        else:
-            self.backend = backend
+        # Business data (using standard types as per Lumen contracts)
+        self.labels: list[str] = []
+        self.text_embeddings: NDArray[np.float32] | None = None
+        self._load_time: float | None = None
+        self.is_initialized: bool = False
 
-        # Model and data components
-        self.device = self._choose_device()
-        self._model: Optional[torch.nn.Module] = None  # preserved for service batch path when using TorchBackend
-        self.is_initialized = False
-
-        self.labels: List[str] = []
-        self.text_embeddings: Optional[torch.Tensor] = None
-        self._load_time: Optional[float] = None
-
-        # Scene classification prompts and embeddings
-        self.scene_prompts = [
+        # Scene classification prompts (business logic)
+        self.scene_prompts: list[str] = [
+            "a photo of a person",
             "a photo of an animal",
-            "a photo of a bird",
-            "a photo of an insect",
-            "a photo of a human-made object",
+            "a photo of a vehicle",
+            "a photo of food",
+            "a photo of a building",
+            "a photo of nature",
+            "a photo of an object",
             "a photo of a landscape",
             "an abstract painting",
         ]
-        self.scene_prompt_embeddings: Optional[torch.Tensor] = None
-
-    @staticmethod
-    def _choose_device() -> torch.device:
-        """Chooses the best available device (CUDA, MPS, or CPU)."""
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
+        self.scene_prompt_embeddings: NDArray[np.float32] | None = None
 
     def initialize(self) -> None:
         """
-        Loads the backend/model, downloads/caches labels, and computes/loads text embeddings.
-        This method must be called before any inference.
+        Initialize the model manager: load backend, cache labels, and compute embeddings.
+        Must be called before any inference operations.
+
+        Raises:
+            ModelDataNotFoundError: If required model data cannot be loaded
+            CacheCorruptionError: If cached data is corrupted
         """
         if self.is_initialized:
             return
 
         t0 = time.time()
-        logger.info(f"Initializing backend for {self.model_name} ({self.pretrained})...")
+        logger.info(
+            f"Initializing CLIP Model Manager for {self.model_name} ({self.pretrained})..."
+        )
 
-        # 1) Initialize backend
-        self.backend.initialize()
-        binfo = self.backend.get_info()
+        try:
+            # 1) Initialize backend (delegate device/runtime concerns to backend)
+            self.backend.initialize()
 
-        # Derive runtime cache dir and vector paths
-        runtime_id = binfo.runtime or "unknown"
-        model_id = binfo.model_id or self.model_id
-        self._cache_runtime_dir = os.path.join(self._base_data_dir, runtime_id, model_id)
+            # 2) Setup per-backend cache paths
+            self._setup_cache_paths()
+
+            # 3) Load/download labels and compute/load embeddings
+            self._load_label_names()
+            self._load_or_compute_text_embeddings()
+
+            # 4) Initialize scene embeddings
+            self._initialize_scene_embeddings()
+
+            self.is_initialized = True
+            self._load_time = time.time() - t0
+            logger.info(
+                f"CLIP Model Manager initialized in {self._load_time:.2f} seconds"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to initialize CLIP Model Manager: {e}")
+            raise ModelDataNotFoundError(f"Model initialization failed: {e}") from e
+
+    def _setup_cache_paths(self) -> None:
+        """Setup per-backend cache directory structure."""
+        backend_info = self.backend.get_info()
+        runtime_id = backend_info.runtime or "unknown"
+        model_id = backend_info.model_id or self.model_id
+
+        self._cache_runtime_dir = os.path.join(
+            self._base_data_dir, runtime_id, model_id
+        )
         os.makedirs(self._cache_runtime_dir, exist_ok=True)
-        self._vectors_npz_path = os.path.join(self._cache_runtime_dir, "text_vectors.npz")
-        self._vectors_meta_path = os.path.join(self._cache_runtime_dir, "text_vectors.meta.json")
 
-        # Preserve torch model handle for service batch path if using TorchBackend
-        if isinstance(self.backend, TorchBackend):
-            # Access internal model only for service compatibility; safe in our codebase
-            self._model = getattr(self.backend, "_model", None)  # type: ignore[attr-defined]
-
-
-
-        # 2) Load labels and embeddings (with migration)
-        self._load_label_names()
-        self._load_or_compute_text_embeddings()
-
-        # 3) Initialize scene embeddings via backend
-        self._initialize_scene_embeddings()
-
-        self.is_initialized = True
-        self._load_time = time.time() - t0
-        logger.info(f"Model initialized in {self._load_time:.2f} seconds (runtime={runtime_id}).")
+        self._vectors_npz_path = os.path.join(
+            self._cache_runtime_dir, "text_vectors.npz"
+        )
+        self._vectors_meta_path = os.path.join(
+            self._cache_runtime_dir, "text_vectors.meta.json"
+        )
 
     def _load_label_names(self) -> None:
         """
-        Downloads and caches ImageNet class names from a canonical source.
-        The file is a simple JSON list of strings.
+        Download and cache ImageNet class names from a canonical source.
+
+        Raises:
+            ModelDataNotFoundError: If labels cannot be downloaded or loaded
         """
         if not os.path.exists(self.names_filename):
             logger.info("Downloading ImageNet class names...")
             try:
-                # Using a known reliable source for ImageNet labels as a simple list.
-                # Replace with a different repo/file if needed.
+                # Download from huggingface repository
                 path = hf_hub_download(
                     repo_id="huggingface/label-files",
-                    repo_type="dataset",
                     filename="imagenet-1k-id2label.json",
+                    repo_type="dataset",
                 )
-                import shutil
-                shutil.copy(path, self.names_filename)
+
+                # Convert to simple list format and save
+                with open(path, "r") as f:
+                    id2label = json.load(f)
+
+                # Extract labels in order (assuming keys are "0", "1", "2", ...)
+                labels = [id2label[str(i)] for i in range(len(id2label))]
+
+                with open(self.names_filename, "w") as f:
+                    json.dump(labels, f, ensure_ascii=False, indent=2)
+
             except Exception as e:
-                raise RuntimeError(f"Failed to download label names: {e}")
+                raise ModelDataNotFoundError(
+                    f"Failed to download ImageNet labels: {e}"
+                ) from e
 
-        with open(self.names_filename, 'r') as f:
-            self.labels = json.load(f)
-        logger.info(f"Loaded {len(self.labels)} ImageNet class names.")
-
-    def _build_vectors_meta(self, embed_dim: Optional[int] = None) -> Dict[str, Any]:
-        binfo = self.backend.get_info()
-        model_id = binfo.model_id or self.model_id
-        model_name = binfo.model_name or self.model_name
-        pretrained = binfo.pretrained or self.pretrained
-        labels_str = json.dumps(self.labels, ensure_ascii=False, separators=(",", ":"))
-        labels_hash = hashlib.sha256(labels_str.encode("utf-8")).hexdigest()
-        meta: Dict[str, Any] = {
-            "runtime": binfo.runtime,
-            "model_id": model_id,
-            "model_name": model_name,
-            "pretrained": pretrained,
-            "backend_version": binfo.version,
-            "labels_hash": labels_hash,
-        }
-        if embed_dim is not None:
-            meta["embed_dim"] = int(embed_dim)
-        return meta
+        # Load labels
+        try:
+            with open(self.names_filename, "r") as f:
+                self.labels = json.load(f)
+            logger.info(f"Loaded {len(self.labels)} ImageNet class names")
+        except Exception as e:
+            raise ModelDataNotFoundError(f"Failed to load ImageNet labels: {e}") from e
 
     def _compute_and_cache_text_embeddings(self) -> None:
-        """Computes text embeddings for labels via backend and saves them to per-backend cache."""
-        assert self._vectors_npz_path is not None and self._vectors_meta_path is not None
-        logger.info(f"Computing text embeddings for {len(self.labels)} labels via backend...")
+        """
+        Compute text embeddings for all labels and cache to disk.
 
-        # Use simple prompt template consistent with encode_text
-        prompts = [f"a photo of a {name.replace('_', ' ')}" for name in self.labels]
-        # TODO: Consider adding a backend batch text API to accelerate this loop.
-        vec_list: List[np.ndarray] = []
-        for text in prompts:
-            vec = self.backend.text_to_vector(text)
-            vec_list.append(vec.astype(np.float32, copy=False))
-        vecs = np.vstack(vec_list).astype(np.float32, copy=False)
+        Raises:
+            CacheCorruptionError: If caching fails
+        """
+        assert (
+            self._vectors_npz_path is not None and self._vectors_meta_path is not None
+        )
 
-        # Save NPZ and META
-        np.savez(self._vectors_npz_path, names=np.array(self.labels, dtype=object), vecs=vecs)
-        meta = self._build_vectors_meta(embed_dim=int(vecs.shape[1]))
-        with open(self._vectors_meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
+        try:
+            logger.info(f"Computing text embeddings for {len(self.labels)} labels...")
 
-        self.text_embeddings = torch.tensor(vecs)
-        logger.info(f"Computed and cached text embeddings at {self._vectors_npz_path}.")
+            # Compute embeddings via backend (using standard interface)
+            prompts = [f"a photo of a {label}" for label in self.labels]
+            embeddings_list: list[NDArray[np.float32]] = []
+
+            for prompt in prompts:
+                embedding = self.backend.text_to_vector(prompt)
+                embeddings_list.append(embedding)
+
+            # Stack into single array
+            embeddings_array = np.vstack(embeddings_list).astype(np.float32, copy=False)
+
+            # Cache embeddings and metadata
+            np.savez(
+                self._vectors_npz_path,
+                names=np.array(self.labels, dtype=object),
+                vecs=embeddings_array,
+            )
+
+            backend_info = self.backend.get_info()
+            metadata = {
+                "runtime": backend_info.runtime,
+                "model_id": self.model_id,
+                "num_labels": len(self.labels),
+                "embedding_dim": embeddings_array.shape[1],
+            }
+
+            with open(self._vectors_meta_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, separators=(",", ":"))
+
+            # Store in standard format (np.ndarray)
+            self.text_embeddings = embeddings_array
+            logger.info(
+                f"Computed and cached text embeddings to {self._vectors_npz_path}"
+            )
+
+        except Exception as e:
+            raise CacheCorruptionError(
+                f"Failed to compute and cache embeddings: {e}"
+            ) from e
 
     def _load_or_compute_text_embeddings(self) -> None:
-        """Loads text embeddings from per-backend cache or computes them. Migrates legacy cache if present."""
-        assert self._vectors_npz_path is not None and self._vectors_meta_path is not None
+        """
+        Load cached text embeddings or compute them if cache is invalid/missing.
 
-        # 0) Migrate legacy torch cache if exists and new cache missing
-        if os.path.exists(self._legacy_vectors_filename) and not os.path.exists(self._vectors_npz_path):
-            os.makedirs(os.path.dirname(self._vectors_npz_path), exist_ok=True)
-            shutil.move(self._legacy_vectors_filename, self._vectors_npz_path)
-            meta = self._build_vectors_meta(embed_dim=None)  # embed_dim inferred on load
-            with open(self._vectors_meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
-            logger.info(f"Migrated legacy vectors to {self._vectors_npz_path} and wrote meta.")
+        Raises:
+            LabelMismatchError: If cached embeddings don't match current labels
+            CacheCorruptionError: If cached data is corrupted
+        """
+        assert self._vectors_npz_path is not None
 
-        # 1) Try loading existing cache
+        # Try to load from cache first
         if os.path.exists(self._vectors_npz_path):
-            data = np.load(self._vectors_npz_path, allow_pickle=True)
-            names = data.get("names")
-            vecs = data.get("vecs")
-            if names is not None and vecs is not None and names.tolist() == self.labels:
-                self.text_embeddings = torch.tensor(vecs.astype(np.float32, copy=False))
-                logger.info(f"Loaded cached text embeddings from {self._vectors_npz_path}.")
-                return
-            else:
-                logger.warning("Cached labels mismatch or invalid format; recomputing embeddings.")
+            try:
+                data = np.load(self._vectors_npz_path, allow_pickle=True)
+                cached_names = data.get("names")
+                cached_vecs = data.get("vecs")
 
-        # 2) Compute and save
+                if (
+                    cached_names is not None
+                    and cached_vecs is not None
+                    and cached_names.tolist() == self.labels
+                ):
+                    self.text_embeddings = cached_vecs.astype(np.float32, copy=False)
+                    logger.info(
+                        f"Loaded cached text embeddings from {self._vectors_npz_path}"
+                    )
+                    return
+                else:
+                    logger.warning(
+                        "Cached labels mismatch current labels; recomputing embeddings"
+                    )
+                    raise LabelMismatchError(
+                        "Cached embeddings don't match current labels"
+                    )
+
+            except (Exception, KeyError, LabelMismatchError) as e:
+                logger.warning(f"Cache validation failed: {e}; recomputing embeddings")
+
+        # Compute embeddings if cache is invalid/missing
         self._compute_and_cache_text_embeddings()
 
     def _initialize_scene_embeddings(self) -> None:
-        """Initialize embeddings for simple scene prompts using backend; store on CPU."""
-        logger.info("Initializing scene classification embeddings via backend.")
+        """Initialize scene classification embeddings using backend."""
         try:
-            vecs = [self.backend.text_to_vector(p) for p in self.scene_prompts]
-            arr = np.vstack([v.astype(np.float32, copy=False) for v in vecs])
-            self.scene_prompt_embeddings = torch.tensor(arr, device="cpu")
+            embeddings_list = []
+            for prompt in self.scene_prompts:
+                embedding = self.backend.text_to_vector(prompt)
+                embeddings_list.append(embedding)
+
+            self.scene_prompt_embeddings = np.vstack(embeddings_list).astype(
+                np.float32, copy=False
+            )
+            logger.info("Initialized scene classification embeddings")
+
         except Exception as e:
             logger.error(f"Failed to initialize scene embeddings: {e}")
             self.scene_prompt_embeddings = None
 
-    @staticmethod
-    def _unit_normalize(t: torch.Tensor) -> torch.Tensor:
-        """Normalizes a tensor to unit length."""
-        return t / t.norm(dim=-1, keepdim=True)
+    def encode_image(self, image_bytes: bytes) -> NDArray[np.float32]:
+        """
+        Encode image bytes into a unit-normalized embedding vector.
 
-    def encode_image(self, image_bytes: bytes) -> np.ndarray:
-        """Encodes image bytes into a unit-normalized embedding vector via backend."""
+        Args:
+            image_bytes: Raw image data in bytes
+
+        Returns:
+            Unit-normalized embedding vector as numpy array
+
+        Raises:
+            RuntimeError: If model is not initialized
+        """
         self._ensure_initialized()
-        return self.backend.image_to_vector(image_bytes).astype(np.float32, copy=False)
+        return self.backend.image_to_vector(image_bytes)
 
-    def encode_text(self, text: str) -> np.ndarray:
-        """Encodes a single string of text into a unit-normalized embedding vector via backend."""
+    def encode_text(self, text: str) -> NDArray[np.float32]:
+        """
+        Encode text into a unit-normalized embedding vector.
+
+        Args:
+            text: Text to encode
+
+        Returns:
+            Unit-normalized embedding vector as numpy array
+
+        Raises:
+            RuntimeError: If model is not initialized
+        """
         self._ensure_initialized()
         prompt = f"a photo of a {text}"
-        return self.backend.text_to_vector(prompt).astype(np.float32, copy=False)
+        return self.backend.text_to_vector(prompt)
 
     def classify_image(
-        self,
-        image_bytes: bytes,
-        top_k: int = 5
-    ) -> List[Tuple[str, float]]:
+        self, image_bytes: bytes, top_k: int = 5
+    ) -> list[tuple[str, float]]:
         """
-        Classifies an image against the cached ImageNet labels.
+        Classify an image against cached ImageNet labels.
 
         Args:
-            image_bytes: The image to classify, in bytes.
-            top_k: The number of top results to return.
+            image_bytes: Raw image data in bytes
+            top_k: Number of top results to return
 
         Returns:
-            A list of (label, probability) tuples.
+            List of (label, probability) tuples sorted by probability (descending)
+
+        Raises:
+            RuntimeError: If model is not initialized
         """
         self._ensure_initialized()
-        img_vec = torch.tensor(self.encode_image(image_bytes), device=self.device).unsqueeze(0)
 
         if self.text_embeddings is None:
-            raise RuntimeError("Text embeddings are not available.")
+            raise RuntimeError("Text embeddings are not available")
 
-        text_emb = self.text_embeddings.to(self.device)
-        with torch.no_grad():
-            # Similarities -> Probabilities
-            sims = (100.0 * img_vec @ text_emb.T).softmax(dim=-1).squeeze(0)
-            probs, idxs = sims.topk(min(top_k, sims.numel()))
+        # Get image embedding via backend
+        img_embedding = self.encode_image(image_bytes)
 
-        return [(self.labels[idx], float(prob)) for prob, idx in zip(probs, idxs)]
+        # Compute similarities using numpy (standard operations)
+        img_embedding = img_embedding / np.linalg.norm(
+            img_embedding
+        )  # Ensure unit norm
+        text_embeddings_norm = self.text_embeddings / np.linalg.norm(
+            self.text_embeddings, axis=1, keepdims=True
+        )
 
-    def classify_scene(self, image_bytes: bytes) -> Tuple[str, float]:
+        # Compute cosine similarities
+        similarities = np.dot(img_embedding, text_embeddings_norm.T)
+
+        # Convert to probabilities (softmax)
+        similarities_scaled = similarities * 100.0  # Temperature scaling
+        exp_sims = np.exp(
+            similarities_scaled - np.max(similarities_scaled)
+        )  # Numerical stability
+        probabilities = exp_sims / np.sum(exp_sims)
+
+        # Get top-k results
+        top_indices = np.argsort(probabilities)[::-1][:top_k]
+
+        results = [(self.labels[idx], float(probabilities[idx])) for idx in top_indices]
+
+        return results
+
+    def classify_scene(self, image_bytes: bytes) -> tuple[str, float]:
         """
-        Performs a high-level scene classification on an image.
+        Perform high-level scene classification on an image.
 
         Args:
-            image_bytes: The image to classify, in bytes.
+            image_bytes: Raw image data in bytes
 
         Returns:
-            A tuple of (scene_label, confidence_score).
+            Tuple of (scene_label, confidence_score)
+
+        Raises:
+            RuntimeError: If model is not initialized or scene embeddings unavailable
         """
         self._ensure_initialized()
+
         if self.scene_prompt_embeddings is None:
-            raise RuntimeError("Scene embeddings not initialized.")
+            raise RuntimeError("Scene embeddings are not available")
 
-        assert self.scene_prompt_embeddings is not None
-        img_vec = torch.tensor(self.encode_image(image_bytes), device='cpu').unsqueeze(0)
+        # Get image embedding via backend
+        img_embedding = self.encode_image(image_bytes)
 
-        with torch.no_grad():
-            sims = (img_vec @ self.scene_prompt_embeddings.T).softmax(-1).squeeze(0)
-            confidence, idx = sims.max(dim=0)
+        # Compute similarities using numpy
+        img_embedding = img_embedding / np.linalg.norm(img_embedding)
+        scene_embeddings_norm = self.scene_prompt_embeddings / np.linalg.norm(
+            self.scene_prompt_embeddings, axis=1, keepdims=True
+        )
 
-        return self.scene_prompts[int(idx.item())], float(confidence.item())
+        similarities = np.dot(img_embedding, scene_embeddings_norm.T)
 
-    def info(self) -> Dict[str, Any]:
-        """Returns a dictionary with information about the loaded model."""
+        # Convert to probabilities
+        exp_sims = np.exp(similarities - np.max(similarities))
+        probabilities = exp_sims / np.sum(exp_sims)
+
+        # Get best match
+        best_idx = np.argmax(probabilities)
+        scene_label = (
+            self.scene_prompts[best_idx].replace("a photo of ", "").replace("an ", "")
+        )
+        confidence = float(probabilities[best_idx])
+
+        return scene_label, confidence
+
+    def info(self) -> dict[str, str | int | float | bool | dict[str, Any]]:
+        """
+        Return model manager information.
+
+        Returns:
+            Dictionary containing model metadata and performance info
+        """
+        backend_info: dict[str, Any] = {}
+        if hasattr(self, "backend"):
+            info = self.backend.get_info()
+            backend_info = {
+                "runtime": info.runtime,
+                "model_id": info.model_id,
+                "model_name": info.model_name,
+                "version": info.version,
+            }
+
         return {
             "model_name": self.model_name,
             "pretrained": self.pretrained,
-            "device": str(self.device),
+            "model_id": self.model_id,
+            "num_labels": len(self.labels),
+            "load_time": self._load_time,
             "is_initialized": self.is_initialized,
-            "load_time_seconds": self._load_time,
-            "label_count": len(self.labels),
-            "vectors_cache_path": self._vectors_npz_path,
+            "backend_info": backend_info,
+            "scene_classification_available": self.scene_prompt_embeddings is not None,
         }
 
     def _ensure_initialized(self) -> None:
-        """Raises a RuntimeError if the model is not initialized."""
-        if not self.is_initialized:
-            raise RuntimeError("Model is not initialized. Call initialize() before inference.")
+        """
+        Ensure the model manager is initialized before inference.
 
-    def _ensure_initialized_for_computation(self) -> None:
-        """Kept for backward compatibility; backend handles model readiness."""
-        if not self.backend.is_initialized:
-            raise RuntimeError("Backend must be initialized before this operation.")
+        Raises:
+            RuntimeError: If model is not initialized
+        """
+        if not self.is_initialized:
+            raise RuntimeError(
+                "Model manager not initialized. Call initialize() first."
+            )

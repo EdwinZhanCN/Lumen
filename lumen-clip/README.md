@@ -122,6 +122,11 @@ Linux-only RKNN extra (optional, for Rockchip NPU support):
 ````bash
 uv pip install --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu,rknn]'
 ````
+Linux-only Jetson
+````bash
+uv pip install --index-url https://pypi.jetson-ai-lab.io/jp6/cu126 --extra-index-url https://pypi.org/simple torch torchvision
+uv pip install -e . --extra-index-url https://pypi.org/simple
+````
 
 - CPU-only:
 ````bash
@@ -163,6 +168,7 @@ The server selects model backends at startup via environment variables:
 - mDNS:
   - CLIP_MDNS_TYPE, CLIP_MDNS_NAME to override service type and instance name
   - ADVERTISE_IP to override the advertised IP
+  - CLIP_MDNS_SVC to represent the service instance
 
 Quick checks with grpcurl:
 ````bash

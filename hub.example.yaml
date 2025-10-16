@@ -14,6 +14,9 @@ dependencies:
     - "lumen-face @ file:///abs/path/to/lumen-face"
     # - "lumen-ocr @ file:///abs/path/to/lumen-ocr"
 
+config:
+    name: "minimal.config" # service config
+
 services:
     - name: clip
       enabled: true
@@ -21,10 +24,6 @@ services:
       import:
           servicer_class: "lumen_clip.service_registry.UnifiedMLService"
           add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
-      env:
-          CLIP_BACKEND: "torch"
-          CLIP_DEVICE: "cpu" # cuda|mps|cpu
-          BATCH_SIZE: "8"
 
     - name: face
       enabled: true
@@ -32,11 +31,6 @@ services:
       import:
           servicer_class: "lumen_face.service_registry.FaceService"
           add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
-      env:
-          FACE_BACKEND: "insightface"
-          FACE_PACK: "buffalo_l"
-          FACE_ORT_PROVIDERS: "CPUExecutionProvider"
-          FACE_MODEL_ROOT: "/app/models" # pre-baked models or mounted volume
 
     - name: ocr
       enabled: false
@@ -44,6 +38,3 @@ services:
       import:
           servicer_class: "lumen_ocr.service_registry.OCRService"
           add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
-      env:
-          OCR_BACKEND: "onnxrt"
-          OCR_DEVICE: "cpu"

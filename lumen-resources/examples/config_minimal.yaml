@@ -1,0 +1,25 @@
+# Minimal configuration for single ML service (CLIP with ONNX)
+# This is the simplest valid configuration for lumen-resources
+
+metadata:
+  version: "1.0"
+  region: "other"  # "cn" for ModelScope, "other" for HuggingFace
+  cache_dir: "~/.lumen/models"
+
+services:
+  clip:
+    enabled: true
+    package: "lumen-clip"
+    import:
+      registry_class: "lumen_clip.service_registry.CLIPService"
+      add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+    models:
+      default:
+        model: "MobileCLIP2-S2"
+        runtime: "onnx"
+    server:
+      port: 50051
+      mdns:
+        enabled: true
+        name: "CLIP-Service"
+        type: "_homenative-node._tcp.local."

@@ -15,9 +15,10 @@ How to enable RKNN (Linux only):
 
 from __future__ import annotations
 
-from typing import Optional
+from typing_extensions import override
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .base import BaseClipBackend, BackendInfo
 
@@ -35,14 +36,14 @@ class RKNNBackend(BaseClipBackend):
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        pretrained: Optional[str] = None,
-        model_id: Optional[str] = None,
-        rknn_model_path: Optional[str] = None,
+        model_name: str | None = None,
+        pretrained: str | None = None,
+        model_id: str | None = None,
+        rknn_model_path: str | None = None,
         target: str = "rk3588",
-        device_preference: Optional[str] = None,
-        max_batch_size: Optional[int] = None,
-        cache_dir: Optional[str] = None,
+        device_preference: str | None = None,
+        max_batch_size: int | None = None,
+        cache_dir: str | None = None,
     ) -> None:
         super().__init__(
             model_name=model_name,
@@ -61,24 +62,28 @@ class RKNNBackend(BaseClipBackend):
             "- At runtime, set BIOCLIP_BACKEND=rknn or CLIP_BACKEND=rknn to select the RKNN backend."
         )
 
+    @override
     def initialize(self) -> None:
         raise ImportError(
             "RKNNBackend.initialize is unavailable: RKNN is Linux-only. "
             "Use a Linux build with the 'rknn' extra to enable this backend."
         )
 
-    def text_to_vector(self, text: str) -> np.ndarray:
+    @override
+    def text_to_vector(self, text: str) -> NDArray[np.float32]:
         raise ImportError(
             "RKNNBackend.text_to_vector is unavailable: RKNN is Linux-only. "
             "Use a Linux build with the 'rknn' extra to enable this backend."
         )
 
-    def image_to_vector(self, image_bytes: bytes) -> np.ndarray:
+    @override
+    def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         raise ImportError(
             "RKNNBackend.image_to_vector is unavailable: RKNN is Linux-only. "
             "Use a Linux build with the 'rknn' extra to enable this backend."
         )
 
+    @override
     def get_info(self) -> BackendInfo:
         raise ImportError(
             "RKNNBackend.get_info is unavailable: RKNN is Linux-only. "

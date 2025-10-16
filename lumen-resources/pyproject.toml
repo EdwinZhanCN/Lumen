@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lumen-resources"
+version = "0.1.0"
+description = "Unified model resource management for Lumen ML services"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Lumilio Photos", email = "modelscope@lumilio.org" }
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+huggingface = ["huggingface_hub>=0.20.0"]
+modelscope = ["modelscope>=1.11.0"]
+all = ["huggingface_hub>=0.20.0", "modelscope>=1.11.0"]
+dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "black>=23.0.0", "ruff>=0.1.0"]
+
+[project.scripts]
+lumen-resources = "lumen_resources.cli:main"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/lumen_resources"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

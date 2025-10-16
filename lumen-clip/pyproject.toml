@@ -7,7 +7,7 @@ name = "lumen-clip"
 version = "0.1.0"
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
-requires-python = ">=3.12, <3.13"
+requires-python = ">=3.10"
 dependencies = [
     "open-clip-torch",
     "timm",
@@ -21,14 +21,47 @@ dependencies = [
     "colorama",
     "pygbif",
     "zeroconf",
-    "onnxruntime",         # cross-platform ONNX Runtime support
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "onnxruntime>=1.16.0",
 ]
 
 [project.optional-dependencies]
-cpu = ["torch", "torchvision", "torchaudio"]
-gpu = ["torch", "torchvision", "torchaudio"]
-osx = ["torch", "torchvision", "torchaudio"]
-rknn = ["rknn-toolkit2==2.3.2; platform_system == \"Linux\""]
+cpu = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "onnxruntime>=1.16.0",
+]
+
+cuda = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "onnxruntime-gpu>=1.16.0",
+]
+
+mps = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "onnxruntime>=1.16.0",
+]
+
+openvino2404 = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "onnxruntime-openvino==1.20.0",
+]
+
+jp61 = [
+    "torch==2.3.0",
+    "torchvision==0.18.0",
+    "torchaudio==2.3.0",
+    "onnxruntime-gpu==1.18.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,74 @@
+# Hub configuration aggregating multiple ML services
+# This configuration demonstrates Hub mode with CLIP, Face, and OCR services
+
+metadata:
+  version: "1.0"
+  region: "cn"  # Use ModelScope in China
+  cache_dir: "/opt/lumen/models"
+
+# Optional: Python package dependencies (install before starting services)
+dependencies:
+  - "lumen-clip @ git+https://github.com/lumilio/lumen.git@main#subdirectory=lumen-clip"
+  - "lumen-face @ git+https://github.com/lumilio/lumen.git@main#subdirectory=lumen-face"
+  - "lumen-ocr @ git+https://github.com/lumilio/lumen.git@main#subdirectory=lumen-ocr"
+
+services:
+  clip:
+    enabled: true
+    package: "lumen-clip"
+    import:
+      registry_class: "lumen_clip.service_registry.CLIPService"
+      add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+    models:
+      default:
+        model: "MobileCLIP2-S2"
+        runtime: "onnx"
+      expert:
+        model: "bioclip-2"
+        runtime: "torch"
+    default_model: "default"
+    env:
+      CLIP_BACKEND: "onnx"
+    server:
+      port: 50051
+      mdns:
+        enabled: true
+        name: "CLIP-Service"
+        type: "_homenative-node._tcp.local."
+
+  face:
+    enabled: true
+    package: "lumen-face"
+    import:
+      registry_class: "lumen_face.service_registry.FaceService"
+      add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+    models:
+      default:
+        model: "antelopev2"
+        runtime: "onnx"
+    server:
+      port: 50052
+      mdns:
+        enabled: true
+        name: "Face-Service"
+
+  ocr:
+    enabled: false  # Disabled service - won't be loaded
+    package: "lumen-ocr"
+    import:
+      registry_class: "lumen_ocr.service_registry.OCRService"
+      add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+    models:
+      default:
+        model: "paddleocr-v3"
+        runtime: "onnx"
+
+# Hub aggregation settings (optional, for Hub mode only)
+hub:
+  enabled: true
+  server:
+    port: 50050
+    mdns:
+      enabled: true
+      name: "Lumen-AI-Hub"
+      type: "_homenative-node._tcp.local."

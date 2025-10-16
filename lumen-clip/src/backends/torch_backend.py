@@ -17,15 +17,50 @@ from __future__ import annotations
 
 import io
 import time
-from typing import List, Optional, Sequence, Callable, cast
+from collections.abc import Callable, Sequence
+from typing import cast
+from typing_extensions import override
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 
 import torch
 import open_clip
 
-from .base import BaseClipBackend, BackendInfo
+from .base import (
+    BaseClipBackend,
+    BackendInfo,
+    BackendError,
+    ModelLoadingError,
+    DeviceUnavailableError,
+    InvalidInputError,
+    InferenceError,
+)
+
+
+class TorchBackendError(BackendError):
+    """Base class for TorchBackend specific errors."""
+
+    pass
+
+
+class CUDAMemoryError(TorchBackendError):
+    """Raised when CUDA out of memory occurs."""
+
+    pass
+
+
+class TorchModelLoadingError(TorchBackendError, ModelLoadingError):
+    """Raised when PyTorch model loading fails."""
+
+    pass
+
+
+class TorchDeviceUnavailableError(TorchBackendError, DeviceUnavailableError):
+    """Raised when requested PyTorch device is not available."""
+
+    pass
 
 
 class TorchBackend(BaseClipBackend):
@@ -49,12 +84,12 @@ class TorchBackend(BaseClipBackend):
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        pretrained: Optional[str] = None,
-        model_id: Optional[str] = None,
-        device_preference: Optional[str] = None,
-        max_batch_size: Optional[int] = None,
-        cache_dir: Optional[str] = None,
+        model_name: str | None = None,
+        pretrained: str | None = None,
+        model_id: str | None = None,
+        device_preference: str | None = None,
+        max_batch_size: int | None = None,
+        cache_dir: str | None = None,
     ) -> None:
         # Provide defaults consistent with current CLIPModelManager
         model_name = model_name or "ViT-B-32"
@@ -70,10 +105,12 @@ class TorchBackend(BaseClipBackend):
 
         # Runtime objects
         self._device: torch.device = self._select_device(device_preference)
-        self._model: Optional[torch.nn.Module] = None
-        self._preprocess: Optional[Callable[[Image.Image], torch.Tensor]] = None  # torchvision-like transform returned by open_clip
-        self._tokenizer: Optional[Callable[[List[str]], torch.Tensor]] = None
-        self._load_time_seconds: Optional[float] = None
+        self._model: torch.nn.Module | None = None
+        self._preprocess: Callable[[Image.Image], torch.Tensor] | None = (
+            None  # torchvision-like transform returned by open_clip
+        )
+        self._tokenizer: Callable[[list[str]], torch.Tensor] | None = None
+        self._load_time_seconds: float | None = None
 
         # Cache derived identifiers
         if self._model_id is None:
@@ -81,28 +118,37 @@ class TorchBackend(BaseClipBackend):
 
     # ---------- Lifecycle ----------
 
+    @override
     def initialize(self) -> None:
         if self._initialized:
             return
 
         t0 = time.time()
-        # Load model, transforms, tokenizer
-        model_name_str: str = self._model_name or "ViT-B-32"
-        pretrained_str: str = self._pretrained or "laion2b_s34b_b79k"
-        model_obj, _, preprocess = open_clip.create_model_and_transforms(
-            model_name_str, pretrained=pretrained_str
-        )
-        tokenizer_fun = open_clip.get_tokenizer(model_name_str)
+        try:
+            # Load model, transforms, tokenizer
+            model_name_str: str = self._model_name or "ViT-B-32"
+            pretrained_str: str = self._pretrained or "laion2b_s34b_b79k"
 
-        model_module = cast(torch.nn.Module, model_obj)
-        model_module.eval().to(self._device)
-        self._model = model_module
-        self._preprocess = cast(Callable[[Image.Image], torch.Tensor], preprocess)
-        self._tokenizer = cast(Callable[[List[str]], torch.Tensor], tokenizer_fun)
+            model_obj, _, preprocess = open_clip.create_model_and_transforms(
+                model_name_str, pretrained=pretrained_str
+            )
+            tokenizer_fun = open_clip.get_tokenizer(model_name_str)
 
-        self._load_time_seconds = time.time() - t0
-        self._initialized = True
+            model_module = cast(torch.nn.Module, model_obj)
+            model_module.eval().to(self._device)
+            self._model = model_module
+            self._preprocess = cast(Callable[[Image.Image], torch.Tensor], preprocess)
+            self._tokenizer = cast(Callable[[list[str]], torch.Tensor], tokenizer_fun)
 
+            self._load_time_seconds = time.time() - t0
+            self._initialized = True
+
+        except ImportError as e:
+            raise TorchModelLoadingError(f"Required dependencies not found: {e}") from e
+        except Exception as e:
+            raise TorchModelLoadingError(f"Model loading failed: {e}") from e
+
+    @override
     def close(self) -> None:
         # Best-effort release; PyTorch will free on GC.
         m = self._model
@@ -116,46 +162,75 @@ class TorchBackend(BaseClipBackend):
     # ---------- Encoding API ----------
 
     @torch.inference_mode()
-    def text_to_vector(self, text: str) -> np.ndarray:
+    @override
+    def text_to_vector(self, text: str) -> NDArray[np.float32]:
         """
         Encode a text string into a unit-normalized float32 embedding vector.
         Uses a CLIP-style prompt template for consistency with the current implementation.
         """
         self._ensure_initialized()
 
-        # Create a simple CLIP-compatible prompt
-        prompt = text
-        assert self._tokenizer is not None
-        assert self._model is not None
+        if not text or not text.strip():
+            raise InvalidInputError("text cannot be empty or whitespace only")
 
-        tokenizer = cast(Callable[[List[str]], torch.Tensor], self._tokenizer)
-        tokens = tokenizer([prompt]).to(self._device)
-        feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
-        feats = feats / feats.norm(dim=-1, keepdim=True)
+        if len(text) > 10000:  # Reasonable length limit
+            raise InvalidInputError("text too long (max 10000 characters)")
 
-        vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
-        return vec
+        try:
+            # Create a simple CLIP-compatible prompt
+            prompt = text
+            assert self._tokenizer is not None
+            assert self._model is not None
+
+            tokenizer = cast(Callable[[list[str]], torch.Tensor], self._tokenizer)
+            tokens = tokenizer([prompt]).to(self._device)
+            feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+
+            vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
+            return vec
+
+        except torch.cuda.OutOfMemoryError as e:
+            raise CUDAMemoryError(
+                f"CUDA out of memory during text encoding: {e}"
+            ) from e
+        except Exception as e:
+            raise InferenceError(f"Text encoding failed: {e}") from e
 
     @torch.inference_mode()
-    def image_to_vector(self, image_bytes: bytes) -> np.ndarray:
+    @override
+    def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         """
         Encode image bytes (RGB) into a unit-normalized float32 embedding vector.
         """
         self._ensure_initialized()
-        assert self._preprocess is not None
-        assert self._model is not None
 
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        preprocess = cast(Callable[[Image.Image], torch.Tensor], self._preprocess)
-        tensor = preprocess(img).unsqueeze(0).to(self._device)
-        feats = self._model.encode_image(tensor)  # type: ignore[attr-defined]
-        feats = feats / feats.norm(dim=-1, keepdim=True)
+        if not image_bytes:
+            raise InvalidInputError("image_bytes cannot be empty")
 
-        vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
-        return vec
+        try:
+            assert self._preprocess is not None
+            assert self._model is not None
+
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            preprocess = cast(Callable[[Image.Image], torch.Tensor], self._preprocess)
+            tensor = preprocess(img).unsqueeze(0).to(self._device)
+            feats = self._model.encode_image(tensor)  # type: ignore[attr-defined]
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+
+            vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
+            return vec
+
+        except torch.cuda.OutOfMemoryError as e:
+            raise CUDAMemoryError(
+                f"CUDA out of memory during image encoding: {e}"
+            ) from e
+        except Exception as e:
+            raise InferenceError(f"Image encoding failed: {e}") from e
 
     @torch.inference_mode()
-    def image_batch_to_vectors(self, images: Sequence[bytes]) -> np.ndarray:
+    @override
+    def image_batch_to_vectors(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         """
         Encode a list of image bytes using a single batched forward pass.
         Falls back to BaseClipBackend's sequential implementation if images is empty.
@@ -168,22 +243,74 @@ class TorchBackend(BaseClipBackend):
         assert self._model is not None
         preprocess = cast(Callable[[Image.Image], torch.Tensor], self._preprocess)
 
-        # Decode and preprocess to a batch tensor [N, C, H, W]
-        tensors: List[torch.Tensor] = []
-        for b in images:
-            img = Image.open(io.BytesIO(b)).convert("RGB")
-            t = preprocess(img)
-            tensors.append(t)
+        try:
+            # Decode and preprocess to a batch tensor [N, C, H, W]
+            tensors: list[torch.Tensor] = []
+            for b in images:
+                if not b:
+                    raise InvalidInputError("image bytes cannot be empty")
 
-        batch = torch.stack(tensors, dim=0).to(self._device)
-        feats = self._model.encode_image(batch)  # type: ignore[attr-defined]
-        feats = feats / feats.norm(dim=-1, keepdim=True)
+                img = Image.open(io.BytesIO(b)).convert("RGB")
+                t = preprocess(img)
+                tensors.append(t)
 
-        arr = feats.detach().cpu().numpy().astype(np.float32, copy=False)
-        return arr
+            batch = torch.stack(tensors, dim=0).to(self._device)
+            feats = self._model.encode_image(batch)  # type: ignore[attr-defined]
+            feats = feats / feats.norm(dim=-1, keepdim=True)
 
-    # ---------- Metadata ----------
+            arr = feats.detach().cpu().numpy().astype(np.float32, copy=False)
+            return arr
 
+        except torch.cuda.OutOfMemoryError as e:
+            raise CUDAMemoryError(
+                f"CUDA out of memory during batch image encoding: {e}"
+            ) from e
+        except Exception as e:
+            raise InferenceError(f"Batch image encoding failed: {e}") from e
+
+    @torch.inference_mode()
+    @override
+    def text_batch_to_vectors(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        """
+        Encode a batch of text strings into unit-normalized float32 embedding vectors.
+
+        Args:
+            texts: Sequence of text strings to encode.
+
+        Returns:
+            np.ndarray with shape (N, D) and dtype float32, each row L2-normalized.
+        """
+        self._ensure_initialized()
+        assert self._tokenizer is not None
+        assert self._model is not None
+
+        if not texts:
+            return np.empty((0, 0), dtype=np.float32)
+
+        try:
+            # Validate inputs
+            for text in texts:
+                if not text or not text.strip():
+                    raise InvalidInputError("text cannot be empty or whitespace only")
+                if len(text) > 10000:  # Reasonable length limit
+                    raise InvalidInputError("text too long (max 10000 characters)")
+
+            tokenizer = cast(Callable[[list[str]], torch.Tensor], self._tokenizer)
+            tokens = tokenizer(list(texts)).to(self._device)
+            feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+
+            vecs = feats.detach().cpu().numpy().astype(np.float32, copy=False)
+            return vecs
+
+        except torch.cuda.OutOfMemoryError as e:
+            raise CUDAMemoryError(
+                f"CUDA out of memory during batch text encoding: {e}"
+            ) from e
+        except Exception as e:
+            raise InferenceError(f"Batch text encoding failed: {e}") from e
+
+    @override
     def get_info(self) -> BackendInfo:
         """
         Report runtime and model metadata. Embedding dims are left optional; they
@@ -212,7 +339,7 @@ class TorchBackend(BaseClipBackend):
     # ---------- Helpers ----------
 
     @staticmethod
-    def _select_device(preference: Optional[str]) -> torch.device:
+    def _select_device(preference: str | None) -> torch.device:
         """
         Choose a torch.device based on an optional preference and availability.
         """
@@ -232,5 +359,12 @@ class TorchBackend(BaseClipBackend):
         return torch.device("cpu")
 
     def _ensure_initialized(self) -> None:
-        if not self._initialized or self._model is None or self._preprocess is None or self._tokenizer is None:
-            raise RuntimeError("TorchBackend is not initialized. Call initialize() first.")
+        if (
+            not self._initialized
+            or self._model is None
+            or self._preprocess is None
+            or self._tokenizer is None
+        ):
+            raise RuntimeError(
+                "TorchBackend is not initialized. Call initialize() first."
+            )
