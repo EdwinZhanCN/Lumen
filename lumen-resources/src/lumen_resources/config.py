@@ -70,9 +70,7 @@ class ModelConfig:
         return common_files
 
     def get_dataset_pattern(self) -> Optional[str]:
-        """Get dataset file pattern if specified."""
-        if self.dataset:
-            return f"{self.dataset}.npz"
+        """Deprecated: dataset files should be specified via model_info.json datasets relative paths. Always returns None."""
         return None
 
 
@@ -136,8 +134,8 @@ class ResourceConfig:
     - Model keys in the 'models' mapping are auto-constructed as "service:alias".
     - Use ModelConfig.get_runtime_patterns() to obtain glob patterns for
       downloading runtime-specific files as well as JSON metadata files.
-    - Use ModelConfig.get_dataset_pattern() to obtain dataset artifact name
-      (returns e.g. "<dataset>.npz" or None).
+    - Dataset files are defined via model_info.json datasets mapping as relative paths.
+      Do not guess extensions or locations; ModelConfig.get_dataset_pattern() is deprecated and returns None.
     - The class relies on helper static methods (_validate_structure and
       _parse_model_config) to perform structural checks and to convert raw model
       dicts into ModelConfig instances.
@@ -148,7 +146,7 @@ class ResourceConfig:
         for key, model in cfg.models.items():
             print(key, model.model, model.runtime)
             patterns = model.get_runtime_patterns()
-            ds = model.get_dataset_pattern()
+            ds = None  # dataset path is resolved from model_info.json at download time
             repo_id = cfg.get_repo_id(model.model)
 
     Raises:

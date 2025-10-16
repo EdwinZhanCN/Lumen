@@ -9,6 +9,10 @@ Features:
 - File pattern filtering during download (not post-download)
 - Automatic cache management and file organization
 - Force download and cache invalidation support
+- Supports two-phase dataset downloads used by the Downloader:
+  1) First pass downloads runtime-specific files plus JSON metadata (to obtain model_info.json).
+  2) Second pass optionally fetches dataset files using the exact relative path from
+     model_info.json's "datasets" mapping via allow_patterns=[relative_path].
 
 @requires: Platform-specific SDK installed (huggingface_hub or modelscope)
 @returns: Downloaded model files in local cache with filtering applied

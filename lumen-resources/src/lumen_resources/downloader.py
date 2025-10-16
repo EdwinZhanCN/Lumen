@@ -181,13 +181,9 @@ class Downloader:
         result = DownloadResult(model_type=model_type, model_config=model_config)
 
         try:
-            # Step 1: Prepare download patterns
+            # Phase 1: Prepare and download runtime + JSON only
             patterns = model_config.get_runtime_patterns()
-            dataset_pattern = model_config.get_dataset_pattern()
-            if dataset_pattern:
-                patterns.append(dataset_pattern)
 
-            # Step 2: Download files
             model_path = self.platform.download_model(
                 repo_name=model_config.model,
                 cache_dir=self.config.cache_dir,
@@ -197,15 +193,34 @@ class Downloader:
 
             result.model_path = model_path
 
-            # Step 3: Load and validate model_info.json
+            # Load and validate model_info.json
             model_info = self._load_model_info(model_path)
 
-            # Step 4: Logical validation (Phase 2)
+            # Logical validation
             self._validate_model_config(model_info, model_config)
 
-            # Step 5: File integrity validation (Phase 3)
+            # Phase 2: If dataset specified, download by relative path from model_info.json
+            if model_config.dataset:
+                dataset_rel = model_info.get_dataset_file(model_config.dataset)
+                if dataset_rel:
+                    dataset_path = model_path / dataset_rel
+                    if not dataset_path.exists():
+                        # Download only the dataset file by its relative path
+                        self.platform.download_model(
+                            repo_name=model_config.model,
+                            cache_dir=self.config.cache_dir,
+                            allow_patterns=[dataset_rel],
+                            force=False,
+                        )
+
+            # Final: File integrity validation
             missing = self._validate_files(model_path, model_info, model_config)
             result.missing_files = missing
+
+            if missing:
+                raise ValidationError(
+                    f"Missing required files after download: {', '.join(missing)}"
+                )
 
             result.success = True
 
