@@ -25,6 +25,8 @@ dependencies = [
     "torchvision>=0.16.0",
     "torchaudio>=2.1.0",
     "onnxruntime>=1.16.0",
+    "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
+    # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
 ]
 
 [project.optional-dependencies]
