@@ -1,7 +1,7 @@
 """
 unified_service.py
 
-A unified, high-performance gRPC service that combines the capabilities of
+UnifiedCLIPService: A unified, high-performance gRPC service that combines the capabilities of
 general CLIP and BioCLIP models.
 
 Features:
@@ -17,106 +17,163 @@ import logging
 import os
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import Iterable, List, Tuple
 
 import grpc
 
-
 from google.protobuf import empty_pb2
-from backends import TorchBackend, ONNXRTBackend, RKNNBackend
+from backends import TorchBackend, ONNXRTBackend
 
 # Import the service definition and model managers
 import ml_service_pb2 as pb
 import ml_service_pb2_grpc as rpc
 from biological_atlas import BioCLIPModelManager
 from image_classification import CLIPModelManager
+from resources.loader import ModelResources, ResourceLoader
 
 # --- Constants ---
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "8"))
 logger = logging.getLogger(__name__)
 
 
-class CLIPService(rpc.InferenceServicer):
-    """A single gRPC service that intelligently routes requests to CLIP or BioCLIP models."""
+class UnifiedCLIPService(rpc.InferenceServicer):
+    """A unified gRPC service that intelligently routes requests to CLIP or BioCLIP models."""
 
-    SERVICE_NAME = "clip"
+    SERVICE_NAME = "clip-unified"
 
-    def __init__(self, clip_backend=None, bioclip_backend=None) -> None:
-        # Env-driven backend selection if not injected
-        if clip_backend is None or bioclip_backend is None:
+    def __init__(
+        self,
+        clip_backend,
+        bioclip_backend,
+        clip_resources: ModelResources,
+        bioclip_resources: ModelResources,
+    ) -> None:
+        """
+        Initialize UnifiedCLIPService.
 
-            def build_backend(prefix: str, is_bio: bool = False):
-                backend_name = (
-                    os.getenv(f"{prefix}_BACKEND", "torch") or "torch"
-                ).lower()
-                device_pref = os.getenv(f"{prefix}_DEVICE")
-                max_bs_env = os.getenv(f"{prefix}_MAX_BATCH_SIZE")
-                max_bs = (
-                    int(max_bs_env) if max_bs_env and max_bs_env.isdigit() else None
-                )
-
-                if backend_name == "onnxrt":
-                    onnx_image = os.getenv(f"{prefix}_ONNX_IMAGE")
-                    onnx_text = os.getenv(f"{prefix}_ONNX_TEXT")
-                    providers = os.getenv(f"{prefix}_ORT_PROVIDERS")
-                    providers_list = (
-                        [p.strip() for p in providers.split(",")] if providers else None
-                    )
-                    return ONNXRTBackend(
-                        model_name=os.getenv(f"{prefix}_MODEL_NAME"),
-                        pretrained=os.getenv(f"{prefix}_PRETRAINED"),
-                        onnx_image_path=onnx_image,
-                        onnx_text_path=onnx_text,
-                        providers=providers_list,
-                        device_preference=device_pref,
-                        max_batch_size=max_bs,
-                    )
-                if backend_name == "rknn":
-                    rknn_path = os.getenv(f"{prefix}_RKNN_MODEL")
-                    target = os.getenv(f"{prefix}_RKNN_TARGET", "rk3588")
-                    return RKNNBackend(
-                        model_name=os.getenv(f"{prefix}_MODEL_NAME"),
-                        pretrained=os.getenv(f"{prefix}_PRETRAINED"),
-                        rknn_model_path=rknn_path,
-                        target=target,
-                        device_preference=device_pref,
-                        max_batch_size=max_bs,
-                    )
-                # default: torch backend
-                model_name = os.getenv(f"{prefix}_MODEL_NAME")
-                pretrained = os.getenv(f"{prefix}_PRETRAINED")
-                if is_bio and not model_name:
-                    model_name = "hf-hub:imageomics/bioclip-2"
-                if not is_bio and not model_name:
-                    model_name = "ViT-B-32"
-                if not is_bio and not pretrained:
-                    pretrained = "laion2b_s34b_b79k"
-                return TorchBackend(
-                    model_name=model_name,
-                    pretrained=pretrained,
-                    device_preference=device_pref,
-                    max_batch_size=max_bs,
-                )
-
-            if clip_backend is None:
-                clip_backend = build_backend("CLIP", is_bio=False)
-            if bioclip_backend is None:
-                # Allow BIOCLIP_BACKEND to fall back to CLIP_BACKEND if unset
-                clip_backend_env = os.getenv("CLIP_BACKEND")
-                if (
-                    os.getenv("BIOCLIP_BACKEND") is None
-                    and clip_backend_env is not None
-                ):
-                    os.environ["BIOCLIP_BACKEND"] = clip_backend_env
-                bioclip_backend = build_backend("BIOCLIP", is_bio=True)
-
+        Args:
+            clip_backend: Backend instance for CLIP model
+            bioclip_backend: Backend instance for BioCLIP model
+            clip_resources: ModelResources for CLIP model
+            bioclip_resources: ModelResources for BioCLIP model
+        """
         # Initialize model managers with the selected backends
-        self.clip_model = CLIPModelManager(backend=clip_backend)
-        self.bioclip_model = BioCLIPModelManager(backend=bioclip_backend)
+        self.clip_model = CLIPModelManager(
+            backend=clip_backend, resources=clip_resources
+        )
+        self.bioclip_model = BioCLIPModelManager(
+            backend=bioclip_backend, resources=bioclip_resources
+        )
 
         # Store backend references for device info queries if needed
         self._clip_backend = clip_backend
         self._bioclip_backend = bioclip_backend
+
+    @classmethod
+    def from_config(cls, config: dict, cache_dir: Path):
+        """
+        Create UnifiedCLIPService from configuration.
+
+        Args:
+            config: Service configuration dict
+            cache_dir: Cache directory path
+
+        Returns:
+            Initialized UnifiedCLIPService instance
+
+        Raises:
+            ResourceNotFoundError: If required resources are missing
+            ConfigError: If configuration is invalid
+        """
+        from resources.exceptions import ResourceNotFoundError, ConfigError
+
+        # Validate that both models are configured
+        if "models" not in config:
+            raise ConfigError("Unified service requires 'models' configuration")
+
+        if "clip_default" not in config["models"]:
+            raise ConfigError(
+                "Unified service requires 'models.clip_default' configuration"
+            )
+
+        if "bioclip_default" not in config["models"]:
+            raise ConfigError(
+                "Unified service requires 'models.bioclip_default' configuration"
+            )
+
+        # Load CLIP resources
+        clip_model_cfg = config["models"]["clip_default"]
+        logger.info(f"Loading resources for CLIP model: {clip_model_cfg['model']}")
+        clip_resources = ResourceLoader.load_model_resources(
+            cache_dir=cache_dir,
+            model_name=clip_model_cfg["model"],
+            runtime=clip_model_cfg["runtime"],
+        )
+
+        # Load BioCLIP resources
+        bioclip_model_cfg = config["models"]["bioclip_default"]
+        bioclip_dataset = bioclip_model_cfg.get("dataset", "TreeOfLife-10M")
+        logger.info(
+            f"Loading resources for BioCLIP model: {bioclip_model_cfg['model']}"
+        )
+        bioclip_resources = ResourceLoader.load_model_resources(
+            cache_dir=cache_dir,
+            model_name=bioclip_model_cfg["model"],
+            runtime=bioclip_model_cfg["runtime"],
+            dataset=bioclip_dataset,
+        )
+
+        # Create backends based on runtime
+        runtime = clip_model_cfg["runtime"]
+        batch_size = int(config.get("env", {}).get("BATCH_SIZE", 8))
+        device = config.get("env", {}).get("DEVICE")
+
+        if runtime == "torch":
+            clip_backend = TorchBackend(
+                resources=clip_resources,
+                device_preference=device,
+                max_batch_size=batch_size,
+            )
+            bioclip_backend = TorchBackend(
+                resources=bioclip_resources,
+                device_preference=device,
+                max_batch_size=batch_size,
+            )
+        elif runtime == "onnx":
+            providers = config.get("env", {}).get(
+                "ONNX_PROVIDERS", "CPUExecutionProvider"
+            )
+            providers_list = [p.strip() for p in providers.split(",")]
+            clip_backend = ONNXRTBackend(
+                resources=clip_resources,
+                providers=providers_list,
+                device_preference=device,
+                max_batch_size=batch_size,
+            )
+            bioclip_backend = ONNXRTBackend(
+                resources=bioclip_resources,
+                providers=providers_list,
+                device_preference=device,
+                max_batch_size=batch_size,
+            )
+        else:
+            raise ConfigError(f"Unsupported runtime: {runtime}")
+
+        # Create service
+        service = cls(clip_backend, bioclip_backend, clip_resources, bioclip_resources)
+
+        # Log warnings if classification not supported
+        if not clip_resources.has_classification_support():
+            logger.warning(
+                "Unified service: CLIP classification disabled (no ImageNet dataset)"
+            )
+        if not bioclip_resources.has_classification_support():
+            logger.warning(
+                f"Unified service: BioCLIP classification disabled (no {bioclip_dataset} dataset)"
+            )
+
+        return service
 
     def initialize(self) -> None:
         """Initializes both underlying model managers."""
@@ -220,6 +277,18 @@ class CLIPService(rpc.InferenceServicer):
         self, requests: List[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
+            # Check if both models support classification
+            if not self.clip_model.supports_classification:
+                yield pb.InferResponse(
+                    correlation_id=req.correlation_id,
+                    is_final=True,
+                    error=pb.Error(
+                        code=pb.ERROR_CODE_INVALID_ARGUMENT,
+                        message="smart_classify requires CLIP classification support (no ImageNet dataset)",
+                    ),
+                )
+                continue
+
             # 1) Scene classification using CLIP
             scene_label, scene_score = self.clip_model.classify_scene(req.payload)
 
@@ -239,7 +308,17 @@ class CLIPService(rpc.InferenceServicer):
                 )
                 continue
 
-            # 2) Animal-like: classify with BioCLIP
+            # 2) Animal-like: classify with BioCLIP (if supported)
+            if not self.bioclip_model.supports_classification:
+                # Fallback to CLIP classification
+                yield self._build_label_response(
+                    req.correlation_id,
+                    [(scene_label, scene_score)],
+                    self.clip_model.info(),
+                    meta={"source": "scene_classification_fallback"},
+                )
+                continue
+
             top_k = int(req.meta.get("topk", "3"))
             scores = self.bioclip_model.classify_image(req.payload, top_k)
             yield self._build_label_response(
@@ -341,31 +420,17 @@ class CLIPService(rpc.InferenceServicer):
         return empty_pb2.Empty()
 
     def _build_capability(self) -> pb.Capability:
+        # Base tasks (always available)
         tasks = [
-            pb.IOTask(
-                name="clip_classify",
-                input_mimes=["image/jpeg", "image/png", "image/webp"],
-                output_mimes=["application/json;schema=labels_v1"],
-            ),
             pb.IOTask(
                 name="clip_embed",
                 input_mimes=["text/plain"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="bioclip_classify",
-                input_mimes=["image/jpeg", "image/png", "image/webp"],
-                output_mimes=["application/json;schema=labels_v1"],
-            ),
-            pb.IOTask(
                 name="bioclip_embed",
                 input_mimes=["text/plain"],
                 output_mimes=["application/json;schema=embedding_v1"],
-            ),
-            pb.IOTask(
-                name="smart_classify",
-                input_mimes=["image/jpeg", "image/png", "image/webp"],
-                output_mimes=["application/json;schema=labels_v1"],
             ),
             pb.IOTask(
                 name="clip_image_embed",
@@ -378,10 +443,41 @@ class CLIPService(rpc.InferenceServicer):
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
         ]
+
+        # Classification tasks (only if datasets are available)
+        if self.clip_model.supports_classification:
+            tasks.append(
+                pb.IOTask(
+                    name="clip_classify",
+                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    output_mimes=["application/json;schema=labels_v1"],
+                )
+            )
+
+        if self.bioclip_model.supports_classification:
+            tasks.append(
+                pb.IOTask(
+                    name="bioclip_classify",
+                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    output_mimes=["application/json;schema=labels_v1"],
+                )
+            )
+
+        # Smart classify (only if CLIP classification is available)
+        if self.clip_model.supports_classification:
+            tasks.append(
+                pb.IOTask(
+                    name="smart_classify",
+                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    output_mimes=["application/json;schema=labels_v1"],
+                )
+            )
+
         # Report effective runtime; if mixed backends are used, declare "mixed"
         clip_rt = self.clip_model.backend.get_info().runtime
         bio_rt = self.bioclip_model.backend.get_info().runtime
         effective_runtime = clip_rt if clip_rt == bio_rt else "mixed"
+
         return pb.Capability(
             service_name=self.SERVICE_NAME,
             model_ids=[self.clip_model.model_id, self.bioclip_model.model_id],
@@ -392,5 +488,13 @@ class CLIPService(rpc.InferenceServicer):
                 "batch_size": str(BATCH_SIZE),
                 "runtime.clip": clip_rt,
                 "runtime.bioclip": bio_rt,
+                "clip_classification": str(self.clip_model.supports_classification),
+                "bioclip_classification": str(
+                    self.bioclip_model.supports_classification
+                ),
             },
         )
+
+
+# Backward compatibility alias
+CLIPService = UnifiedCLIPService

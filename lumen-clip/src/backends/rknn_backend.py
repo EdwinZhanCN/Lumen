@@ -15,12 +15,16 @@ How to enable RKNN (Linux only):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from typing_extensions import override
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .base import BaseClipBackend, BackendInfo
+
+if TYPE_CHECKING:
+    from resources import ModelResources
 
 __all__ = ["RKNNBackend"]
 
@@ -36,22 +40,14 @@ class RKNNBackend(BaseClipBackend):
 
     def __init__(
         self,
-        model_name: str | None = None,
-        pretrained: str | None = None,
-        model_id: str | None = None,
-        rknn_model_path: str | None = None,
-        target: str = "rk3588",
+        resources: "ModelResources",
         device_preference: str | None = None,
         max_batch_size: int | None = None,
-        cache_dir: str | None = None,
     ) -> None:
         super().__init__(
-            model_name=model_name,
-            pretrained=pretrained,
-            model_id=model_id,
-            device_preference=device_preference,
-            max_batch_size=max_batch_size,
-            cache_dir=cache_dir,
+            resources,
+            device_preference,
+            max_batch_size,
         )
         raise ImportError(
             "RKNNBackend is a Linux-only optional backend and is not available in this build.\n"

@@ -1,0 +1,35 @@
+# 场景 2: 只启用 BioCLIP 服务
+# 用途: 生物物种分类、生物相关的文本嵌入
+# 内存占用: 低
+
+metadata:
+    version: "1.0"
+    region: "cn" # "other" 使用 HuggingFace, "cn" 使用 ModelScope
+    cache_dir: "~/.lumen/models"
+
+# 可选: Python 包依赖（如果需要自动安装）
+dependencies:
+    - "lumen-clip @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-clip"
+
+services:
+    bioclip:
+        enabled: true
+        package: "lumen-clip"
+        import:
+            registry_class: "biological_atlas.bioclip_service.BioCLIPService"
+            add_to_server: "ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        models:
+            default:
+                model: "bioclip-2"
+                runtime: "torch"
+                dataset: "TreeOfLife-10M" # 可选: TreeOfLife-10M 或 TreeOfLife-200M
+        default_model: "default"
+        env:
+            # 可选的环境变量配置
+            BATCH_SIZE: "8"
+        server:
+            port: 50052
+            mdns:
+                enabled: true
+                name: "BioCLIP-Service"
+                type: "_lumen-bioclip._tcp.local."

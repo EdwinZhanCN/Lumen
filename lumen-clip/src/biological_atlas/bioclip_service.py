@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+from pathlib import Path
 from collections.abc import Iterable
 from typing_extensions import override
 
@@ -10,6 +11,8 @@ from google.protobuf import empty_pb2
 
 import ml_service_pb2 as pb
 import ml_service_pb2_grpc as rpc
+from backends import TorchBackend, ONNXRTBackend
+from resources.loader import ModelResources, ResourceLoader
 from .bioclip_model import BioCLIPModelManager
 
 logger = logging.getLogger(__name__)
@@ -28,10 +31,89 @@ class BioClipService(rpc.InferenceServicer):
 
     MODEL_VERSION: str = "bioclip2"
 
-    def __init__(self) -> None:
-        self.model: BioCLIPModelManager = BioCLIPModelManager()
+    def __init__(self, backend, resources: ModelResources) -> None:
+        """
+        Initialize BioCLIPService.
+
+        Args:
+            backend: Backend instance (TorchBackend or ONNXRTBackend)
+            resources: ModelResources with model configuration and data
+        """
+        self.model: BioCLIPModelManager = BioCLIPModelManager(
+            backend=backend, resources=resources
+        )
         self.start_time: float = time.time()
         self.is_initialized: bool = False
+
+    @classmethod
+    def from_config(cls, config: dict, cache_dir: Path):
+        """
+        Create BioCLIPService from configuration.
+
+        Args:
+            config: Service configuration dict
+            cache_dir: Cache directory path
+
+        Returns:
+            Initialized BioCLIPService instance
+
+        Raises:
+            ResourceNotFoundError: If required resources are missing
+            ConfigError: If configuration is invalid
+        """
+        from resources.exceptions import ResourceNotFoundError, ConfigError
+
+        # Get model configuration
+        if "models" not in config or "default" not in config["models"]:
+            raise ConfigError("BioCLIP service requires 'models.default' configuration")
+
+        model_cfg = config["models"]["default"]
+
+        # Get dataset name if specified
+        dataset = model_cfg.get("dataset", "TreeOfLife-10M")
+
+        # Load resources
+        logger.info(f"Loading resources for BioCLIP model: {model_cfg['model']}")
+        resources = ResourceLoader.load_model_resources(
+            cache_dir=cache_dir,
+            model_name=model_cfg["model"],
+            runtime=model_cfg["runtime"],
+            dataset=dataset,
+        )
+
+        # Create backend based on runtime
+        runtime = model_cfg["runtime"]
+        if runtime == "torch":
+            backend = TorchBackend(
+                resources=resources,
+                device_preference=config.get("env", {}).get("DEVICE"),
+                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+            )
+        elif runtime == "onnx":
+            providers = config.get("env", {}).get(
+                "ONNX_PROVIDERS", "CPUExecutionProvider"
+            )
+            providers_list = [p.strip() for p in providers.split(",")]
+            backend = ONNXRTBackend(
+                resources=resources,
+                providers=providers_list,
+                device_preference=config.get("env", {}).get("DEVICE"),
+                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+            )
+        else:
+            raise ConfigError(f"Unsupported runtime: {runtime}")
+
+        # Create service
+        service = cls(backend, resources)
+
+        # Log classification support status
+        if not resources.has_classification_support():
+            logger.warning(
+                f"BioCLIP service started without classification support "
+                f"(no {dataset} dataset found). Only embed tasks will be available."
+            )
+
+        return service
 
     # -------- lifecycle ----------
     def initialize(self) -> None:
@@ -76,7 +158,23 @@ class BioClipService(rpc.InferenceServicer):
                         req.payload_mime, payload, dict(req.meta)
                     )
                 elif req.task == "classify":
+                    # Check if classification is supported
+                    if not self.model.supports_classification:
+                        yield pb.InferResponse(
+                            correlation_id=cid,
+                            is_final=True,
+                            error=pb.Error(
+                                code=pb.ERROR_CODE_INVALID_ARGUMENT,
+                                message="Classification not supported: no dataset loaded. "
+                                "Please ensure TreeOfLife dataset exists in the model directory.",
+                            ),
+                        )
+                        continue
                     result_bytes, result_mime, extra_meta = self._handle_classify(
+                        req.payload_mime, payload, dict(req.meta)
+                    )
+                elif req.task == "image_embed":
+                    result_bytes, result_mime, extra_meta = self._handle_image_embed(
                         req.payload_mime, payload, dict(req.meta)
                     )
                 else:
@@ -143,8 +241,34 @@ class BioClipService(rpc.InferenceServicer):
         if not payload_mime.startswith("text/"):
             raise ValueError(f"embed expects text/* payload, got {payload_mime!r}")
         text = payload.decode("utf-8")
-        vec = self.model.encode_text(text).tolist()  # type: ignore[attr-defined]
-        obj = {"vector": vec, "dim": len(vec), "model_id": self.MODEL_VERSION}
+        vec = self.model.encode_text(text).tolist()
+        info = self.model.info()
+        model_id = info.get("model_id", self.MODEL_VERSION)
+        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=embedding_v1",
+            {"dim": str(len(vec))},
+        )
+
+    def _handle_image_embed(
+        self, payload_mime: str, payload: bytes, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
+        """
+        Image embedding:
+          - Expects payload_mime: "image/jpeg" / "image/png" / "image/webp"
+          - Output result_mime: "application/json;schema=embedding_v1"
+          - Output JSON: {"vector":[...], "dim":512, "model_id":"bioclip2"}
+        """
+        if not payload_mime.startswith("image/"):
+            raise ValueError(
+                f"image_embed expects image/* payload, got {payload_mime!r}"
+            )
+
+        vec = self.model.encode_image(payload).tolist()
+        info = self.model.info()
+        model_id = info.get("model_id", self.MODEL_VERSION)
+        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
         return (
             json.dumps(obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=embedding_v1",
@@ -172,11 +296,15 @@ class BioClipService(rpc.InferenceServicer):
             )
 
         topk = int((meta or {}).get("topk", "5"))
-        pairs = self.model.classify_image(payload)[:topk]  # list[tuple[str, float]]
+        pairs = self.model.classify_image(
+            payload, top_k=topk
+        )  # list[tuple[str, float]]
 
+        info = self.model.info()
+        model_id = info.get("model_id", self.MODEL_VERSION)
         obj = {
             "labels": [{"label": name, "score": float(score)} for name, score in pairs],
-            "model_id": self.MODEL_VERSION,
+            "model_id": model_id,
         }
         return (
             json.dumps(obj, separators=(",", ":")).encode("utf-8"),
@@ -208,30 +336,65 @@ class BioClipService(rpc.InferenceServicer):
     # -------- Capability ----------
     def _build_capability(self) -> pb.Capability:
         info = {}
+        backend_info = {}
         try:
             info = self.model.info()
+            backend_info_raw = info.get("backend_info", {})
+            backend_info = (
+                backend_info_raw if isinstance(backend_info_raw, dict) else {}
+            )
         except Exception:
             pass
+
+        # Base tasks (always available)
+        tasks = [
+            pb.IOTask(
+                name="embed",
+                input_mimes=["text/plain;charset=utf-8"],
+                output_mimes=["application/json;schema=embedding_v1"],
+            ),
+            pb.IOTask(
+                name="image_embed",
+                input_mimes=["image/jpeg", "image/png", "image/webp"],
+                output_mimes=["application/json;schema=embedding_v1"],
+            ),
+        ]
+
+        # Classification task (only if dataset is available)
+        if self.model.supports_classification:
+            tasks.append(
+                pb.IOTask(
+                    name="classify",
+                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    output_mimes=["application/json;schema=labels_v1"],
+                    limits={"topk_max": "50"},
+                )
+            )
+
+        runtime = backend_info.get("runtime", "unknown")
+        runtime_str = str(runtime) if runtime is not None else "unknown"
+
+        precisions_raw = backend_info.get("precisions", ["fp32"])
+        precisions = precisions_raw if isinstance(precisions_raw, list) else ["fp32"]
+
+        device = backend_info.get("device", "unknown")
+        device_str = str(device) if device is not None else "unknown"
+
+        embedding_dim = backend_info.get("embedding_dim", "unknown")
+        embedding_dim_str = (
+            str(embedding_dim) if embedding_dim is not None else "unknown"
+        )
 
         return pb.Capability(
             service_name="clip-bioclip",
             model_ids=[self.MODEL_VERSION],
-            runtime=str(info.get("runtime", "onnxrt-cuda")),
+            runtime=runtime_str,
             max_concurrency=4,
-            precisions=["fp16", "fp32"],
-            extra={"device": str(info.get("device", "cuda:0"))},
-            tasks=[
-                pb.IOTask(
-                    name="embed",
-                    input_mimes=["text/plain;charset=utf-8"],
-                    output_mimes=["application/json;schema=embedding_v1"],
-                    limits={"dim": "768"},
-                ),
-                pb.IOTask(
-                    name="classify",
-                    input_mimes=["image/jpeg", "image/png"],
-                    output_mimes=["application/json;schema=labels_v1"],
-                    limits={"topk_max": "50"},
-                ),
-            ],
+            precisions=precisions,
+            extra={
+                "device": device_str,
+                "embedding_dim": embedding_dim_str,
+                "supports_classification": str(self.model.supports_classification),
+            },
+            tasks=tasks,
         )

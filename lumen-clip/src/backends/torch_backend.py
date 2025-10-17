@@ -2,9 +2,10 @@
 TorchBackend: an OpenCLIP-based backend that implements the BaseClipBackend
 interface using PyTorch.
 
-This backend mirrors the behavior of the current OpenCLIP usage in the project:
-- Loads a CLIP-like model via open_clip.create_model_and_transforms
-- Uses open_clip.get_tokenizer for text tokenization
+This backend:
+- Loads models from local files (no automatic downloads)
+- Uses config.json for model architecture
+- Uses tokenizer.json or falls back to SimpleTokenizer
 - Produces unit-normalized float32 embeddings for both text and images
 - Supports true batched image embedding on GPU/CPU
 
@@ -16,6 +17,7 @@ Notes:
 from __future__ import annotations
 
 import io
+import logging
 import time
 from collections.abc import Callable, Sequence
 from typing import cast
@@ -24,6 +26,7 @@ from typing_extensions import override
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
+from resources.loader import ModelResources
 
 import torch
 import open_clip
@@ -37,6 +40,8 @@ from .base import (
     InvalidInputError,
     InferenceError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TorchBackendError(BackendError):
@@ -68,53 +73,42 @@ class TorchBackend(BaseClipBackend):
     A PyTorch/OpenCLIP backend implementing BaseClipBackend.
 
     Args:
-        model_name: OpenCLIP model architecture (default "ViT-B-32").
-        pretrained: OpenCLIP pretrained weights tag (default "laion2b_s34b_b79k").
-        model_id: Optional stable model identifier. Defaults to "{model_name}_{pretrained}".
+        resources: ModelResources object containing model files and configs
         device_preference: Optional hint for device selection ("cuda", "mps", "cpu").
         max_batch_size: Optional hint for batch size; not enforced by backend.
-        cache_dir: Unused by this backend (included for interface parity).
 
     Behavior:
-        - initialize() loads the model, tokenizer, and preprocess pipeline, and moves model to device.
-        - text_to_vector() encodes a text prompt via the model's text encoder.
-        - image_to_vector() decodes and preprocesses image bytes, then encodes via the image encoder.
-        - image_batch_to_vectors() performs a single batched forward pass for multiple images.
+        - initialize() loads the model from local files, tokenizer, and preprocess pipeline
+        - Always loads FP32 weights (model.pt)
+        - Uses mixed precision (AMP) on GPU (CUDA/MPS) for inference
+        - text_to_vector() encodes a text prompt via the model's text encoder
+        - image_to_vector() decodes and preprocesses image bytes, then encodes via the image encoder
+        - image_batch_to_vectors() performs a single batched forward pass for multiple images
     """
 
     def __init__(
         self,
-        model_name: str | None = None,
-        pretrained: str | None = None,
-        model_id: str | None = None,
+        resources: "ModelResources",
         device_preference: str | None = None,
         max_batch_size: int | None = None,
-        cache_dir: str | None = None,
     ) -> None:
-        # Provide defaults consistent with current CLIPModelManager
-        model_name = model_name or "ViT-B-32"
-        pretrained = pretrained or "laion2b_s34b_b79k"
         super().__init__(
-            model_name=model_name,
-            pretrained=pretrained,
-            model_id=model_id,
+            resources=resources,
             device_preference=device_preference,
             max_batch_size=max_batch_size,
-            cache_dir=cache_dir,
         )
 
         # Runtime objects
         self._device: torch.device = self._select_device(device_preference)
         self._model: torch.nn.Module | None = None
-        self._preprocess: Callable[[Image.Image], torch.Tensor] | None = (
-            None  # torchvision-like transform returned by open_clip
-        )
+        self._preprocess: Callable[[Image.Image], torch.Tensor] | None = None
         self._tokenizer: Callable[[list[str]], torch.Tensor] | None = None
         self._load_time_seconds: float | None = None
 
-        # Cache derived identifiers
-        if self._model_id is None:
-            self._model_id = f"{self._model_name}_{self._pretrained}"
+        # Mixed precision settings
+        self._use_amp: bool = self._device.type in ("cuda", "mps")
+        self._amp_dtype: torch.dtype = torch.float16
+        self._current_precision: str = "fp32"  # Will be updated after init
 
     # ---------- Lifecycle ----------
 
@@ -125,28 +119,100 @@ class TorchBackend(BaseClipBackend):
 
         t0 = time.time()
         try:
-            # Load model, transforms, tokenizer
-            model_name_str: str = self._model_name or "ViT-B-32"
-            pretrained_str: str = self._pretrained or "laion2b_s34b_b79k"
+            logger.info(f"Initializing TorchBackend for {self.resources.model_name}")
 
+            # 1. Get model architecture name from config
+            config = self.resources.config
+            model_name = config.get("model_name", self.resources.model_name)
+
+            # 2. Create model architecture without pretrained weights
+            logger.info(f"Creating model architecture: {model_name}")
             model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                model_name_str, pretrained=pretrained_str
+                model_name,
+                pretrained=None,  # No automatic download
             )
-            tokenizer_fun = open_clip.get_tokenizer(model_name_str)
+
+            # 3. Load local weights
+            model_file = self.resources.get_model_file("model.pt")
+            if not model_file.exists():
+                raise TorchModelLoadingError(f"Model file not found: {model_file}")
+
+            logger.info(f"Loading weights from {model_file}")
+            state_dict = torch.load(model_file, map_location=self._device)
+
+            # Handle potential state_dict wrapper (e.g., {"model": ...})
+            if "model" in state_dict:
+                state_dict = state_dict["model"]
+            if "state_dict" in state_dict:
+                state_dict = state_dict["state_dict"]
+
+            model_obj.load_state_dict(state_dict)
 
             model_module = cast(torch.nn.Module, model_obj)
             model_module.eval().to(self._device)
             self._model = model_module
             self._preprocess = cast(Callable[[Image.Image], torch.Tensor], preprocess)
-            self._tokenizer = cast(Callable[[list[str]], torch.Tensor], tokenizer_fun)
+
+            # 4. Load tokenizer
+            self._tokenizer = self._load_tokenizer(model_name)
 
             self._load_time_seconds = time.time() - t0
             self._initialized = True
+
+            # Update precision info
+            if self._use_amp:
+                self._current_precision = "fp32+amp(fp16)"
+                logger.info(f"Mixed precision (AMP) enabled on {self._device}")
+            else:
+                self._current_precision = "fp32"
+
+            logger.info(
+                f"✅ TorchBackend initialized in {self._load_time_seconds:.2f}s"
+            )
+            logger.info(f"   Precision: {self._current_precision}")
 
         except ImportError as e:
             raise TorchModelLoadingError(f"Required dependencies not found: {e}") from e
         except Exception as e:
             raise TorchModelLoadingError(f"Model loading failed: {e}") from e
+
+    def _load_tokenizer(self, model_name: str) -> Callable[[list[str]], torch.Tensor]:
+        """Load tokenizer from tokenizer.json or fallback to SimpleTokenizer."""
+        if self.resources.tokenizer_config:
+            try:
+                # Try to use HuggingFace tokenizers
+                from tokenizers import Tokenizer as HFTokenizer
+
+                tokenizer_path = self.resources.model_path / "tokenizer.json"
+                hf_tokenizer = HFTokenizer.from_file(str(tokenizer_path))
+
+                logger.info("Using custom tokenizer from tokenizer.json")
+
+                # Wrap HF tokenizer to match open_clip interface
+                def tokenize_fn(texts: list[str]) -> torch.Tensor:
+                    encoded = hf_tokenizer.encode_batch(texts)
+                    tokens = [enc.ids for enc in encoded]
+                    # Pad to max length
+                    max_len = max(len(t) for t in tokens)
+                    padded = [t + [0] * (max_len - len(t)) for t in tokens]
+                    return torch.tensor(padded, dtype=torch.long)
+
+                return tokenize_fn
+
+            except ImportError:
+                logger.warning(
+                    "tokenizers library not available, falling back to SimpleTokenizer"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load custom tokenizer: {e}, "
+                    f"falling back to SimpleTokenizer"
+                )
+
+        # Fallback to SimpleTokenizer
+        logger.info("Using SimpleTokenizer (fallback)")
+        tokenizer_fun = open_clip.get_tokenizer(model_name)
+        return cast(Callable[[list[str]], torch.Tensor], tokenizer_fun)
 
     @override
     def close(self) -> None:
@@ -166,7 +232,7 @@ class TorchBackend(BaseClipBackend):
     def text_to_vector(self, text: str) -> NDArray[np.float32]:
         """
         Encode a text string into a unit-normalized float32 embedding vector.
-        Uses a CLIP-style prompt template for consistency with the current implementation.
+        Uses mixed precision (AMP) on GPU for better performance.
         """
         self._ensure_initialized()
 
@@ -184,7 +250,16 @@ class TorchBackend(BaseClipBackend):
 
             tokenizer = cast(Callable[[list[str]], torch.Tensor], self._tokenizer)
             tokens = tokenizer([prompt]).to(self._device)
-            feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+
+            # Use AMP if enabled (GPU only)
+            if self._use_amp:
+                with torch.autocast(
+                    device_type=self._device.type, dtype=self._amp_dtype
+                ):
+                    feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+            else:
+                feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+
             feats = feats / feats.norm(dim=-1, keepdim=True)
 
             vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
@@ -202,6 +277,7 @@ class TorchBackend(BaseClipBackend):
     def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         """
         Encode image bytes (RGB) into a unit-normalized float32 embedding vector.
+        Uses mixed precision (AMP) on GPU for better performance.
         """
         self._ensure_initialized()
 
@@ -215,7 +291,16 @@ class TorchBackend(BaseClipBackend):
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             preprocess = cast(Callable[[Image.Image], torch.Tensor], self._preprocess)
             tensor = preprocess(img).unsqueeze(0).to(self._device)
-            feats = self._model.encode_image(tensor)  # type: ignore[attr-defined]
+
+            # Use AMP if enabled (GPU only)
+            if self._use_amp:
+                with torch.autocast(
+                    device_type=self._device.type, dtype=self._amp_dtype
+                ):
+                    feats = self._model.encode_image(tensor)  # type: ignore[attr-defined]
+            else:
+                feats = self._model.encode_image(tensor)  # type: ignore[attr-defined]
+
             feats = feats / feats.norm(dim=-1, keepdim=True)
 
             vec = feats.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
@@ -233,6 +318,7 @@ class TorchBackend(BaseClipBackend):
     def image_batch_to_vectors(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         """
         Encode a list of image bytes using a single batched forward pass.
+        Uses mixed precision (AMP) on GPU for better performance.
         Falls back to BaseClipBackend's sequential implementation if images is empty.
         """
         if not images:
@@ -255,7 +341,16 @@ class TorchBackend(BaseClipBackend):
                 tensors.append(t)
 
             batch = torch.stack(tensors, dim=0).to(self._device)
-            feats = self._model.encode_image(batch)  # type: ignore[attr-defined]
+
+            # Use AMP if enabled (GPU only)
+            if self._use_amp:
+                with torch.autocast(
+                    device_type=self._device.type, dtype=self._amp_dtype
+                ):
+                    feats = self._model.encode_image(batch)  # type: ignore[attr-defined]
+            else:
+                feats = self._model.encode_image(batch)  # type: ignore[attr-defined]
+
             feats = feats / feats.norm(dim=-1, keepdim=True)
 
             arr = feats.detach().cpu().numpy().astype(np.float32, copy=False)
@@ -273,6 +368,7 @@ class TorchBackend(BaseClipBackend):
     def text_batch_to_vectors(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """
         Encode a batch of text strings into unit-normalized float32 embedding vectors.
+        Uses mixed precision (AMP) on GPU for better performance.
 
         Args:
             texts: Sequence of text strings to encode.
@@ -297,7 +393,16 @@ class TorchBackend(BaseClipBackend):
 
             tokenizer = cast(Callable[[list[str]], torch.Tensor], self._tokenizer)
             tokens = tokenizer(list(texts)).to(self._device)
-            feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+
+            # Use AMP if enabled (GPU only)
+            if self._use_amp:
+                with torch.autocast(
+                    device_type=self._device.type, dtype=self._amp_dtype
+                ):
+                    feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+            else:
+                feats = self._model.encode_text(tokens)  # type: ignore[attr-defined]
+
             feats = feats / feats.norm(dim=-1, keepdim=True)
 
             vecs = feats.detach().cpu().numpy().astype(np.float32, copy=False)
@@ -313,27 +418,42 @@ class TorchBackend(BaseClipBackend):
     @override
     def get_info(self) -> BackendInfo:
         """
-        Report runtime and model metadata. Embedding dims are left optional; they
-        can vary by model and are discoverable at runtime if needed.
+        Report runtime and model metadata.
         """
-        precisions = ["fp32"]
-        if torch.cuda.is_available() or torch.backends.mps.is_available():
-            precisions.append("fp16")
+        # Report precision: always loads fp32 weights, uses AMP on GPU
+        if self._use_amp:
+            precisions = ["fp32", "fp16(amp)"]
+        else:
+            precisions = ["fp32"]
 
         version = getattr(open_clip, "__version__", None)
+
+        # Get embedding dimension from resources
+        embed_dim = self.resources.get_embedding_dim()
+
+        # Get image size from resources
+        image_size = self.resources.get_image_size()
+        image_size_str = f"{image_size[0]}x{image_size[1]}" if image_size else None
+
         return BackendInfo(
             runtime="torch",
             device=str(self._device),
-            model_id=self._model_id,
-            model_name=self._model_name,
-            pretrained=self._pretrained,
+            model_id=self.resources.model_name,
+            model_name=self.resources.config.get(
+                "model_name", self.resources.model_name
+            ),
+            pretrained=None,  # Local weights, no pretrained tag
             version=str(version) if version is not None else None,
-            image_embedding_dim=None,
-            text_embedding_dim=None,
+            image_embedding_dim=embed_dim,
+            text_embedding_dim=embed_dim,
             precisions=precisions,
             max_batch_size=self._max_batch_size,
             supports_image_batch=True,
-            extra={"library": "open-clip-torch"},
+            extra={
+                "library": "open-clip-torch",
+                "image_size": image_size_str,
+                "config_path": str(self.resources.model_path / "config.json"),
+            },
         )
 
     # ---------- Helpers ----------

@@ -25,9 +25,13 @@ import abc
 import enum
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from resources.loader import ModelResources
 
 
 __all__ = [
@@ -103,7 +107,9 @@ class BackendInfo:
     precisions: list[str] = field(default_factory=list)  # e.g., ["fp32","fp16","int8"]
     max_batch_size: int | None = None  # backend hint (if any)
     supports_image_batch: bool = False
-    extra: dict[str, str] = field(default_factory=dict)  # arbitrary key/value pairs
+    extra: dict[str, str | None] = field(
+        default_factory=dict
+    )  # arbitrary key/value pairs
 
     def as_dict(self) -> dict[str, object]:
         """Convert to a plain dict (safe for JSON serialization)."""
@@ -139,32 +145,22 @@ class BaseClipBackend(abc.ABC):
 
     def __init__(
         self,
-        model_name: str | None = None,
-        pretrained: str | None = None,
-        model_id: str | None = None,
+        resources: "ModelResources",
         device_preference: str | None = None,
         max_batch_size: int | None = None,
-        cache_dir: str | None = None,
     ) -> None:
         """
-        Construct a backend with optional hints.
+        Construct a backend with model resources.
 
         Args:
-            model_name: Logical model architecture name (e.g., "ViT-B-32").
-            pretrained: Pretrained tag/weights identifier (e.g., "laion2b_s34b_b79k").
-            model_id: Combined unique identifier; if not provided, implementations
-                      can derive one from (model_name, pretrained).
+            resources: ModelResources object containing all model files and configs
             device_preference: Hint for device selection (e.g., "cuda", "mps", "cpu").
             max_batch_size: Hint for batching; implementation may clamp lower/higher.
-            cache_dir: Optional writable directory for any cached assets.
         """
         self._initialized: bool = False
-        self._model_name: str | None = model_name
-        self._pretrained: str | None = pretrained
-        self._model_id: str | None = model_id
+        self.resources = resources
         self._device_pref: str | None = device_preference
         self._max_batch_size: int | None = max_batch_size
-        self._cache_dir: str | None = cache_dir
 
     # ---------- Lifecycle ----------
 

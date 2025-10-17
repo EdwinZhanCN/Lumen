@@ -1,24 +1,22 @@
 """
 clip_model.py
 
-Refactored CLIPModelManager to align with Lumen architecture contracts.
-- Separates concerns between Model Manager and Backend layers
-- Uses standard types (np.ndarray) instead of torch-specific types
-- Implements proper error handling according to Lumen contracts
-- Focuses on business logic: data preparation, caching, and result formatting
+Refactored CLIPModelManager to use ModelResources from lumen-resources.
+- Uses pre-loaded labels and embeddings from ModelResources
+- No longer downloads from HuggingFace
+- Simplified initialization (no caching logic needed)
+- Focuses on business logic: classification and embedding
 """
 
-import json
 import logging
-import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
-from huggingface_hub import hf_hub_download
 from numpy.typing import NDArray
 
 from backends import BaseClipBackend
+from resources.loader import ModelResources
 
 logger = logging.getLogger(__name__)
 
@@ -43,62 +41,42 @@ class LabelMismatchError(Exception):
 
 class CLIPModelManager:
     """
-    Manages CLIP model business logic for image classification using cached ImageNet labels.
+    Manages CLIP model business logic for image classification.
 
-    This class follows Lumen architecture contracts:
+    This class:
     - Receives a BaseClipBackend instance for inference
-    - Manages model-specific labels and embeddings cache
-    - Handles data preprocessing/postprocessing
+    - Uses pre-loaded labels and embeddings from ModelResources
+    - Handles classification and embedding tasks
     - Returns business-level results using standard types
     """
 
     def __init__(
         self,
         backend: BaseClipBackend,
-        model_name: str = "ViT-B-32",
-        pretrained: str = "laion2b_s34b_b79k",
-        batch_size: int = 512,
+        resources: ModelResources,
     ) -> None:
         """
         Initialize CLIP Model Manager.
 
         Args:
             backend: Backend instance implementing BaseClipBackend interface
-            model_name: Model architecture name
-            pretrained: Pretrained weights identifier
-            batch_size: Batch size for processing
+            resources: ModelResources with pre-loaded data
         """
-        # Backend dependency injection (following Lumen contracts)
+        # Backend dependency injection
         self.backend: BaseClipBackend = backend
+        self.resources: ModelResources = resources
 
-        # Model configuration from args with environment overrides
-        self.model_name: str = os.getenv("CLIP_MODEL_NAME", model_name)
-        self.pretrained: str = os.getenv("CLIP_PRETRAINED", pretrained)
-        self.model_id: str = f"{self.model_name}_{self.pretrained}"
-
-        bs_env = os.getenv("CLIP_MAX_BATCH_SIZE")
-        self.batch_size: int = (
-            int(bs_env) if bs_env and bs_env.isdigit() else batch_size
+        # Use pre-loaded labels and embeddings from resources
+        self.labels: list[str] = (
+            resources.labels.tolist() if resources.labels is not None else []
         )
+        self.text_embeddings: NDArray[np.float32] | None = resources.label_embeddings
 
-        # Data management paths
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        self._base_data_dir: str = os.path.join(base_dir, "data", "clip")
-        os.makedirs(self._base_data_dir, exist_ok=True)
+        # Model identification
+        self.model_id: str = f"{resources.model_name}_{resources.runtime}"
+        self.supports_classification: bool = resources.has_classification_support()
 
-        # ImageNet labels file (shared across backends)
-        self.names_filename: str = os.path.join(
-            self._base_data_dir, "imagenet_labels.json"
-        )
-
-        # Per-backend cache paths (resolved after backend initialization)
-        self._cache_runtime_dir: str | None = None
-        self._vectors_npz_path: str | None = None
-        self._vectors_meta_path: str | None = None
-
-        # Business data (using standard types as per Lumen contracts)
-        self.labels: list[str] = []
-        self.text_embeddings: NDArray[np.float32] | None = None
+        # Initialization state
         self._load_time: float | None = None
         self.is_initialized: bool = False
 
@@ -118,210 +96,95 @@ class CLIPModelManager:
 
     def initialize(self) -> None:
         """
-        Initialize the model manager: load backend, cache labels, and compute embeddings.
+        Initialize the model manager: initialize backend and compute embeddings if needed.
         Must be called before any inference operations.
-
-        Raises:
-            ModelDataNotFoundError: If required model data cannot be loaded
-            CacheCorruptionError: If cached data is corrupted
         """
         if self.is_initialized:
             return
 
         t0 = time.time()
         logger.info(
-            f"Initializing CLIP Model Manager for {self.model_name} ({self.pretrained})..."
+            f"Initializing CLIP Model Manager for {self.resources.model_name}..."
         )
 
         try:
-            # 1) Initialize backend (delegate device/runtime concerns to backend)
+            # 1) Initialize backend
             self.backend.initialize()
 
-            # 2) Setup per-backend cache paths
-            self._setup_cache_paths()
+            # 2) If no pre-computed text embeddings and we have labels, compute them
+            if self.supports_classification and self.text_embeddings is None:
+                logger.info("No pre-computed embeddings found, computing on-the-fly...")
+                self._compute_text_embeddings()
 
-            # 3) Load/download labels and compute/load embeddings
-            self._load_label_names()
-            self._load_or_compute_text_embeddings()
-
-            # 4) Initialize scene embeddings
+            # 3) Initialize scene embeddings (always computed, not dataset-dependent)
             self._initialize_scene_embeddings()
 
             self.is_initialized = True
             self._load_time = time.time() - t0
-            logger.info(
-                f"CLIP Model Manager initialized in {self._load_time:.2f} seconds"
-            )
+
+            if self.supports_classification:
+                logger.info(
+                    f"✅ CLIP Model Manager initialized in {self._load_time:.2f}s "
+                    f"({len(self.labels)} classes)"
+                )
+            else:
+                logger.info(
+                    f"✅ CLIP Model Manager initialized in {self._load_time:.2f}s "
+                    f"(embed-only mode)"
+                )
 
         except Exception as e:
             logger.error(f"Failed to initialize CLIP Model Manager: {e}")
-            raise ModelDataNotFoundError(f"Model initialization failed: {e}") from e
+            raise RuntimeError(f"Model initialization failed: {e}") from e
 
-    def _setup_cache_paths(self) -> None:
-        """Setup per-backend cache directory structure."""
-        backend_info = self.backend.get_info()
-        runtime_id = backend_info.runtime or "unknown"
-        model_id = backend_info.model_id or self.model_id
-
-        self._cache_runtime_dir = os.path.join(
-            self._base_data_dir, runtime_id, model_id
-        )
-        os.makedirs(self._cache_runtime_dir, exist_ok=True)
-
-        self._vectors_npz_path = os.path.join(
-            self._cache_runtime_dir, "text_vectors.npz"
-        )
-        self._vectors_meta_path = os.path.join(
-            self._cache_runtime_dir, "text_vectors.meta.json"
-        )
-
-    def _load_label_names(self) -> None:
+    def _compute_text_embeddings(self) -> None:
         """
-        Download and cache ImageNet class names from a canonical source.
-
-        Raises:
-            ModelDataNotFoundError: If labels cannot be downloaded or loaded
+        Compute text embeddings for all labels (called if not pre-computed).
         """
-        if not os.path.exists(self.names_filename):
-            logger.info("Downloading ImageNet class names...")
-            try:
-                # Download from huggingface repository
-                path = hf_hub_download(
-                    repo_id="huggingface/label-files",
-                    filename="imagenet-1k-id2label.json",
-                    repo_type="dataset",
-                )
+        if not self.labels:
+            logger.warning("No labels available, skipping embedding computation")
+            return
 
-                # Convert to simple list format and save
-                with open(path, "r") as f:
-                    id2label = json.load(f)
+        logger.info(f"Computing text embeddings for {len(self.labels)} labels...")
 
-                # Extract labels in order (assuming keys are "0", "1", "2", ...)
-                labels = [id2label[str(i)] for i in range(len(id2label))]
+        # Use batch processing if backend supports it
+        prompts = [f"a photo of a {label}" for label in self.labels]
 
-                with open(self.names_filename, "w") as f:
-                    json.dump(labels, f, ensure_ascii=False, indent=2)
-
-            except Exception as e:
-                raise ModelDataNotFoundError(
-                    f"Failed to download ImageNet labels: {e}"
-                ) from e
-
-        # Load labels
         try:
-            with open(self.names_filename, "r") as f:
-                self.labels = json.load(f)
-            logger.info(f"Loaded {len(self.labels)} ImageNet class names")
+            # Try batch processing first
+            embeddings_array = self.backend.text_batch_to_vectors(prompts)
+            self.text_embeddings = embeddings_array.astype(np.float32, copy=False)
+            logger.info("Text embeddings computed successfully")
         except Exception as e:
-            raise ModelDataNotFoundError(f"Failed to load ImageNet labels: {e}") from e
-
-    def _compute_and_cache_text_embeddings(self) -> None:
-        """
-        Compute text embeddings for all labels and cache to disk.
-
-        Raises:
-            CacheCorruptionError: If caching fails
-        """
-        assert (
-            self._vectors_npz_path is not None and self._vectors_meta_path is not None
-        )
-
-        try:
-            logger.info(f"Computing text embeddings for {len(self.labels)} labels...")
-
-            # Compute embeddings via backend (using standard interface)
-            prompts = [f"a photo of a {label}" for label in self.labels]
+            logger.warning(f"Batch processing failed: {e}, falling back to sequential")
+            # Fallback to sequential processing
             embeddings_list: list[NDArray[np.float32]] = []
-
             for prompt in prompts:
                 embedding = self.backend.text_to_vector(prompt)
                 embeddings_list.append(embedding)
-
-            # Stack into single array
-            embeddings_array = np.vstack(embeddings_list).astype(np.float32, copy=False)
-
-            # Cache embeddings and metadata
-            np.savez(
-                self._vectors_npz_path,
-                names=np.array(self.labels, dtype=object),
-                vecs=embeddings_array,
+            self.text_embeddings = np.vstack(embeddings_list).astype(
+                np.float32, copy=False
             )
-
-            backend_info = self.backend.get_info()
-            metadata = {
-                "runtime": backend_info.runtime,
-                "model_id": self.model_id,
-                "num_labels": len(self.labels),
-                "embedding_dim": embeddings_array.shape[1],
-            }
-
-            with open(self._vectors_meta_path, "w", encoding="utf-8") as f:
-                json.dump(metadata, f, ensure_ascii=False, separators=(",", ":"))
-
-            # Store in standard format (np.ndarray)
-            self.text_embeddings = embeddings_array
-            logger.info(
-                f"Computed and cached text embeddings to {self._vectors_npz_path}"
-            )
-
-        except Exception as e:
-            raise CacheCorruptionError(
-                f"Failed to compute and cache embeddings: {e}"
-            ) from e
-
-    def _load_or_compute_text_embeddings(self) -> None:
-        """
-        Load cached text embeddings or compute them if cache is invalid/missing.
-
-        Raises:
-            LabelMismatchError: If cached embeddings don't match current labels
-            CacheCorruptionError: If cached data is corrupted
-        """
-        assert self._vectors_npz_path is not None
-
-        # Try to load from cache first
-        if os.path.exists(self._vectors_npz_path):
-            try:
-                data = np.load(self._vectors_npz_path, allow_pickle=True)
-                cached_names = data.get("names")
-                cached_vecs = data.get("vecs")
-
-                if (
-                    cached_names is not None
-                    and cached_vecs is not None
-                    and cached_names.tolist() == self.labels
-                ):
-                    self.text_embeddings = cached_vecs.astype(np.float32, copy=False)
-                    logger.info(
-                        f"Loaded cached text embeddings from {self._vectors_npz_path}"
-                    )
-                    return
-                else:
-                    logger.warning(
-                        "Cached labels mismatch current labels; recomputing embeddings"
-                    )
-                    raise LabelMismatchError(
-                        "Cached embeddings don't match current labels"
-                    )
-
-            except (Exception, KeyError, LabelMismatchError) as e:
-                logger.warning(f"Cache validation failed: {e}; recomputing embeddings")
-
-        # Compute embeddings if cache is invalid/missing
-        self._compute_and_cache_text_embeddings()
 
     def _initialize_scene_embeddings(self) -> None:
         """Initialize scene classification embeddings using backend."""
         try:
-            embeddings_list = []
-            for prompt in self.scene_prompts:
-                embedding = self.backend.text_to_vector(prompt)
-                embeddings_list.append(embedding)
-
-            self.scene_prompt_embeddings = np.vstack(embeddings_list).astype(
-                np.float32, copy=False
-            )
-            logger.info("Initialized scene classification embeddings")
+            # Use batch processing if available
+            try:
+                self.scene_prompt_embeddings = self.backend.text_batch_to_vectors(
+                    self.scene_prompts
+                )
+                logger.info("Initialized scene classification embeddings (batched)")
+            except Exception:
+                # Fallback to sequential
+                embeddings_list = []
+                for prompt in self.scene_prompts:
+                    embedding = self.backend.text_to_vector(prompt)
+                    embeddings_list.append(embedding)
+                self.scene_prompt_embeddings = np.vstack(embeddings_list).astype(
+                    np.float32, copy=False
+                )
+                logger.info("Initialized scene classification embeddings (sequential)")
 
         except Exception as e:
             logger.error(f"Failed to initialize scene embeddings: {e}")
@@ -364,7 +227,7 @@ class CLIPModelManager:
         self, image_bytes: bytes, top_k: int = 5
     ) -> list[tuple[str, float]]:
         """
-        Classify an image against cached ImageNet labels.
+        Classify an image against ImageNet labels.
 
         Args:
             image_bytes: Raw image data in bytes
@@ -374,9 +237,15 @@ class CLIPModelManager:
             List of (label, probability) tuples sorted by probability (descending)
 
         Raises:
-            RuntimeError: If model is not initialized
+            RuntimeError: If model is not initialized or classification not supported
         """
         self._ensure_initialized()
+
+        if not self.supports_classification:
+            raise RuntimeError(
+                "Classification not supported: no dataset loaded. "
+                "Ensure ImageNet_1k.npz exists in the model directory."
+            )
 
         if self.text_embeddings is None:
             raise RuntimeError("Text embeddings are not available")
@@ -451,7 +320,7 @@ class CLIPModelManager:
 
         return scene_label, confidence
 
-    def info(self) -> dict[str, str | int | float | bool | dict[str, Any]]:
+    def info(self) -> dict[str, str | int | float | bool | dict[str, Any] | None]:
         """
         Return model manager information.
 
@@ -466,13 +335,14 @@ class CLIPModelManager:
                 "model_id": info.model_id,
                 "model_name": info.model_name,
                 "version": info.version,
+                "embedding_dim": info.image_embedding_dim,
             }
 
         return {
-            "model_name": self.model_name,
-            "pretrained": self.pretrained,
+            "model_name": self.resources.model_name,
             "model_id": self.model_id,
             "num_labels": len(self.labels),
+            "supports_classification": self.supports_classification,
             "load_time": self._load_time,
             "is_initialized": self.is_initialized,
             "backend_info": backend_info,

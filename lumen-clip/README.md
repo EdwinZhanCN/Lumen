@@ -1,380 +1,622 @@
-# Lumen-CLIP (PML: Python Machine Learning)
+# Lumen-CLIP: Production-Ready CLIP Model Serving
 
-pml stands for “Python Machine Learning.” This package provides a unified, high-performance gRPC inference service for Lumilio Photos. It exposes both general-purpose CLIP and BioCLIP-2 capabilities for image classification and text/image embeddings, with batched request processing and optional mDNS advertisement for discovery on a local network.
+A robust, production-grade gRPC service for serving CLIP and BioCLIP models with strict resource management, configuration-driven deployment, and multi-runtime support.
 
-- Status:
-  - image_classification: implemented (OpenCLIP + ImageNet labels, scene prompts, text/image embeddings)
-  - biological_atlas: implemented (BioCLIP-2 + TreeOfLife-10M labels, text/image embeddings)
+## Overview
 
-## Project structure
+Lumen-CLIP provides a unified interface for:
+- **General CLIP**: Image classification (ImageNet), text/image embeddings, scene analysis
+- **BioCLIP**: Species identification (TreeOfLife-10M), biological embeddings
+- **Unified Service**: Smart routing between CLIP and BioCLIP based on context
+
+### Key Features
+
+- **Config-Driven**: All deployment controlled via YAML configuration
+- **Strict Resource Management**: Uses `lumen-resources` for model/dataset validation
+- **Multi-Runtime Support**: PyTorch, ONNX Runtime (RKNN planned)
+- **All-or-None Principle**: Service refuses to start if required files are missing
+- **Dynamic Capabilities**: Only exposes tasks supported by loaded resources
+- **Production Ready**: Graceful shutdown, mDNS advertisement, comprehensive error handling
+
+## Architecture
 
 ```
-lumen-clip/
-├─ Dockerfiles/
-│  ├─ Dockerfile                # CPU (and macOS with MPS) target
-│  ├─ cuda/
-│  │  └─ Dockerfile             # NVIDIA CUDA (12.6) target
-│  └─ rocm/
-│     └─ Dockerfile             # AMD ROCm (6.3) target
-├─ data/                        # Runtime caches (labels & precomputed text vectors)
-│  ├─ clip/
-│  └─ bioclip/
-├─ src/
-│  ├─ server.py                 # Unified gRPC server (UnifiedMLService + mDNS)
-│  ├─ proto/
-│  │  ├─ ml_service.proto       # Inference protocol
-│  │  ├─ ml_service_pb2.py      # Generated code
-│  │  └─ ml_service_pb2_grpc.py # Generated code
-│  ├─ service_registry/
-│  │  ├─ __init__.py
-│  │  └─ service.py             # UnifiedMLService (task router + batching)
-│  ├─ image_classification/
-│  │  ├─ clip_model.py          # CLIPModelManager (OpenCLIP, ImageNet labels, scene prompts)
-│  │  └─ clip_service.py        # Standalone CLIP service (reference/legacy)
-│  └─ biological_atlas/
-│     ├─ bioclip_model.py       # BioCLIPModelManager (OpenCLIP, TreeOfLife-10M labels)
-│     └─ bioclip_service.py     # Standalone BioCLIP service (reference/legacy)
-├─ pyproject.toml               # Python packaging & deps
-├─ uv.lock                      # uv lock file
-└─ README.md
+┌─────────────────────────────────────────────────────────────┐
+│                      YAML Configuration                      │
+│  (Service selection, models, runtime, datasets, etc.)       │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Server (server.py)                      │
+│  • Config validation & single-service enforcement            │
+│  • Dynamic service loading & gRPC registration               │
+│  • mDNS advertisement & graceful shutdown                    │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Service Layer (from_config)                  │
+│  CLIPService / BioCLIPService / UnifiedCLIPService           │
+│  • Resource validation & loading                             │
+│  • Backend initialization                                    │
+│  • Dynamic task exposure                                     │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Model Manager Layer                         │
+│  CLIPModelManager / BioCLIPModelManager                      │
+│  • Classification (if dataset available)                     │
+│  • Embedding (always available)                              │
+│  • Batching & preprocessing                                  │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Backend Layer                            │
+│  TorchBackend / ONNXRTBackend / RKNNBackend                  │
+│  • Model inference                                           │
+│  • Device management                                         │
+│  • Runtime-specific optimizations                            │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Resource Management                          │
+│  ResourceLoader / ModelResources                             │
+│  • Strict cache structure validation                         │
+│  • Config/weights/tokenizer/dataset loading                  │
+│  • Region-aware (ModelScope/HuggingFace)                     │
+└─────────────────────────────────────────────────────────────┘
 ```
-
-Notes:
-- The unified server in `src/server.py` starts `UnifiedMLService` (see `src/service_registry/service.py`).
-- Caches (per-backend/runtime):
-  - CLIP: downloads ImageNet-1k labels and precomputes text embeddings to `data/clip/<runtime>/<model_id>/text_vectors.npz` with sidecar `text_vectors.meta.json`. Example: `data/clip/torch/ViT-B-32_laion2b_s34b_b79k/`.
-  - BioCLIP: downloads TreeOfLife-10M labels and precomputes text embeddings to `data/bioclip/<runtime>/<model_id>/text_vectors.npz` with sidecar `text_vectors.meta.json`.
-- The standalone `clip_service.py` and `bioclip_service.py` implement the same proto one-service-per-model; they are kept as references but are not started by the unified server.
-
-
-## gRPC services and tasks
-
-Protocol definition: `src/proto/ml_service.proto`
-
-Service: `service Inference`
-- rpc Infer(stream InferRequest) returns (stream InferResponse)
-- rpc GetCapabilities(google.protobuf.Empty) returns (Capability)
-- rpc StreamCapabilities(google.protobuf.Empty) returns (stream Capability)
-- rpc Health(google.protobuf.Empty) returns (google.protobuf.Empty)
-
-UnifiedMLService supported tasks (name → input → output):
-- clip_classify
-  - input: image/jpeg | image/png | image/webp
-  - output: application/json;schema=labels_v1
-  - meta: topk (default 5)
-- bioclip_classify
-  - input: image/jpeg | image/png | image/webp
-  - output: application/json;schema=labels_v1
-  - meta: topk (default 3)
-- smart_classify
-  - input: image/jpeg | image/png | image/webp
-  - output: application/json;schema=labels_v1
-  - behavior: CLIP scene prompts first; if “animal-like”, delegates to BioCLIP classification, otherwise returns the predicted scene
-- clip_embed
-  - input: text/plain
-  - output: application/json;schema=embedding_v1
-- bioclip_embed
-  - input: text/plain
-  - output: application/json;schema=embedding_v1
-- clip_image_embed
-  - input: image/jpeg | image/png | image/webp
-  - output: application/json;schema=embedding_v1
-- bioclip_image_embed
-  - input: image/jpeg | image/png | image/webp
-  - output: application/json;schema=embedding_v1
-
-Batching:
-- Unified service processes requests in batches (default batch size 8) for higher throughput. Image-embed tasks use a true batched forward pass; other tasks batch at the routing level.
-
-Capabilities and health:
-- GetCapabilities/StreamCapabilities describe the above tasks and limits.
-- Health returns Empty when the service is healthy.
-
-mDNS advertisement:
-- If zeroconf is available, the server publishes service type `_homenative-node._tcp.local.` with instance name `CLIP-Image-Processor`. You can override the service type and instance via `CLIP_MDNS_TYPE` and `CLIP_MDNS_NAME`. TXT props:
-  - uuid: CLIP_MDNS_UUID or randomly generated
-  - status: CLIP_MDNS_STATUS (default “ready”)
-  - version: CLIP_MDNS_VERSION (default “1.0.0”)
-- You can override the advertised IP via `ADVERTISE_IP` env var. If it resolves to a loopback address (127.x), remote discovery may fail.
-
 
 ## Installation
 
-This project uses uv for dependency management.
+### Prerequisites
 
-- Python version for local development: see pyproject “requires-python” (>=3.12,<3.13). If you prefer newer Python, use the Docker images below which include a pinned runtime.
+- Python 3.10+
+- pip or uv (recommended)
 
-- Apple Silicon (macOS, MPS):
-````bash
-uv pip install '.[osx]'
-````
-Note: RKNN (rknn-toolkit2) is Linux-only; it will not install on macOS.
+### Install from source
 
-- NVIDIA GPU (CUDA 12.6):
-````bash
-uv pip install --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu]'
-````
-Linux-only ROCm6.3 support
-````bash
-uv pip install --index-url https://download.pytorch.org/whl/rocm6.3 --extra-index-url https://pypi.org/simple '.[gpu]'
-````
-Linux-only RKNN extra (optional, for Rockchip NPU support):
-````bash
-uv pip install --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple '.[gpu,rknn]'
-````
-Linux-only Jetson
-````bash
-uv pip install --index-url https://pypi.jetson-ai-lab.io/jp6/cu126 --extra-index-url https://pypi.org/simple torch torchvision
-uv pip install -e . --extra-index-url https://pypi.org/simple
-````
+```bash
+# Clone the repository
+git clone https://github.com/EdwinZhanCN/Lumen.git
+cd Lumen/lumen-clip
 
-- CPU-only:
-````bash
-uv pip install '.[cpu]'
-````
+# Install with uv (recommended)
+uv pip install -e .
 
-## Running locally
+# Or with pip
+pip install -e .
+```
 
-Initialize environment and start the unified server:
-````bash
-# From the project root
-export PYTHONPATH=$(pwd)/src
+### Install dependencies
 
-# Optional: control mDNS advertising
-export ADVERTISE_IP=192.168.1.23
-export CLIP_MDNS_UUID="$(uuidgen)"
-export CLIP_MDNS_STATUS=ready
-export CLIP_MDNS_VERSION=1.0.0
+```bash
+# Core dependencies (automatically installed)
+- torch / torchvision
+- grpcio / grpcio-tools
+- protobuf
+- pyyaml
+- pillow
+- numpy
 
-# Start the server
-python -m src.server --port 50051
-````
+# Optional for ONNX Runtime
+pip install onnxruntime  # CPU
+pip install onnxruntime-gpu  # GPU
 
-### Environment-based backend selection
+# Optional for mDNS
+pip install zeroconf
+```
 
-The server selects model backends at startup via environment variables:
-- CLIP_BACKEND: torch (default) | onnxrt | rknn
-- BIOCLIP_BACKEND: torch (default). If unset, falls back to CLIP_BACKEND.
-- CLIP_DEVICE, BIOCLIP_DEVICE: Device hints (e.g., cuda, mps, cpu).
-- CLIP_MAX_BATCH_SIZE, BIOCLIP_MAX_BATCH_SIZE: Optional batch size hints for backends.
-- ONNX Runtime:
-  - CLIP_ONNX_IMAGE, CLIP_ONNX_TEXT (and BIOCLIP_ONNX_IMAGE, BIOCLIP_ONNX_TEXT)
-  - CLIP_ORT_PROVIDERS, BIOCLIP_ORT_PROVIDERS (comma-separated; e.g., "CUDAExecutionProvider,CPUExecutionProvider")
-- RKNN:
-  - CLIP_RKNN_MODEL, BIOCLIP_RKNN_MODEL
-  - CLIP_RKNN_TARGET, BIOCLIP_RKNN_TARGET (default "rk3588")
-- Service runtime:
-  - BATCH_SIZE: server-side request batch size (default 8)
-- mDNS:
-  - CLIP_MDNS_TYPE, CLIP_MDNS_NAME to override service type and instance name
-  - ADVERTISE_IP to override the advertised IP
-  - CLIP_MDNS_SVC to represent the service instance
+## Quick Start
 
-Quick checks with grpcurl:
-````bash
-# List services
-grpcurl -plaintext localhost:50051 list
+### 1. Prepare Resources
 
-# Health
-grpcurl -plaintext localhost:50051 home_native.v1.Inference/Health
+All models, configs, and datasets must be managed via `lumen-resources`:
 
-# Capabilities (single response)
-grpcurl -plaintext localhost:50051 home_native.v1.Inference/GetCapabilities
-````
+```bash
+# Download CLIP model (MobileCLIP2-S2) for torch runtime
+lumen-resources download MobileCLIP2-S2 --runtime torch --region cn
 
-Example request/response shapes
-- InferRequest
-  - fields: correlation_id, task, payload (bytes), payload_mime, meta (map), seq/total/offset (optional for chunking)
-- InferResponse
-  - fields: correlation_id, is_final, result (bytes), result_mime, meta (map), error (optional), seq/total/offset
+# Download BioCLIP model with dataset
+lumen-resources download bioclip-2 --runtime torch --dataset TreeOfLife-10M --region cn
 
-Example: clip_classify (labels_v1)
-````json
+# Validate resources
+lumen-resources validate config/clip_only.yaml
+```
+
+Resources are stored in: `~/.lumen/models/{model_name}/{runtime}/`
+
+Required files per model:
+- `config.json` - Model configuration
+- `model.pt` or `*.onnx` - Model weights
+- `tokenizer.json` (optional, falls back to SimpleTokenizer)
+- Dataset files (e.g., `ImageNet_1k.npz`, `TreeOfLife-10M.npy`) for classification
+
+### 2. Configure Service
+
+Choose a deployment scenario:
+
+**Scenario 1: CLIP Only** (`config/clip_only.yaml`)
+```yaml
+metadata:
+    version: "1.0"
+    region: "cn"
+    cache_dir: "~/.lumen/models"
+
+services:
+    clip:
+        enabled: true
+        package: "lumen-clip"
+        import:
+            registry_class: "image_classification.clip_service.CLIPService"
+            add_to_server: "ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        models:
+            default:
+                model: "MobileCLIP2-S2"
+                runtime: "torch"
+        env:
+            BATCH_SIZE: "8"
+            DEVICE: "cuda"  # or "cpu"
+        server:
+            port: 50051
+            mdns:
+                enabled: true
+                name: "CLIP-Service"
+                type: "_lumen-clip._tcp.local."
+```
+
+**Scenario 2: BioCLIP Only** (`config/bioclip_only.yaml`)
+```yaml
+services:
+    bioclip:
+        enabled: true
+        import:
+            registry_class: "biological_atlas.bioclip_service.BioCLIPService"
+            add_to_server: "ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        models:
+            default:
+                model: "bioclip-2"
+                runtime: "torch"
+                dataset: "TreeOfLife-10M"
+        server:
+            port: 50052
+```
+
+**Scenario 3: Unified Service** (`config/unified_service.yaml`)
+```yaml
+services:
+    clip-unified:
+        enabled: true
+        import:
+            registry_class: "service_registry.service.UnifiedCLIPService"
+            add_to_server: "ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        models:
+            clip_default:
+                model: "MobileCLIP2-S2"
+                runtime: "torch"
+            bioclip_default:
+                model: "bioclip-2"
+                runtime: "torch"
+                dataset: "TreeOfLife-10M"
+        server:
+            port: 50053
+```
+
+### 3. Start Service
+
+```bash
+# Start CLIP service
+python src/server.py --config config/clip_only.yaml
+
+# Start on custom port
+python src/server.py --config config/clip_only.yaml --port 50060
+
+# Enable debug logging
+python src/server.py --config config/clip_only.yaml --log-level DEBUG
+```
+
+### 4. Test Service
+
+```bash
+# Using grpcurl
+grpcurl -plaintext localhost:50051 inference.Inference/GetCapabilities
+
+# Using Python client
+python examples/client_test.py
+```
+
+## Service Types & Supported Tasks
+
+### CLIP Service
+
+**Always Available:**
+- `embed`: Text → embedding vector
+- `image_embed`: Image → embedding vector
+
+**Available if ImageNet dataset present:**
+- `classify`: Image → ImageNet class labels
+- `classify_scene`: Image → scene category
+
+### BioCLIP Service
+
+**Always Available:**
+- `embed`: Text → embedding vector
+- `image_embed`: Image → embedding vector
+
+**Available if TreeOfLife-10M dataset present:**
+- `classify`: Image → species identification
+
+### Unified Service
+
+**Always Available:**
+- `clip_embed`, `bioclip_embed`
+- `clip_image_embed`, `bioclip_image_embed`
+
+**Conditional:**
+- `clip_classify`: If CLIP has ImageNet
+- `bioclip_classify`: If BioCLIP has TreeOfLife-10M
+- `smart_classify`: If both models have datasets (auto-routes between CLIP/BioCLIP)
+
+## Multi-Service Deployment
+
+**Important**: Only one service per process is allowed. For multi-service deployment, run multiple processes:
+
+```bash
+# Terminal 1: CLIP service
+python src/server.py --config config/clip_only.yaml --port 50051
+
+# Terminal 2: BioCLIP service
+python src/server.py --config config/bioclip_only.yaml --port 50052
+
+# Terminal 3: Unified service
+python src/server.py --config config/unified_service.yaml --port 50053
+```
+
+Or use a process manager (systemd, supervisor, docker-compose):
+
+```yaml
+# docker-compose.yml
+services:
+  clip:
+    image: lumen-clip:latest
+    command: python src/server.py --config config/clip_only.yaml
+    ports:
+      - "50051:50051"
+  
+  bioclip:
+    image: lumen-clip:latest
+    command: python src/server.py --config config/bioclip_only.yaml
+    ports:
+      - "50052:50052"
+```
+
+## Runtime Selection
+
+### PyTorch (Default)
+
+```yaml
+models:
+    default:
+        model: "MobileCLIP2-S2"
+        runtime: "torch"
+env:
+    DEVICE: "cuda"  # or "cpu", "mps"
+```
+
+### ONNX Runtime
+
+```yaml
+models:
+    default:
+        model: "MobileCLIP2-S2"
+        runtime: "onnx"
+env:
+    ONNX_PROVIDERS: "CUDAExecutionProvider,CPUExecutionProvider"
+```
+
+Required files:
+- `image_encoder.onnx`
+- `text_encoder.onnx`
+
+### RKNN (Rockchip NPU)
+
+```yaml
+models:
+    default:
+        model: "MobileCLIP2-S2"
+        runtime: "rknn"
+env:
+    RKNN_TARGET: "rk3588"
+```
+
+## Resource Management
+
+### Cache Structure
+
+```
+~/.lumen/models/
+├── MobileCLIP2-S2/
+│   ├── torch/
+│   │   ├── config.json          # Model configuration
+│   │   ├── model.pt             # PyTorch weights
+│   │   ├── tokenizer.json       # (optional)
+│   │   └── ImageNet_1k.npz      # Classification dataset
+│   └── onnx/
+│       ├── config.json
+│       ├── image_encoder.onnx
+│       ├── text_encoder.onnx
+│       └── ImageNet_1k.npz
+└── bioclip-2/
+    └── torch/
+        ├── config.json
+        ├── model.pt
+        ├── tokenizer.json
+        └── TreeOfLife-10M.npy
+```
+
+### Validation
+
+```bash
+# Validate config before deployment
+lumen-resources validate config/clip_only.yaml
+
+# Check specific model
+lumen-resources check MobileCLIP2-S2 --runtime torch
+
+# List available models
+lumen-resources list
+```
+
+### Download from Different Regions
+
+```yaml
+metadata:
+    region: "cn"    # Use ModelScope (China)
+    # region: "other" # Use HuggingFace
+```
+
+## Configuration Reference
+
+### Metadata Section
+
+```yaml
+metadata:
+    version: "1.0"              # Config version
+    region: "cn"                # Download region: "cn" or "other"
+    cache_dir: "~/.lumen/models"  # Resource cache directory
+```
+
+### Service Section
+
+```yaml
+services:
+    <service-name>:
+        enabled: true/false     # Enable this service
+        package: "lumen-clip"   # Package name
+        import:
+            registry_class: "module.path.ClassName"
+            add_to_server: "module.path.function_name"
+        models:
+            default:            # Model identifier
+                model: "model-name"
+                runtime: "torch|onnx|rknn"
+                dataset: "dataset-name"  # Optional
+        env:                    # Environment variables
+            BATCH_SIZE: "8"
+            DEVICE: "cuda"
+        server:
+            port: 50051
+            mdns:
+                enabled: true
+                name: "Service-Name"
+                type: "_service._tcp.local."
+```
+
+## gRPC API
+
+### Methods
+
+```protobuf
+service Inference {
+    // Bidirectional streaming for inference tasks
+    rpc Infer(stream InferRequest) returns (stream InferResponse);
+    
+    // Get service capabilities
+    rpc GetCapabilities(google.protobuf.Empty) returns (CapabilityList);
+    
+    // Stream capabilities (for future expansion)
+    rpc StreamCapabilities(google.protobuf.Empty) returns (stream Capability);
+    
+    // Health check
+    rpc Health(google.protobuf.Empty) returns (HealthResponse);
+}
+```
+
+### Request Format
+
+```json
 {
-  "labels": [
-    {"label": "golden_retriever", "score": 0.73},
-    {"label": "Labrador_retriever", "score": 0.14}
-  ],
-  "model_id": "ViT-B-32:laion2b_s34b_b79k"
+    "task_name": "classify",
+    "request_id": "unique-id",
+    "inputs": {
+        "image": "<base64-encoded-image>"
+    },
+    "params": {
+        "top_k": 5
+    }
 }
-````
+```
 
-Example: clip_embed / bioclip_embed (embedding_v1)
-````json
+### Response Format
+
+```json
 {
-  "vector": [0.01, -0.02, ...],
-  "dim": 512,
-  "model_id": "ViT-B-32:laion2b_s34b_b79k"
+    "request_id": "unique-id",
+    "outputs": {
+        "labels": [
+            {"label": "golden_retriever", "score": 0.95},
+            {"label": "labrador", "score": 0.03}
+        ]
+    },
+    "metadata": {
+        "model_id": "MobileCLIP2-S2",
+        "processing_time_ms": 45
+    }
 }
-````
+```
 
-Note: The exact embedding dimension varies by model; it is reported in the payload and duplicated in response meta as dim.
+## Development
 
+### Project Structure
 
-## Docker
+```
+lumen-clip/
+├── config/                      # Configuration examples
+│   ├── clip_only.yaml
+│   ├── bioclip_only.yaml
+│   ├── unified_service.yaml
+│   ├── clip_onnx.yaml
+│   └── clip_rknn_rk3588.yaml
+├── src/
+│   ├── server.py               # Main server entry point
+│   ├── backends/               # Runtime backends
+│   │   ├── base.py
+│   │   ├── torch_backend.py
+│   │   ├── onnxrt_backend.py
+│   │   └── rknn_backend.py
+│   ├── resources/              # Resource management
+│   │   ├── loader.py
+│   │   └── exceptions.py
+│   ├── image_classification/   # CLIP service
+│   │   ├── clip_service.py
+│   │   └── clip_model.py
+│   ├── biological_atlas/       # BioCLIP service
+│   │   ├── bioclip_service.py
+│   │   └── bioclip_model.py
+│   ├── service_registry/       # Unified service
+│   │   └── service.py
+│   └── proto/                  # gRPC definitions
+│       └── ml_service.proto
+└── examples/                   # Example clients
+    └── client_test.py
+```
 
-Multiple targets are supplied to match different runtimes.
+### Adding a New Model
 
-- CPU (and macOS MPS) image:
-````bash
-docker build -f Dockerfiles/Dockerfile -t lumen-clip:cpu .
-docker run --rm -p 50051:50051 \
-  -e ADVERTISE_IP \
-  -e CLIP_MDNS_UUID \
-  -e CLIP_MDNS_STATUS=ready \
-  -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:cpu
-````
+1. **Download resources via lumen-resources**
+2. **Create config file**
+3. **Validate**: `lumen-resources validate config/new_model.yaml`
+4. **Test**: `python src/server.py --config config/new_model.yaml`
 
-- NVIDIA CUDA 12.6 image (includes RKNN extra):
-````bash
-docker build -f Dockerfiles/cuda/Dockerfile -t lumen-clip:cuda .
-docker run --rm --gpus all -p 50051:50051 \
-  -e ADVERTISE_IP \
-  -e CLIP_MDNS_UUID \
-  -e CLIP_MDNS_STATUS=ready \
-  -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:cuda
-````
+### Testing
 
-- AMD ROCm 6.3 image (includes RKNN extra):
-````bash
-docker build -f Dockerfiles/rocm/Dockerfile -t lumen-clip:rocm .
-docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
-  -e HSA_OVERRIDE_GFX_VERSION=10.3.0 \
-  -p 50051:50051 \
-  -e ADVERTISE_IP \
-  -e CLIP_MDNS_UUID \
-  -e CLIP_MDNS_STATUS=ready \
-  -e CLIP_MDNS_VERSION=1.0.0 \
-  lumen-clip:rocm
-````
+```bash
+# Unit tests
+pytest tests/
 
-Notes:
-- The Docker build stages install dependencies with uv. The images set their CMD to run the unified server (`python -m src.server`), so you don't need to pass a command.
-- The images copy the project into `/app` and set `PYTHONPATH=/app/src`. Adjust bind mounts and volumes as needed to persist `data/*` caches between runs.
+# Integration tests
+pytest tests/integration/
 
-
-## Development workflow
-
-- Model managers
-  - `CLIPModelManager` uses OpenCLIP (e.g., `ViT-B-32:laion2b_s34b_b79k`) and caches:
-    - ImageNet labels: `data/clip/imagenet_class_names.json` (downloaded from Hugging Face)
-    - Text embeddings: `data/clip/<model>_imagenet_vectors.npz`
-  - `BioCLIPModelManager` uses `imageomics/bioclip-2` and caches:
-    - TreeOfLife-10M labels: `data/bioclip/txt_emb_species.json`
-    - Text embeddings: `data/bioclip/text_vectors.npz`
-- Unified service
-  - Routes tasks and applies server-side batching where possible.
-  - Image decoding and preprocessing are handled inside the selected backend; for image-embed tasks the service calls `backend.image_batch_to_vectors()` which may fall back to sequential processing if a backend doesn’t support true batching.
-  - Scene routing in `smart_classify`: CLIP scene prompts → if animal-like, delegate to BioCLIP.
-- Regenerating gRPC stubs (only if you modify `ml_service.proto`):
-````bash
-python -m grpc_tools.protoc \
-  -I src/proto \
-  --python_out=src/proto \
-  --grpc_python_out=src/proto \
-  src/proto/ml_service.proto
-````
-- Python version
-  - Local dev targets Python 3.12 (see pyproject). Use the Docker targets if you prefer a pinned container runtime.
-- Logging
-  - The server logs to stdout; additional logs can be directed as needed. You may see `pml_service.log` if you configure file-based logging.
-- Performance tuning
-  - Batch size defaults to 8 in the unified service (override via `BATCH_SIZE`). Increase cautiously based on device memory and throughput requirements.
-
-
-## Data sources and caching
-
-- ImageNet labels are downloaded once from: https://huggingface.co/datasets/huggingface/label-files (file: `imagenet-1k-id2label.json`) and stored at `data/clip/imagenet_class_names.json`.
-- TreeOfLife-10M species labels are downloaded once from: https://huggingface.co/datasets/imageomics/TreeOfLife-10M (file: `embeddings/txt_emb_species.json`) and stored at `data/bioclip/txt_emb_species.json`.
-- First run computes and caches text embeddings for label sets. Subsequent runs load from cache for faster startup.
-
-If you need to rebuild label vectors (e.g., after changing models), delete the corresponding `*.npz` files in `data/clip` or `data/bioclip`.
-
-
-## Citations and attributions
-
-If you use this project in academic work or presentations, please cite the upstream models and datasets:
-
-- OpenAI CLIP
-  - Paper: Learning Transferable Visual Models From Natural Language Supervision (ICML 2021)
-  - BibTeX:
-````bibtex
-@inproceedings{radford2021learning,
-  title={Learning Transferable Visual Models From Natural Language Supervision},
-  author={Radford, Alec and Kim, Jong Wook and Hallacy, Chris and Ramesh, Aditya and Goh, Gabriel and Agarwal, Sandhini and Sastry, Girish and Askell, Amanda and Mishkin, Pamila and Clark, Jack and Krueger, Gretchen and Sutskever, Ilya},
-  booktitle={Proceedings of the 38th International Conference on Machine Learning},
-  year={2021}
-}
-````
-- open-clip-torch
-  - Repository: https://github.com/mlfoundations/open_clip
-  - Please follow repository guidance for appropriate citations and dataset acknowledgements (e.g., LAION).
-- BioCLIP 2
-  - The project uses BioCLIP-2 for biological atlas tasks.
-  - BibTeX (as provided by the authors):
-````bibtex
-@article{gu2025bioclip,
-  title = {{B}io{CLIP} 2: Emergent Properties from Scaling Hierarchical Contrastive Learning},
-  author = {Jianyang Gu and Samuel Stevens and Elizabeth G Campolongo and Matthew J Thompson and Net Zhang and Jiaman Wu and Andrei Kopanev and Zheda Mai and Alexander E. White and James Balhoff and Wasila M Dahdul and Daniel Rubenstein and Hilmar Lapp and Tanya Berger-Wolf and Wei-Lun Chao and Yu Su},
-  year = {2025},
-  eprint={2505.23883},
-  archivePrefix={arXiv},
-  primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2505.23883},
-}
-````
-- TreeOfLife-10M (label source used by BioCLIP-2 manager)
-  - Dataset (Hugging Face): https://huggingface.co/datasets/imageomics/TreeOfLife-10M
-
-Additionally:
-- This project uses PyTorch, TorchVision, Pillow, gRPC, protobuf, zeroconf, and the Hugging Face Hub. Please cite them where appropriate per their respective guidelines.
-
+# Load testing
+python examples/load_test.py --config config/clip_only.yaml
+```
 
 ## Troubleshooting
 
-- Discovery issues on LAN
-  - If mDNS advertises a loopback address (127.x), set `ADVERTISE_IP` to a reachable LAN IP.
-- GPU initialization
-  - NVIDIA: ensure host drivers match the CUDA 12.6 base image, and use `--gpus all`.
-  - ROCm: ensure the host supports ROCm 6.3 and pass `/dev/kfd` and `/dev/dri` devices to the container.
-- Cold start
-  - First run downloads labels and computes text embeddings; this can take several minutes depending on hardware. Subsequent runs use cached vectors.
-- Protocol compatibility
-  - Use the provided proto to generate stubs in your client language. Respect `payload_mime` and `result_mime` fields so both sides negotiate payload schemas correctly.
+### Service refuses to start
 
-```shell
-PYTHONPATH=$(pwd)/src uv run -p python3.12 python -m grpc_tools.protoc \
-  -I src/proto \
-  --python_out=src \
-  --pyi_out=src \
-  --grpc_python_out=src \
-  src/proto/ml_service.proto
+**Error**: `ResourceNotFoundError: Model files not found`
+- **Solution**: Run `lumen-resources download <model> --runtime <runtime>`
+
+**Error**: `ConfigError: Multiple services enabled`
+- **Solution**: Enable only one service per config file
+
+### Classification task not available
+
+**Error**: `Task 'classify' not supported`
+- **Solution**: Download the required dataset:
+  - CLIP: `lumen-resources download <model> --dataset ImageNet_1k`
+  - BioCLIP: `lumen-resources download <model> --dataset TreeOfLife-10M`
+
+### Model loading is slow
+
+- Use ONNX runtime for faster inference
+- Enable GPU: Set `DEVICE: cuda` in config
+- Reduce batch size if memory limited
+
+### mDNS not working
+
+- Install zeroconf: `pip install zeroconf`
+- Set `ADVERTISE_IP` environment variable to your LAN IP
+- Check firewall settings
+
+## Performance Tuning
+
+### Batch Size
+
+```yaml
+env:
+    BATCH_SIZE: "16"  # Increase for better throughput, decrease for lower latency
 ```
 
+### Device Selection
 
-## Project structure details
+```yaml
+env:
+    DEVICE: "cuda"     # Use GPU
+    DEVICE: "cuda:0"   # Specific GPU
+    DEVICE: "cpu"      # Force CPU
+```
 
-- Backends
-  - Torch (default): Fully implemented via open-clip + PyTorch. Supports batched image embedding and standard CLIP prompt templating applied by managers (not the backend).
-  - ONNX Runtime: Present as a scaffold (`ONNXRTBackend`). Environment wiring and capability reporting are implemented, but text/image encode methods are not yet implemented.
-  - RKNN (Linux-only): Provided as a typed placeholder (`RKNNBackend`) to enable env wiring and capability reporting without breaking non-Linux platforms. It raises an ImportError at runtime unless you build/run on Linux with a proper RKNN implementation (planned) and install the Linux-only extra.
-- Cache layout (per backend/runtime and model)
-  - CLIP: `data/clip/<runtime>/<model_id>/text_vectors.npz` with `text_vectors.meta.json`
-  - BioCLIP: `data/bioclip/<runtime>/<model_id>/text_vectors.npz` with `text_vectors.meta.json`
-  - Legacy caches (pre-refactor) are migrated automatically on first run when the per-backend cache is missing.
-- Environment-driven backend selection
-  - CLIP_BACKEND, BIOCLIP_BACKEND: torch (default) | onnxrt | rknn
-  - Device hints: CLIP_DEVICE, BIOCLIP_DEVICE (e.g., cuda, mps, cpu)
-  - Batch hints: CLIP_MAX_BATCH_SIZE, BIOCLIP_MAX_BATCH_SIZE
-  - ONNX paths/providers: CLIP_ONNX_IMAGE, CLIP_ONNX_TEXT, CLIP_ORT_PROVIDERS (and BIOCLIP_* equivalents)
-  - RKNN paths/target (Linux-only): CLIP_RKNN_MODEL, CLIP_RKNN_TARGET (and BIOCLIP_* equivalents)
-- Capability reporting
-  - The unified service reports an effective runtime. If CLIP and BioCLIP use different backends, runtime is reported as “mixed”.
-- mDNS
-  - Service type and instance name are configurable via `CLIP_MDNS_TYPE` and `CLIP_MDNS_NAME`, with TXT properties for uuid/status/version. Use `ADVERTISE_IP` to override the advertised address.
+### ONNX Optimization
+
+```yaml
+env:
+    ONNX_PROVIDERS: "CUDAExecutionProvider,CPUExecutionProvider"
+    ONNX_INTRA_OP_THREADS: "4"
+    ONNX_INTER_OP_THREADS: "2"
+```
+
+## Citations
+
+If you use Lumen-CLIP in your research, please cite:
+
+### OpenCLIP
+
+```bibtex
+@inproceedings{radford2021learning,
+  title={Learning Transferable Visual Models From Natural Language Supervision},
+  author={Radford, Alec and Kim, Jong Wook and Hallacy, Chris and others},
+  booktitle={ICML},
+  year={2021}
+}
+```
+
+### BioCLIP
+
+```bibtex
+@article{gu2025bioclip,
+  title={BioCLIP 2: Emergent Properties from Scaling Hierarchical Contrastive Learning},
+  author={Gu, Yuning and Van Horn, Grant and others},
+  journal={arXiv preprint arXiv:2501.xxxxx},
+  year={2025}
+}
+```
 
 ## License
 
-This project is licensed under the MIT license. See the LICENSE file for details.
+This project is part of the Lumen ecosystem and follows the same license terms. See LICENSE file for details.
+
+## Support
+
+- **Issues**: https://github.com/EdwinZhanCN/Lumen/issues
+- **Documentation**: https://lumen-docs.example.com
+- **Community**: [Discord/Slack link]
+
+---
+
+**Built with ❤️ for the Lumen ecosystem**

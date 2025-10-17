@@ -1,0 +1,47 @@
+# 场景 3: 启用统一 CLIP 服务（CLIP + BioCLIP）
+# 用途: 需要智能分类（smart_classify）功能，自动选择最佳模型
+# 内存占用: 高（同时加载两个模型）
+
+metadata:
+    version: "1.0"
+    region: "cn" # "other" 使用 HuggingFace, "cn" 使用 ModelScope
+    cache_dir: "~/.lumen/models"
+
+# 可选: Python 包依赖（如果需要自动安装）
+dependencies:
+    - "lumen-clip @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-clip"
+
+services:
+    clip-unified:
+        enabled: true
+        package: "lumen-clip"
+        import:
+            registry_class: "service_registry.service.UnifiedCLIPService"
+            add_to_server: "ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        models:
+            clip_default:
+                model: "MobileCLIP2-S2"
+                runtime: "torch"
+            bioclip_default:
+                model: "bioclip-2"
+                runtime: "torch"
+                dataset: "TreeOfLife-10M" # BioCLIP 专用数据集
+        default_model: "clip_default"
+        env:
+            # 可选的环境变量配置
+            BATCH_SIZE: "8"
+        server:
+            port: 50053
+            mdns:
+                enabled: true
+                name: "Unified-CLIP-Service"
+                type: "_lumen-unified._tcp.local."
+# Hub 模式配置（可选）
+# hub:
+#   enabled: true
+#   server:
+#     port: 50050
+#     mdns:
+#       enabled: true
+#       name: "Lumen-AI-Hub"
+#       type: "_lumen-hub._tcp.local."
