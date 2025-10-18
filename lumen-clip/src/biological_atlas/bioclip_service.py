@@ -61,7 +61,7 @@ class BioClipService(rpc.InferenceServicer):
             ResourceNotFoundError: If required resources are missing
             ConfigError: If configuration is invalid
         """
-        from resources.exceptions import ResourceNotFoundError, ConfigError
+        from resources.exceptions import ConfigError
 
         # Get model configuration
         if "models" not in config or "default" not in config["models"]:

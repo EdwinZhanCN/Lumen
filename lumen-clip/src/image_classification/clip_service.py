@@ -69,7 +69,7 @@ class CLIPService(rpc.InferenceServicer):
             ResourceNotFoundError: If required resources are missing
             ConfigError: If configuration is invalid
         """
-        from resources.exceptions import ResourceNotFoundError, ConfigError
+        from resources.exceptions import ConfigError
 
         # Get model configuration
         if "models" not in config or "default" not in config["models"]:
@@ -126,11 +126,10 @@ class CLIPService(rpc.InferenceServicer):
         self.is_initialized = True
         info = self.model.info()
         logger.info(
-            "CLIP model ready: %s (%s) on %s (loaded in %.2fs)",
+            "CLIP model ready: %s with %s (loaded in %.2fs)",
             info.get("model_name"),
-            info.get("pretrained"),
-            info.get("device"),
-            info.get("load_time_seconds"),
+            info.get("backend_info", {}) or "unknown",
+            info.get("load_time", 0.0),
         )
 
     # -------- gRPC Service Methods ----------

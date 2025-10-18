@@ -106,7 +106,7 @@ class TorchBackend(BaseClipBackend):
         self._load_time_seconds: float | None = None
 
         # Mixed precision settings
-        self._use_amp: bool = self._device.type in ("cuda", "mps")
+        self._use_amp: bool = self._device.type in ("cuda")
         self._amp_dtype: torch.dtype = torch.float16
         self._current_precision: str = "fp32"  # Will be updated after init
 
@@ -170,6 +170,7 @@ class TorchBackend(BaseClipBackend):
                 f"✅ TorchBackend initialized in {self._load_time_seconds:.2f}s"
             )
             logger.info(f"   Precision: {self._current_precision}")
+            logger.info(f"   Device: {self._device}")
 
         except ImportError as e:
             raise TorchModelLoadingError(f"Required dependencies not found: {e}") from e

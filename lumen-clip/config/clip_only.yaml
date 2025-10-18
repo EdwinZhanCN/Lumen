@@ -5,7 +5,7 @@
 metadata:
     version: "1.0"
     region: "cn" # "other" 使用 HuggingFace, "cn" 使用 ModelScope
-    cache_dir: "~/.lumen/models"
+    cache_dir: "~/.lumen"
 
 # 可选: Python 包依赖（如果需要自动安装）
 dependencies:
@@ -22,6 +22,7 @@ services:
             default:
                 model: "MobileCLIP2-S2"
                 runtime: "torch"
+                dataset: "ImageNet_1k"
         default_model: "default"
         env:
             # 可选的环境变量配置

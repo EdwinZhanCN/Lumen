@@ -32,6 +32,8 @@ from pathlib import Path
 
 from resources import ModelResources
 
+from
+
 try:
     import onnxruntime as ort
 except ImportError:
@@ -219,7 +221,7 @@ class ONNXRTBackend(BaseClipBackend):
         # If still not found, check if there's an fp16 variant as last resort
         fp16_path = runtime_dir / f"{model_type}.fp16.onnx"
         if fp16_path.exists():
-            logger.warning(f"Only FP16 model found, using it despite CPU preference")
+            logger.warning("Only FP16 model found, using it despite CPU preference")
             return fp16_path, "fp16"
 
         raise ONNXRTModelLoadingError(

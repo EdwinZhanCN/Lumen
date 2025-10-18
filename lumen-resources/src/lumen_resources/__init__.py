@@ -1,24 +1,29 @@
 """
 Lumen Resources - Unified Model Resource Management
 
-A simple, configuration-driven tool for downloading and managing ML model resources
-from HuggingFace and ModelScope platforms.
+Configuration-driven tool for managing ML model resources with production-grade
+YAML configuration, JSON Schema validation, and Pydantic models.
 
 Usage:
-    from lumen_resources import ResourceConfig, Downloader
+    from lumen_resources.validator import load_and_validate_config
+    from lumen_resources.downloader import Downloader
 
-    config = ResourceConfig.from_json(Path("config.json"))
-    downloader = Downloader(config)
+    # Load and validate configuration
+    config = load_and_validate_config("config.yaml")
+
+    # Download models
+    downloader = Downloader(config, verbose=True)
     results = downloader.download_all()
 
+    # Check results
     for model_type, result in results.items():
         if result.success:
-            print(f"✅ {model_type}: {result.model_path}")
+            print(f"Downloaded: {model_type} to {result.model_path}")
         else:
-            print(f"❌ {model_type}: {result.error}")
+            print(f"Failed: {model_type} - {result.error}")
 """
 
-from .config import ResourceConfig, ModelConfig, RuntimeType, PlatformType
+from .lumen_config import LumenServicesConfiguration, Runtime, Region
 from .downloader import Downloader, DownloadResult
 from .exceptions import (
     ResourceError,
@@ -28,15 +33,25 @@ from .exceptions import (
     ValidationError,
     ModelInfoError,
 )
+from .lumen_config_validator import load_and_validate_config
+
+from .model_info import ModelInfo, Source, Runtimes, Metadata
+from .model_info_validator import load_and_validate_model_info
 
 __version__ = "0.1.0"
 
 __all__ = [
-    # Config
-    "ResourceConfig",
-    "ModelConfig",
-    "RuntimeType",
-    "PlatformType",
+    # Configuration
+    "LumenServicesConfiguration",
+    "Runtime",
+    "Region",
+    "load_and_validate_config",
+    # Model Info
+    "ModelInfo",
+    "Source",
+    "Runtimes",
+    "Metadata",
+    "load_and_validate_model_info",
     # Downloader
     "Downloader",
     "DownloadResult",

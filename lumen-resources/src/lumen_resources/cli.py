@@ -8,7 +8,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import ResourceConfig, Downloader, ResourceError
+from .downloader import Downloader, DownloadResult
+from .lumen_config_validator import ConfigValidator, load_and_validate_config
+from .model_info_validator import (
+    ModelInfoValidator,
+    load_and_validate_model_info,
+)
 
 
 def print_banner():
@@ -18,7 +23,7 @@ def print_banner():
     print("=" * 60)
 
 
-def print_summary(results: dict):
+def print_summary(results: dict[str, DownloadResult]) -> None:
     """Print download summary."""
     print("\n" + "=" * 60)
     print("📊 Download Summary")
@@ -42,18 +47,25 @@ def print_summary(results: dict):
     print("=" * 60)
 
 
-def cmd_download(args):
+def cmd_download(args: argparse.Namespace) -> None:
     """Handle download command."""
     config_path = Path(args.config)
 
     try:
-        # Parse configuration
-        print("📋 Parsing configuration...")
-        config = ResourceConfig.from_yaml(config_path)
+        # Load and validate configuration
+        print("📋 Loading configuration...")
+        config = load_and_validate_config(config_path)
 
-        print(f"🌍 Platform: {config.platform_type.value}")
-        print(f"📁 Cache directory: {config.cache_dir}")
-        print(f"🎯 Enabled models: {', '.join(config.models.keys())}")
+        print(f"🌍 Region: {config.metadata.region.value}")
+        print(f"📁 Cache directory: {config.metadata.cache_dir}")
+
+        # Count enabled models
+        enabled_models = []
+        for service_name, service_config in config.services.items():
+            if service_config.enabled:
+                for alias in service_config.models.keys():
+                    enabled_models.append(f"{service_name}:{alias}")
+        print(f"🎯 Enabled models: {', '.join(enabled_models)}")
 
         # Download resources
         print("\n🚀 Starting download...")
@@ -67,39 +79,137 @@ def cmd_download(args):
         if not all(r.success for r in results.values()):
             sys.exit(1)
 
-    except ResourceError as e:
+    except Exception as e:
         print(f"\n❌ Error: {e}")
         sys.exit(1)
 
 
-def cmd_validate(args):
+def cmd_validate(args: argparse.Namespace) -> None:
     """Handle validate command."""
     config_path = Path(args.config)
 
     try:
         print("📋 Validating configuration...")
-        config = ResourceConfig.from_yaml(config_path)
+
+        # Use new Pydantic-based validator
+        validator = ConfigValidator()
+        is_valid, errors = validator.validate_file(config_path, strict=args.strict)
+
+        if not is_valid:
+            print("❌ Validation failed:\n")
+            for error in errors:
+                print(f"  • {error}")
+            sys.exit(1)
+
+        # Load the validated config
+        config = load_and_validate_config(config_path)
 
         print("✅ Configuration is valid!")
-        print(f"\n🌍 Platform: {config.platform_type.value}")
-        print(f"📁 Cache directory: {config.cache_dir}")
-        print(f"\n📦 Configured models:")
+        print(f"\n🌍 Region: {config.metadata.region.value}")
+        print(f"📁 Cache directory: {config.metadata.cache_dir}")
+        print(f"🚀 Deployment mode: {config.deployment.mode}")
 
-        for model_type, model_config in config.models.items():
-            print(f"  • {model_type.upper()}")
-            print(f"    Model: {model_config.model}")
-            print(f"    Runtime: {model_config.runtime.value}")
-            if model_config.rknn_device:
-                print(f"    Device: {model_config.rknn_device}")
-            if model_config.dataset:
-                print(f"    Dataset: {model_config.dataset}")
+        if config.deployment.mode == "single":
+            print(f"   Service: {config.deployment.service}")
+        else:
+            services_list = [s.root for s in (config.deployment.services or [])]
+            print(f"   Services: {', '.join(services_list)}")
 
-    except ResourceError as e:
+        print("\n🌐 Server:")
+        print(f"   Port: {config.server.port}")
+        print(f"   Host: {config.server.host}")
+        if config.server.mdns and config.server.mdns.enabled:
+            print(f"   mDNS: {config.server.mdns.service_name}")
+
+        print("\n📦 Services:")
+        for service_name, service_config in config.services.items():
+            status = "✅ enabled" if service_config.enabled else "⚪ disabled"
+            print(f"  • {service_name} ({status})")
+            if service_config.enabled:
+                print(f"    Package: {service_config.package}")
+                print(f"    Models: {', '.join(service_config.models.keys())}")
+                for alias, model in service_config.models.items():
+                    print(f"      - {alias}: {model.model} ({model.runtime.value})")
+                    if model.dataset:
+                        print(f"        Dataset: {model.dataset}")
+
+    except Exception as e:
         print(f"❌ Validation failed: {e}")
         sys.exit(1)
 
 
-def cmd_list(args):
+def cmd_validate_model_info(args: argparse.Namespace) -> None:
+    """Handle validate-model-info command."""
+    model_info_path = Path(args.model_info)
+
+    try:
+        print("📋 Validating model_info.json...")
+
+        # Use ModelInfoValidator
+        validator = ModelInfoValidator()
+        is_valid, _, errors = validator.validate_file(
+            model_info_path, strict=args.strict
+        )
+
+        if not is_valid:
+            print("❌ Validation failed:\n")
+            for error in errors:
+                print(f"  • {error}")
+            sys.exit(1)
+
+        # Load the validated model info
+        model_info = load_and_validate_model_info(model_info_path, strict=True)
+
+        print("✅ Model info is valid!")
+        print(f"\n📦 Model: {model_info.name}")
+        print(f"   Version: {model_info.version}")
+        print(f"   Type: {model_info.model_type}")
+        print(f"   Embedding dimension: {model_info.embedding_dim}")
+
+        print("\n📥 Source:")
+        print(f"   Format: {model_info.source.format.value}")
+        print(f"   Repository: {model_info.source.repo_id}")
+
+        print("\n🔧 Runtimes:")
+        for runtime_name, runtime_config in model_info.runtimes.items():
+            status = "✅ available" if runtime_config.available else "⚪ not available"
+            print(f"  • {runtime_name} ({status})")
+            if runtime_config.available and runtime_config.files:
+                if isinstance(runtime_config.files, list):
+                    print(f"    Files: {len(runtime_config.files)} file(s)")
+                else:
+                    total_files = sum(
+                        len(files) for files in runtime_config.files.values()
+                    )
+                    devices_count = len(runtime_config.files)
+                    print(
+                        f"    Files: {total_files} file(s) across {devices_count} device(s)"
+                    )
+            if runtime_config.devices:
+                print(f"    Devices: {', '.join(runtime_config.devices)}")
+
+        if model_info.datasets:
+            print("\n📊 Datasets:")
+            for dataset_name, dataset_file in model_info.datasets.items():
+                print(f"  • {dataset_name}: {dataset_file}")
+
+        if model_info.metadata:
+            print("\n📝 Metadata:")
+            if model_info.metadata.license:
+                print(f"   License: {model_info.metadata.license}")
+            if model_info.metadata.author:
+                print(f"   Author: {model_info.metadata.author}")
+            if model_info.metadata.created_at:
+                print(f"   Created: {model_info.metadata.created_at}")
+            if model_info.metadata.tags:
+                print(f"   Tags: {', '.join(model_info.metadata.tags)}")
+
+    except Exception as e:
+        print(f"❌ Validation failed: {e}")
+        sys.exit(1)
+
+
+def cmd_list(args: argparse.Namespace) -> None:
     """Handle list command."""
     cache_dir = Path(args.cache_dir).expanduser()
     models_dir = cache_dir / "models"
@@ -146,7 +256,7 @@ def cmd_list(args):
         print()
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="lumen-resources",
@@ -160,8 +270,8 @@ def main():
     download_parser = subparsers.add_parser(
         "download", help="Download model resources from configuration"
     )
-    download_parser.add_argument("config", help="Path to configuration YAML file")
-    download_parser.add_argument(
+    _ = download_parser.add_argument("config", help="Path to configuration YAML file")
+    _ = download_parser.add_argument(
         "--force", action="store_true", help="Force re-download even if cached"
     )
     download_parser.set_defaults(func=cmd_download)
@@ -170,17 +280,50 @@ def main():
     validate_parser = subparsers.add_parser(
         "validate", help="Validate configuration file"
     )
-    validate_parser.add_argument("config", help="Path to configuration YAML file")
+    _ = validate_parser.add_argument("config", help="Path to configuration YAML file")
+    _ = validate_parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=True,
+        help="Use strict Pydantic validation (default: True)",
+    )
+    _ = validate_parser.add_argument(
+        "--schema-only",
+        action="store_false",
+        dest="strict",
+        help="Use JSON Schema validation only (less strict)",
+    )
     validate_parser.set_defaults(func=cmd_validate)
+
+    # Validate model info command
+    validate_model_parser = subparsers.add_parser(
+        "validate-model-info", help="Validate model_info.json file"
+    )
+    _ = validate_model_parser.add_argument(
+        "model_info", help="Path to model_info.json file"
+    )
+    _ = validate_model_parser.add_argument(
+        "--strict",
+        action="store_true",
+        default=True,
+        help="Use strict Pydantic validation (default: True)",
+    )
+    _ = validate_model_parser.add_argument(
+        "--schema-only",
+        action="store_false",
+        dest="strict",
+        help="Use JSON Schema validation only (less strict)",
+    )
+    validate_model_parser.set_defaults(func=cmd_validate_model_info)
 
     # List command
     list_parser = subparsers.add_parser("list", help="List cached models")
-    list_parser.add_argument(
+    _ = list_parser.add_argument(
         "cache_dir", nargs="?", default="~/.lumen/", help="Cache directory path"
     )
     list_parser.set_defaults(func=cmd_list)
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     if not args.command:
         parser.print_help()

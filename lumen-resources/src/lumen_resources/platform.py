@@ -20,11 +20,18 @@ Features:
 """
 
 import shutil
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from .config import PlatformType
 from .exceptions import DownloadError, PlatformUnavailableError
+
+
+class PlatformType(str, Enum):
+    """Supported platforms."""
+
+    HUGGINGFACE = "huggingface"
+    MODELSCOPE = "modelscope"
 
 
 class Platform:
@@ -118,6 +125,8 @@ class Platform:
                 return self._download_from_modelscope(
                     repo_id, cache_dir, allow_patterns, force
                 )
+            else:
+                raise DownloadError(f"Unsupported platform type: {self.platform_type}")
         except Exception as e:
             raise DownloadError(f"Failed to download {repo_id}: {e}") from e
 

@@ -40,12 +40,12 @@ htmlcov/
 .nox/
 
 # IDEs
-.vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+.vscode/
 
 # Project specific
 .cache/
@@ -60,6 +60,5 @@ models/
 *.bak
 *.log
 
-# UV
+# UV - keep lock file for reproducible builds
 .uv/
-uv.lock

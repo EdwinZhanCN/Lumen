@@ -30,7 +30,7 @@ pip install zeroconf
 Use `lumen-resources` to download models and datasets:
 
 ```bash
-# Download CLIP model (MobileCLIP2-S2) with ImageNet dataset
+# Download (MobileCLIP2-S2) with ImageNet dataset
 lumen-resources download MobileCLIP2-S2 --runtime torch --dataset ImageNet_1k --region cn
 
 # Or download BioCLIP with TreeOfLife dataset
@@ -119,7 +119,7 @@ def test_embed():
         payload=b"a photo of a golden retriever",
         payload_mime="text/plain",
     )
-    
+
     responses = stub.Infer(iter([request]))
     for response in responses:
         if response.is_final:
@@ -132,7 +132,7 @@ def test_classify():
     image_path = "path/to/your/image.jpg"
     with open(image_path, 'rb') as f:
         image_bytes = f.read()
-    
+
     request = pb.InferRequest(
         correlation_id="test-2",
         task="classify",
@@ -140,7 +140,7 @@ def test_classify():
         payload_mime="image/jpeg",
         meta={"topk": "5"},
     )
-    
+
     responses = stub.Infer(iter([request]))
     for response in responses:
         if response.is_final:

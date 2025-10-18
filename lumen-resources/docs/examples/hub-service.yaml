@@ -1,0 +1,69 @@
+# Lumen Services Configuration - Hub Mode
+# yaml-language-server: $schema=../config-schema.yaml
+
+metadata:
+    version: "1.0.0"
+    region: "other" # "cn" for ModelScope, "other" for HuggingFace
+    cache_dir: "/opt/lumen/models"
+
+deployment:
+    mode: "hub"
+    services: ["clip", "face"]
+
+server:
+    port: 50051
+    host: "0.0.0.0"
+    mdns:
+        enabled: true
+        service_name: "lumen-hub"
+
+services:
+    # CLIP Service
+    clip:
+        enabled: true
+        package: "lumen_clip"
+        import:
+            registry_class: "lumen_clip.service_registry.ClipService"
+            add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+
+        models:
+            # Default general-purpose CLIP model
+            default:
+                model: "ViT-B-32"
+                runtime: "torch"
+                dataset: "ImageNet_1k"
+
+            # Mobile-optimized model
+            mobile:
+                model: "MobileCLIP-S2"
+                runtime: "onnx"
+
+    # Face Recognition Service
+    face:
+        enabled: true
+        package: "lumen_face"
+        import:
+            registry_class: "lumen_face.service_registry.FaceService"
+            add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_FaceServicer_to_server"
+
+        models:
+            default:
+                model: "FaceNet-512"
+                runtime: "onnx"
+
+            mobile:
+                model: "MobileFaceNet"
+                runtime: "onnx"
+
+    # OCR Service (disabled, but configured)
+    ocr:
+        enabled: false
+        package: "lumen_ocr"
+        import:
+            registry_class: "lumen_ocr.service_registry.OcrService"
+            add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_OcrServicer_to_server"
+
+        models:
+            default:
+                model: "PaddleOCR-v4"
+                runtime: "onnx"

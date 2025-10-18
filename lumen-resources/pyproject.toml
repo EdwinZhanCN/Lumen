@@ -13,10 +13,23 @@ authors = [
     { name = "Lumilio Photos", email = "modelscope@lumilio.org" }
 ]
 
-dependencies = ["huggingface_hub>=0.20.0", "modelscope>=1.11.0"]
+dependencies = [
+    "huggingface_hub>=0.20.0",
+    "modelscope>=1.11.0",
+    "pydantic>=2.0.0",
+    "jsonschema>=4.0.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "black>=23.0.0", "ruff>=0.1.0"]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "datamodel-code-generator[http]>=0.25.0",
+    "pre-commit>=3.0.0",
+]
+config = ["pyyaml>=6.0.0"]
 
 [project.scripts]
 lumen-resources = "lumen_resources.cli:main"
