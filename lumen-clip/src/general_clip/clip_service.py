@@ -24,6 +24,7 @@ import ml_service_pb2_grpc as rpc
 from backends import TorchBackend, ONNXRTBackend
 from resources.loader import ModelResources, ResourceLoader
 from .clip_model import CLIPModelManager
+from lumen_resources.lumen_config import ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-class CLIPService(rpc.InferenceServicer):
+class GeneralCLIPService(rpc.InferenceServicer):
     """
     Implements the streaming Inference service contract for a general-purpose
     OpenCLIP model, offering text embedding, ImageNet classification, and
@@ -54,55 +55,40 @@ class CLIPService(rpc.InferenceServicer):
         self.is_initialized = False
 
     @classmethod
-    def from_config(cls, config: dict, cache_dir: Path):
+    def from_config(cls, model_config: ModelConfig, cache_dir: Path):
         """
-        Create CLIPService from configuration.
+        Create GeneralCLIPService from configuration.
 
         Args:
-            config: Service configuration dict
-            cache_dir: Cache directory path
+            model_config: The specific model's configuration from lumen_config.
+            cache_dir: Cache directory path.
 
         Returns:
-            Initialized CLIPService instance
-
-        Raises:
-            ResourceNotFoundError: If required resources are missing
-            ConfigError: If configuration is invalid
+            Initialized GeneralCLIPService instance.
         """
         from resources.exceptions import ConfigError
+        import os
 
-        # Get model configuration
-        if "models" not in config or "default" not in config["models"]:
-            raise ConfigError("CLIP service requires 'models.default' configuration")
-
-        model_cfg = config["models"]["default"]
-
-        # Load resources
-        logger.info(f"Loading resources for CLIP model: {model_cfg['model']}")
-        resources = ResourceLoader.load_model_resources(
-            cache_dir=cache_dir,
-            model_name=model_cfg["model"],
-            runtime=model_cfg["runtime"],
-        )
+        # Load resources using the validated model_config
+        logger.info(f"Loading resources for General CLIP model: {model_config.model}")
+        resources = ResourceLoader.load_model_resources(cache_dir, model_config)
 
         # Create backend based on runtime
-        runtime = model_cfg["runtime"]
+        runtime = model_config.runtime.value
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
-                device_preference=config.get("env", {}).get("DEVICE"),
-                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+                device_preference=os.getenv("DEVICE"),
+                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
             )
         elif runtime == "onnx":
-            providers = config.get("env", {}).get(
-                "ONNX_PROVIDERS", "CPUExecutionProvider"
-            )
+            providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
             providers_list = [p.strip() for p in providers.split(",")]
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
-                device_preference=config.get("env", {}).get("DEVICE"),
-                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+                device_preference=os.getenv("DEVICE"),
+                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")

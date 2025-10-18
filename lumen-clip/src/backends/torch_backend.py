@@ -184,7 +184,7 @@ class TorchBackend(BaseClipBackend):
                 # Try to use HuggingFace tokenizers
                 from tokenizers import Tokenizer as HFTokenizer
 
-                tokenizer_path = self.resources.model_path / "tokenizer.json"
+                tokenizer_path = self.resources.model_root_path / "tokenizer.json"
                 hf_tokenizer = HFTokenizer.from_file(str(tokenizer_path))
 
                 logger.info("Using custom tokenizer from tokenizer.json")
@@ -453,7 +453,7 @@ class TorchBackend(BaseClipBackend):
             extra={
                 "library": "open-clip-torch",
                 "image_size": image_size_str,
-                "config_path": str(self.resources.model_path / "config.json"),
+                "config_path": str(self.resources.model_root_path / "config.json"),
             },
         )
 

@@ -10,6 +10,6 @@ Modules:
 """
 
 from .clip_model import CLIPModelManager
-from .clip_service import CLIPService
+from .clip_service import GeneralCLIPService
 
-__all__ = ["CLIPModelManager", "CLIPService"]
+__all__ = ["CLIPModelManager", "GeneralCLIPService"]

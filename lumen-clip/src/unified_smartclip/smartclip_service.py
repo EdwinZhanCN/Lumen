@@ -28,13 +28,14 @@ from backends import TorchBackend, ONNXRTBackend
 # Import the service definition and model managers
 import ml_service_pb2 as pb
 import ml_service_pb2_grpc as rpc
-from biological_atlas import BioCLIPModelManager
-from image_classification import CLIPModelManager
+from expert_bioclip import BioCLIPModelManager
+from general_clip import CLIPModelManager
 from resources.loader import ModelResources, ResourceLoader
+from lumen_resources.lumen_config import ModelConfig
 
-# --- Constants ---
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "8"))
 logger = logging.getLogger(__name__)
+
+BATCH_SIZE = 8
 
 
 class UnifiedCLIPService(rpc.InferenceServicer):
@@ -71,107 +72,88 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         self._bioclip_backend = bioclip_backend
 
     @classmethod
-    def from_config(cls, config: dict, cache_dir: Path):
+    def from_config(
+        cls,
+        general_model_config: ModelConfig,
+        bioclip_model_config: ModelConfig,
+        cache_dir: Path,
+    ):
         """
-        Create UnifiedCLIPService from configuration.
+        Create UnifiedCLIPService from configurations for both models.
 
         Args:
-            config: Service configuration dict
-            cache_dir: Cache directory path
+            general_model_config: Configuration for the general-purpose CLIP model.
+            bioclip_model_config: Configuration for the BioCLIP model.
+            cache_dir: Cache directory path.
 
         Returns:
-            Initialized UnifiedCLIPService instance
-
-        Raises:
-            ResourceNotFoundError: If required resources are missing
-            ConfigError: If configuration is invalid
+            Initialized UnifiedCLIPService instance.
         """
-        from resources.exceptions import ResourceNotFoundError, ConfigError
+        from resources.exceptions import ConfigError
+        from general_clip.clip_model import CLIPModelManager
+        from expert_bioclip.bioclip_model import BioCLIPModelManager
 
-        # Validate that both models are configured
-        if "models" not in config:
-            raise ConfigError("Unified service requires 'models' configuration")
+        # --- Helper function to create a backend from config ---
+        def create_backend(resources: ModelResources, runtime: str):
+            if runtime == "torch":
+                return TorchBackend(
+                    resources=resources,
+                    device_preference=os.getenv("DEVICE"),
+                    max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                )
+            elif runtime == "onnx":
+                providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
+                providers_list = [p.strip() for p in providers.split(",")]
+                return ONNXRTBackend(
+                    resources=resources,
+                    providers=providers_list,
+                    device_preference=os.getenv("DEVICE"),
+                    max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                )
+            else:
+                raise ConfigError(f"Unsupported runtime: {runtime}")
 
-        if "clip_default" not in config["models"]:
-            raise ConfigError(
-                "Unified service requires 'models.clip_default' configuration"
-            )
-
-        if "bioclip_default" not in config["models"]:
-            raise ConfigError(
-                "Unified service requires 'models.bioclip_default' configuration"
-            )
-
-        # Load CLIP resources
-        clip_model_cfg = config["models"]["clip_default"]
-        logger.info(f"Loading resources for CLIP model: {clip_model_cfg['model']}")
-        clip_resources = ResourceLoader.load_model_resources(
-            cache_dir=cache_dir,
-            model_name=clip_model_cfg["model"],
-            runtime=clip_model_cfg["runtime"],
+        # 1. Load resources and create backend for General CLIP
+        logger.info(
+            f"Loading resources for General CLIP model: {general_model_config.model}"
+        )
+        general_resources = ResourceLoader.load_model_resources(
+            cache_dir, general_model_config
+        )
+        general_backend = create_backend(
+            general_resources, general_model_config.runtime.value
+        )
+        general_clip_manager = CLIPModelManager(
+            backend=general_backend, resources=general_resources
         )
 
-        # Load BioCLIP resources
-        bioclip_model_cfg = config["models"]["bioclip_default"]
-        bioclip_dataset = bioclip_model_cfg.get("dataset", "TreeOfLife-10M")
+        # 2. Load resources and create backend for BioCLIP
         logger.info(
-            f"Loading resources for BioCLIP model: {bioclip_model_cfg['model']}"
+            f"Loading resources for BioCLIP model: {bioclip_model_config.model}"
         )
         bioclip_resources = ResourceLoader.load_model_resources(
-            cache_dir=cache_dir,
-            model_name=bioclip_model_cfg["model"],
-            runtime=bioclip_model_cfg["runtime"],
-            dataset=bioclip_dataset,
+            cache_dir, bioclip_model_config
+        )
+        bioclip_backend = create_backend(
+            bioclip_resources, bioclip_model_config.runtime.value
+        )
+        bioclip_manager = BioCLIPModelManager(
+            backend=bioclip_backend, resources=bioclip_resources
         )
 
-        # Create backends based on runtime
-        runtime = clip_model_cfg["runtime"]
-        batch_size = int(config.get("env", {}).get("BATCH_SIZE", 8))
-        device = config.get("env", {}).get("DEVICE")
+        # 3. Create the unified service instance
+        service = cls(
+            clip_backend=general_clip_manager,
+            bioclip_backend=bioclip_manager,
+            clip_resources=general_resources,
+            bioclip_resources=bioclip_resources,
+        )
 
-        if runtime == "torch":
-            clip_backend = TorchBackend(
-                resources=clip_resources,
-                device_preference=device,
-                max_batch_size=batch_size,
-            )
-            bioclip_backend = TorchBackend(
-                resources=bioclip_resources,
-                device_preference=device,
-                max_batch_size=batch_size,
-            )
-        elif runtime == "onnx":
-            providers = config.get("env", {}).get(
-                "ONNX_PROVIDERS", "CPUExecutionProvider"
-            )
-            providers_list = [p.strip() for p in providers.split(",")]
-            clip_backend = ONNXRTBackend(
-                resources=clip_resources,
-                providers=providers_list,
-                device_preference=device,
-                max_batch_size=batch_size,
-            )
-            bioclip_backend = ONNXRTBackend(
-                resources=bioclip_resources,
-                providers=providers_list,
-                device_preference=device,
-                max_batch_size=batch_size,
-            )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
-
-        # Create service
-        service = cls(clip_backend, bioclip_backend, clip_resources, bioclip_resources)
-
-        # Log warnings if classification not supported
-        if not clip_resources.has_classification_support():
-            logger.warning(
-                "Unified service: CLIP classification disabled (no ImageNet dataset)"
-            )
+        logger.info("UnifiedCLIPService created with both General and BioCLIP models.")
+        if not general_resources.has_classification_support():
+            logger.warning("General CLIP is missing ImageNet dataset.")
         if not bioclip_resources.has_classification_support():
-            logger.warning(
-                f"Unified service: BioCLIP classification disabled (no {bioclip_dataset} dataset)"
-            )
+            logger.warning("BioCLIP is missing its dataset (e.g., TreeOfLife).")
 
         return service
 
@@ -494,7 +476,3 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 ),
             },
         )
-
-
-# Backward compatibility alias
-CLIPService = UnifiedCLIPService

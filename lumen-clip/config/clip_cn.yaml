@@ -23,7 +23,7 @@ services:
         enabled: true
         package: "lumen_clip"
         import:
-            registry_class: "lumen_clip.image_classification.CLIPService"
+            registry_class: "lumen_clip.service_registry.CLIPService"
             add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
 
         models:

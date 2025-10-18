@@ -202,7 +202,7 @@ class ONNXRTBackend(BaseClipBackend):
         Raises:
             ONNXRTModelLoadingError: If no suitable model file is found
         """
-        runtime_dir = self.resources.get_runtime_path()
+        runtime_dir = self.resources.model_root_path
 
         # Try FP16 first if GPU and preferred
         if self._prefer_fp16:
@@ -260,7 +260,7 @@ class ONNXRTBackend(BaseClipBackend):
             try:
                 from tokenizers import Tokenizer as HFTokenizer
 
-                tokenizer_path = self.resources.model_path / "tokenizer.json"
+                tokenizer_path = self.resources.model_root_path / "tokenizer.json"
                 hf_tokenizer = HFTokenizer.from_file(str(tokenizer_path))
 
                 logger.info("Using custom tokenizer from tokenizer.json")

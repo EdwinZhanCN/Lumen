@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import importlib
 import logging
 import os
 import signal
@@ -24,13 +23,17 @@ import sys
 import uuid
 from concurrent import futures
 from pathlib import Path
-from typing import Optional
-from lumen_resources import LumenServicesConfiguration, load_and_validate_config
+from lumen_resources import load_and_validate_config, Downloader
 import colorlog
 
 import grpc
-from lumen_resources.lumen_config import Services
+import ml_service_pb2_grpc as pb_rpc
+from general_clip.clip_service import GeneralCLIPService
+from expert_bioclip.bioclip_service import BioCLIPService
+from unified_smartclip.smartclip_service import UnifiedCLIPService
+from lumen_resources.downloader import DownloadResult
 
+logger = logging.getLogger(__name__)
 # Try to import zeroconf for mDNS support
 try:
     from zeroconf import ServiceInfo, Zeroconf
@@ -39,26 +42,6 @@ try:
 except ImportError:
     ZEROCONF_AVAILABLE = False
 
-# --- Logging Configuration ---
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-handler = colorlog.StreamHandler()
-formatter = colorlog.ColoredFormatter(
-    "%(log_color)s%(levelname)-8s%(reset)s %(blue)s%(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    reset=True,
-    log_colors={
-        "DEBUG": "cyan",
-        "INFO": "green",
-        "WARNING": "yellow",
-        "ERROR": "red",
-        "CRITICAL": "red,bg_white",
-    },
-)
-
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-
 
 class ConfigError(Exception):
     """Raised when configuration is invalid."""
@@ -66,63 +49,37 @@ class ConfigError(Exception):
     pass
 
 
-# Simplified helpers that work with LumenServicesConfiguration from lumen_resources
-def import_from_string(dotted: str, package: Optional[str] = None):
+def setup_logging(log_level: str = "INFO"):
     """
-    Import attribute (class or function) by dotted path. If direct import fails,
-    try to prefix the module path with the service `package`.
-    Raises ConfigError on failure (consistent with existing error handling).
+    Configures the root logger for the application.
+
+    This function removes any existing handlers, sets the specified log level,
+    and adds a single, colorized handler for console output.
     """
-    try:
-        module_path, attr_name = dotted.rsplit(".", 1)
-    except ValueError:
-        raise ConfigError(f"Invalid import string: '{dotted}'")
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
 
-    # Try direct import first
-    last_exc = None
-    try:
-        module = importlib.import_module(module_path)
-    except Exception as e:
-        last_exc = e
-        # If package provided, try with package prefix
-        if package:
-            try:
-                module = importlib.import_module(f"{package}.{module_path}")
-                last_exc = None
-            except Exception as e2:
-                last_exc = e2
-                module = None
-        else:
-            module = None
+    # Remove any handlers that may have been pre-configured
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
 
-    if module is None:
-        raise ConfigError(f"Failed to import module for '{dotted}': {last_exc}")
-
-    try:
-        return getattr(module, attr_name)
-    except AttributeError as e:
-        raise ConfigError(
-            f"Module '{module.__name__}' has no attribute '{attr_name}': {e}"
-        )
-
-
-def select_enabled_service(cfg: LumenServicesConfiguration) -> tuple[str, Services]:
-    """
-    From a LumenServicesConfiguration instance, pick the single enabled service.
-    Returns (service_name, services_model).
-    """
-    enabled = [
-        name for name, svc in cfg.services.items() if getattr(svc, "enabled", False)
-    ]
-    if len(enabled) == 0:
-        raise ConfigError("No service is enabled in configuration")
-    if len(enabled) > 1:
-        raise ConfigError(
-            f"Multiple services enabled: {enabled}. Only one service is supported per process."
-        )
-    name = enabled[0]
-    service_config = cfg.services[name]
-    return name, service_config
+    # Add our custom colorized handler
+    handler = colorlog.StreamHandler()
+    formatter = colorlog.ColoredFormatter(
+        # 新增了 %(cyan)s[%(name)-25s]%(reset)s
+        # 这会用青色打印出日志来源，并让它占据25个字符宽度以便对齐
+        "%(log_color)s%(levelname)-8s%(cyan)s[%(name)s]%(reset)s %(message)s",
+        reset=True,
+        log_colors={
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "red,bg_white",
+        },
+    )
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
 
 
 def setup_mdns(port: int, mdns_config: dict) -> tuple:
@@ -194,151 +151,171 @@ def setup_mdns(port: int, mdns_config: dict) -> tuple:
         return None, None
 
 
+def handle_download_results(results: dict[str, DownloadResult]):
+    """
+    Processes download results, logs them, and exits if critical failures occurred.
+    """
+    successful_downloads = []
+    failed_downloads = []
+
+    for model_type, result in results.items():
+        if result.success:
+            successful_downloads.append(result)
+        else:
+            failed_downloads.append(result)
+
+    # CRITICAL: If any model failed to download, abort the server startup.
+    if failed_downloads:
+        logger.error(
+            "💥 Critical error: Model download failed. Cannot start the server."
+        )
+        for res in failed_downloads:
+            logger.error(f"  - Model '{res.model_type}': {res.error}")
+        sys.exit(1)
+
+    # If all downloads were successful, log a summary.
+    logger.info("✅ All required models are successfully downloaded and verified.")
+    for res in successful_downloads:
+        # Also check for non-critical warnings, like missing optional files.
+        if res.missing_files:
+            logger.warning(
+                f"  - Model '{res.model_type}' is ready, but has missing optional files: "
+                f"{', '.join(res.missing_files)}"
+            )
+
+
 def serve(config_path: str, port_override: int | None = None) -> None:
     """
-    Initialize and start the gRPC server.
+    Initializes and starts the gRPC server based on a validated configuration.
 
-    Args:
-        config_path: Path to YAML configuration file
-        port_override: Optional port override from command line
-
-    Raises:
-        SystemExit: On fatal errors
+    This server runner acts as an orchestrator:
+    1. Loads and validates the master lumen_config.yaml.
+    2. Determines which service to run (General, Bio, or Unified) based on the models defined.
+    3. Delegates the creation of the service instance to the appropriate Service.from_config factory.
+    4. Initializes the service, which loads the ML models.
+    5. Attaches the service to the gRPC server and starts listening.
     """
     try:
-        # Load and validate configuration (returns Pydantic model)
+        # Step 1: Load and validate the main configuration file.
         config = load_and_validate_config(config_path)
-        # deployment mode
-        deployment_mode: str = config.deployment.mode
 
-        # Top-level server / mDNS config
-        server_cfg = getattr(config, "server", None)
-        mdns_cfg = getattr(server_cfg, "mdns", None) if server_cfg is not None else None
-        mdns_service_name = (
-            getattr(mdns_cfg, "service_name", None) if mdns_cfg is not None else "clip"
-        )
-        mdns_enabled = (
-            getattr(mdns_cfg, "enabled", False) if mdns_cfg is not None else False
-        )
+        # Step 1a: Verify and download all required model assets before proceeding.
+        logger.info("Verifying and downloading model assets...")
+        # verbose=False because we now have a much better result handler.
+        downloader = Downloader(config, verbose=False)
+        download_results = downloader.download_all()
+        handle_download_results(download_results)
 
-        # Select the single enabled service definition
-        service_name, services_config = select_enabled_service(config)
-        service_package = getattr(services_config, "package", None)
+        # Ensure we are running in the correct deployment mode.
+        if config.deployment.mode != "single":
+            logger.error("This server is designed for 'single' deployment mode only.")
+            sys.exit(1)
 
-        # import_ contains registry_class and add_to_server
-        service_import = services_config.import_
-        registry_class_path = service_import.registry_class
-        add_to_server_path = service_import.add_to_server
+        # Step 2: Determine which service to instantiate based on model definitions.
+        service_config = config.services.get("clip")
+        if not service_config or not service_config.models:
+            logger.error("Configuration error: 'services.clip.models' is not defined.")
+            sys.exit(1)
 
-        logger.info(
-            f"Configuration validated: {mdns_service_name} service enabled (service={service_name})"
-        )
-        if mdns_enabled:
-            logger.info("mDNS service enabled")
+        general_model_config = service_config.models.get("general")
+        bioclip_model_config = service_config.models.get("bioclip")
+
+        service_instance = None
+        service_display_name = "Unknown"
+        cache_dir = Path(config.metadata.cache_dir).expanduser()
+        # Decision logic: choose the service based on which models are configured.
+        if general_model_config and bioclip_model_config:
+            # Case 1: Both models are defined -> Unified Service
+            service_display_name = "Unified SmartCLIP"
+            logger.info(
+                f"Configuration for '{service_display_name}' service identified."
+            )
+            service_instance = UnifiedCLIPService.from_config(
+                general_model_config=general_model_config,
+                bioclip_model_config=bioclip_model_config,
+                cache_dir=cache_dir,
+            )
+
+        elif general_model_config:
+            # Case 2: Only general model is defined -> General CLIP Service
+            service_display_name = "General CLIP"
+            logger.info(
+                f"Configuration for '{service_display_name}' service identified."
+            )
+            service_instance = GeneralCLIPService.from_config(
+                model_config=general_model_config, cache_dir=cache_dir
+            )
+
+        elif bioclip_model_config:
+            # Case 3: Only BioCLIP model is defined -> BioCLIP Service
+            service_display_name = "BioCLIP"
+            logger.info(
+                f"Configuration for '{service_display_name}' service identified."
+            )
+            service_instance = BioCLIPService.from_config(
+                model_config=bioclip_model_config, cache_dir=cache_dir
+            )
+
         else:
-            logger.warning("mDNS service disabled")
-        logger.info(f"Deployment mode: {deployment_mode}")
+            logger.error(
+                "Configuration error: No valid models ('general' or 'bioclip') found under 'services.clip'."
+            )
+            sys.exit(1)
 
-        # Import service class and registration function (with package fallback)
-        service_class = import_from_string(registry_class_path, package=service_package)
-        add_to_server_func = import_from_string(
-            add_to_server_path, package=service_package
-        )
-        logger.info(f"✓ Imported service class: {registry_class_path}")
-        logger.info(f"✓ Imported gRPC registration function: {add_to_server_path}")
+        # Step 3: Initialize the chosen service (this loads the ML models).
+        logger.info(f"Initializing {service_display_name} service...")
+        service_instance.initialize()
 
-        # Create gRPC server
+        # Step 4: Set up and start the gRPC server.
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
-        # Prepare cache_dir from metadata
-        cache_dir = Path(config.metadata.cache_dir).expanduser()
+        # All our services implement the same gRPC interface.
+        pb_rpc.add_InferenceServicer_to_server(service_instance, server)
 
-        # Initialize service instance from config
-        try:
-            # pass service config as dict with aliases to preserve 'import' alias if needed
-            svc_config_dict = services_config.model_dump(by_alias=True)
-            logger.info(f"Initializing service '{service_name}' from config...")
-            service_instance = service_class.from_config(
-                config=svc_config_dict, cache_dir=cache_dir
-            )
-        except Exception as e:
-            logger.exception(f"Failed to create service from config: {e}")
-            sys.exit(1)
+        # Determine port: CLI override > config file > default.
+        port = port_override or config.server.port or 50051
+        listen_addr = f"[::]:{port}"
+        server.add_insecure_port(listen_addr)
+        server.start()
+        logger.info(f"🚀 {service_display_name} service listening on {listen_addr}")
 
-        # Register service with gRPC server
-        try:
-            add_to_server_func(service_instance, server)
-            logger.info("✓ Service registered with gRPC server")
-        except Exception as e:
-            logger.exception(f"Failed to register service with gRPC server: {e}")
-            sys.exit(1)
-
-        # Initialize the service (load models, etc.)
-        try:
-            logger.info("Loading models and resources... This may take a moment.")
-            service_instance.initialize()
-            logger.info("✓ Service initialized successfully")
-        except Exception as e:
-            logger.exception(f"Fatal error during service initialization: {e}")
-            sys.exit(1)
-
-        # Get capabilities for logging (best-effort)
+        # Log service capabilities now that it's initialized.
         try:
             from google.protobuf import empty_pb2
 
             capabilities = service_instance.GetCapabilities(empty_pb2.Empty(), None)
-            supported_tasks = [cap.task_name for cap in capabilities.capabilities]
+            supported_tasks = [cap.name for cap in capabilities.tasks]
             logger.info(f"✓ Supported tasks: {', '.join(supported_tasks)}")
         except Exception as e:
-            logger.warning(f"Could not retrieve capabilities: {e}")
+            logger.warning(f"Could not retrieve service capabilities: {e}")
 
-        # Decide port: CLI override > top-level server.port > default 50051
-        port = (
-            port_override
-            if port_override is not None
-            else (server_cfg.port if server_cfg is not None else 50051)
-        )
-        listen_addr = f"[::]:{port}"
-        server.add_insecure_port(listen_addr)
-        server.start()
-        logger.info(f"🚀 {service_name} service listening on {listen_addr}")
+        # Step 5: Set up mDNS and graceful shutdown.
+        zeroconf, service_info = None, None
+        if config.server.mdns and config.server.mdns.enabled:
+            zeroconf, service_info = setup_mdns(
+                port, config.server.mdns.model_dump(by_alias=True)
+            )
 
-        # Set up mDNS advertisement if enabled
-        zeroconf = None
-        service_info = None
-        if mdns_cfg and getattr(mdns_cfg, "enabled", False):
-            # convert mdns model to dict for setup_mdns (which expects a mapping)
-            zeroconf, service_info = setup_mdns(port, mdns_cfg.dict(by_alias=True))
-
-        # Graceful shutdown handler
         def handle_shutdown(signum, frame):
             logger.info("Shutdown signal received. Stopping server...")
-            try:
-                if zeroconf and service_info:
-                    zeroconf.unregister_service(service_info)
-                    zeroconf.close()
-                    logger.info("✓ mDNS service unregistered")
-            except Exception as e:
-                logger.warning(f"mDNS unregistration failed: {e}")
-
+            if zeroconf and service_info:
+                logger.info("Unregistering mDNS service...")
+                zeroconf.unregister_service(service_info)
+                zeroconf.close()
             server.stop(grace=5.0)
 
         signal.signal(signal.SIGINT, handle_shutdown)
         signal.signal(signal.SIGTERM, handle_shutdown)
 
-        # Wait for termination
         logger.info("Server running. Press Ctrl+C to stop.")
         server.wait_for_termination()
         logger.info("Server shutdown complete.")
 
-    except ConfigError as e:
-        logger.error(f"Configuration error: {e}")
-        sys.exit(1)
-    except FileNotFoundError as e:
-        logger.error(str(e))
+    except (ConfigError, FileNotFoundError) as e:
+        logger.error(f"Service startup failed: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
+        logger.exception(f"An unexpected error occurred: {e}")
         sys.exit(1)
 
 
@@ -387,7 +364,7 @@ Examples:
     args = parser.parse_args()
 
     # Set logging level
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
+    setup_logging(args.log_level)
 
     # Start server
     serve(config_path=args.config, port_override=args.port)

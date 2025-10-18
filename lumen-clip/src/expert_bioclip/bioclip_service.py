@@ -14,6 +14,8 @@ import ml_service_pb2_grpc as rpc
 from backends import TorchBackend, ONNXRTBackend
 from resources.loader import ModelResources, ResourceLoader
 from .bioclip_model import BioCLIPModelManager
+from lumen_resources.lumen_config import ModelConfig
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-class BioClipService(rpc.InferenceServicer):
+class BioCLIPService(rpc.InferenceServicer):
     """
     使用新的 Inference 协议，统一承载两个服务：
       - 文本嵌入：task="embed"
@@ -46,7 +48,7 @@ class BioClipService(rpc.InferenceServicer):
         self.is_initialized: bool = False
 
     @classmethod
-    def from_config(cls, config: dict, cache_dir: Path):
+    def from_config(cls, model_config: ModelConfig, cache_dir: Path):
         """
         Create BioCLIPService from configuration.
 
@@ -63,42 +65,32 @@ class BioClipService(rpc.InferenceServicer):
         """
         from resources.exceptions import ConfigError
 
-        # Get model configuration
-        if "models" not in config or "default" not in config["models"]:
-            raise ConfigError("BioCLIP service requires 'models.default' configuration")
-
-        model_cfg = config["models"]["default"]
-
         # Get dataset name if specified
-        dataset = model_cfg.get("dataset", "TreeOfLife-10M")
+        dataset = model_config.dataset
+
+        if dataset is None:
+            logger.warning("Dataset not specified classify feature will be disabled")
 
         # Load resources
-        logger.info(f"Loading resources for BioCLIP model: {model_cfg['model']}")
-        resources = ResourceLoader.load_model_resources(
-            cache_dir=cache_dir,
-            model_name=model_cfg["model"],
-            runtime=model_cfg["runtime"],
-            dataset=dataset,
-        )
+        logger.info(f"Loading resources for BioCLIP model: {model_config.model}")
+        resources = ResourceLoader.load_model_resources(cache_dir, model_config)
 
         # Create backend based on runtime
-        runtime = model_cfg["runtime"]
+        runtime = model_config.runtime.value
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
-                device_preference=config.get("env", {}).get("DEVICE"),
-                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+                device_preference=os.getenv("DEVICE"),
+                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
             )
         elif runtime == "onnx":
-            providers = config.get("env", {}).get(
-                "ONNX_PROVIDERS", "CPUExecutionProvider"
-            )
+            providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
             providers_list = [p.strip() for p in providers.split(",")]
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
-                device_preference=config.get("env", {}).get("DEVICE"),
-                max_batch_size=int(config.get("env", {}).get("BATCH_SIZE", 8)),
+                device_preference=os.getenv("DEVICE"),
+                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")
