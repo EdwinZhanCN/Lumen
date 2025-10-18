@@ -32,8 +32,6 @@ from pathlib import Path
 
 from resources import ModelResources
 
-from
-
 try:
     import onnxruntime as ort
 except ImportError:
