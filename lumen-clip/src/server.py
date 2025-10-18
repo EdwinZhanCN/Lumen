@@ -24,10 +24,12 @@ import sys
 import uuid
 from concurrent import futures
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
+from lumen_resources import LumenServicesConfiguration, load_and_validate_config
+import colorlog
 
 import grpc
-import yaml
+from lumen_resources.lumen_config import Services
 
 # Try to import zeroconf for mDNS support
 try:
@@ -38,12 +40,24 @@ except ImportError:
     ZEROCONF_AVAILABLE = False
 
 # --- Logging Configuration ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+handler = colorlog.StreamHandler()
+formatter = colorlog.ColoredFormatter(
+    "%(log_color)s%(levelname)-8s%(reset)s %(blue)s%(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    reset=True,
+    log_colors={
+        "DEBUG": "cyan",
+        "INFO": "green",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "red,bg_white",
+    },
+)
+
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
 class ConfigError(Exception):
@@ -52,171 +66,63 @@ class ConfigError(Exception):
     pass
 
 
-class ServerConfig:
-    """Parsed and validated server configuration."""
-
-    def __init__(self, config_dict: dict):
-        """
-        Initialize ServerConfig from configuration dictionary.
-
-        Args:
-            config_dict: Parsed YAML configuration
-
-        Raises:
-            ConfigError: If configuration is invalid
-        """
-        self.raw = config_dict
-        self._validate()
-
-    def _validate(self):
-        """Validate configuration structure and enforce single-service rule."""
-        # Check metadata
-        if "metadata" not in self.raw:
-            raise ConfigError("Configuration must contain 'metadata' section")
-
-        metadata = self.raw["metadata"]
-        if "version" not in metadata:
-            raise ConfigError("metadata.version is required")
-        if "region" not in metadata:
-            raise ConfigError("metadata.region is required")
-
-        # Check services
-        if "services" not in self.raw:
-            raise ConfigError("Configuration must contain 'services' section")
-
-        services = self.raw["services"]
-        enabled_services = [
-            name for name, cfg in services.items() if cfg.get("enabled", False)
-        ]
-
-        if len(enabled_services) == 0:
-            raise ConfigError("No service is enabled in configuration")
-
-        if len(enabled_services) > 1:
-            raise ConfigError(
-                f"Multiple services enabled: {enabled_services}. "
-                "Only one service can be enabled per process. "
-                "For multi-service deployment, run multiple processes with separate configs."
-            )
-
-        self.service_name = enabled_services[0]
-        self.service_config = services[self.service_name]
-
-        # Validate service configuration
-        required_fields = ["package", "import"]
-        for field in required_fields:
-            if field not in self.service_config:
-                raise ConfigError(
-                    f"Service '{self.service_name}' missing required field '{field}'"
-                )
-
-        import_cfg = self.service_config["import"]
-        if "registry_class" not in import_cfg:
-            raise ConfigError(
-                f"Service '{self.service_name}' missing 'import.registry_class'"
-            )
-        if "add_to_server" not in import_cfg:
-            raise ConfigError(
-                f"Service '{self.service_name}' missing 'import.add_to_server'"
-            )
-
-    @property
-    def cache_dir(self) -> Path:
-        """Get cache directory path."""
-        cache_path = self.raw["metadata"].get("cache_dir", "~/.lumen/models")
-        return Path(cache_path).expanduser()
-
-    @property
-    def region(self) -> str:
-        """Get region setting."""
-        return self.raw["metadata"]["region"]
-
-    @property
-    def port(self) -> int:
-        """Get server port from config or default."""
-        return self.service_config.get("server", {}).get("port", 50051)
-
-    @property
-    def mdns_config(self) -> Optional[Dict[str, Any]]:
-        """Get mDNS configuration if enabled."""
-        mdns = self.service_config.get("server", {}).get("mdns", {})
-        if mdns.get("enabled", False):
-            return mdns
-        return None
-
-    def get_env_vars(self) -> Dict[str, str]:
-        """Get environment variables from config."""
-        env = self.service_config.get("env", {})
-        return {k: str(v) for k, v in env.items()}
-
-
-def load_config(config_path: str) -> ServerConfig:
+# Simplified helpers that work with LumenServicesConfiguration from lumen_resources
+def import_from_string(dotted: str, package: Optional[str] = None):
     """
-    Load and validate configuration from YAML file.
-
-    Args:
-        config_path: Path to YAML configuration file
-
-    Returns:
-        Validated ServerConfig instance
-
-    Raises:
-        ConfigError: If configuration is invalid
-        FileNotFoundError: If config file doesn't exist
+    Import attribute (class or function) by dotted path. If direct import fails,
+    try to prefix the module path with the service `package`.
+    Raises ConfigError on failure (consistent with existing error handling).
     """
-    config_file = Path(config_path)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-    logger.info(f"Loading configuration from: {config_path}")
-
     try:
-        with open(config_file, "r", encoding="utf-8") as f:
-            config_dict = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ConfigError(f"Failed to parse YAML: {e}")
+        module_path, attr_name = dotted.rsplit(".", 1)
+    except ValueError:
+        raise ConfigError(f"Invalid import string: '{dotted}'")
 
-    return ServerConfig(config_dict)
-
-
-def import_service_class(service_config: dict):
-    """
-    Dynamically import service class from configuration.
-
-    Args:
-        service_config: Service configuration dictionary
-
-    Returns:
-        Tuple of (ServiceClass, add_to_server_function)
-
-    Raises:
-        ConfigError: If import fails
-    """
-    import_cfg = service_config["import"]
-    registry_class = import_cfg["registry_class"]
-    add_to_server = import_cfg["add_to_server"]
-
+    # Try direct import first
+    last_exc = None
     try:
-        # Import service class (e.g., "image_classification.clip_service.CLIPService")
-        module_path, class_name = registry_class.rsplit(".", 1)
         module = importlib.import_module(module_path)
-        service_class = getattr(module, class_name)
-        logger.info(f"✓ Imported service class: {registry_class}")
-    except (ImportError, AttributeError) as e:
-        raise ConfigError(f"Failed to import service class '{registry_class}': {e}")
+    except Exception as e:
+        last_exc = e
+        # If package provided, try with package prefix
+        if package:
+            try:
+                module = importlib.import_module(f"{package}.{module_path}")
+                last_exc = None
+            except Exception as e2:
+                last_exc = e2
+                module = None
+        else:
+            module = None
+
+    if module is None:
+        raise ConfigError(f"Failed to import module for '{dotted}': {last_exc}")
 
     try:
-        # Import add_to_server function (e.g., "ml_service_pb2_grpc.add_InferenceServicer_to_server")
-        module_path, func_name = add_to_server.rsplit(".", 1)
-        module = importlib.import_module(module_path)
-        add_func = getattr(module, func_name)
-        logger.info(f"✓ Imported gRPC registration function: {add_to_server}")
-    except (ImportError, AttributeError) as e:
+        return getattr(module, attr_name)
+    except AttributeError as e:
         raise ConfigError(
-            f"Failed to import add_to_server function '{add_to_server}': {e}"
+            f"Module '{module.__name__}' has no attribute '{attr_name}': {e}"
         )
 
-    return service_class, add_func
+
+def select_enabled_service(cfg: LumenServicesConfiguration) -> tuple[str, Services]:
+    """
+    From a LumenServicesConfiguration instance, pick the single enabled service.
+    Returns (service_name, services_model).
+    """
+    enabled = [
+        name for name, svc in cfg.services.items() if getattr(svc, "enabled", False)
+    ]
+    if len(enabled) == 0:
+        raise ConfigError("No service is enabled in configuration")
+    if len(enabled) > 1:
+        raise ConfigError(
+            f"Multiple services enabled: {enabled}. Only one service is supported per process."
+        )
+    name = enabled[0]
+    service_config = cfg.services[name]
+    return name, service_config
 
 
 def setup_mdns(port: int, mdns_config: dict) -> tuple:
@@ -288,7 +194,7 @@ def setup_mdns(port: int, mdns_config: dict) -> tuple:
         return None, None
 
 
-def serve(config_path: str, port_override: Optional[int] = None) -> None:
+def serve(config_path: str, port_override: int | None = None) -> None:
     """
     Initialize and start the gRPC server.
 
@@ -300,35 +206,72 @@ def serve(config_path: str, port_override: Optional[int] = None) -> None:
         SystemExit: On fatal errors
     """
     try:
-        # Load and validate configuration
-        config = load_config(config_path)
-        logger.info(f"✓ Configuration validated: {config.service_name} service enabled")
+        # Load and validate configuration (returns Pydantic model)
+        config = load_and_validate_config(config_path)
+        # deployment mode
+        deployment_mode: str = config.deployment.mode
 
-        # Set environment variables from config
-        env_vars = config.get_env_vars()
-        if env_vars:
-            logger.info(f"Setting environment variables: {list(env_vars.keys())}")
-            os.environ.update(env_vars)
+        # Top-level server / mDNS config
+        server_cfg = getattr(config, "server", None)
+        mdns_cfg = getattr(server_cfg, "mdns", None) if server_cfg is not None else None
+        mdns_service_name = (
+            getattr(mdns_cfg, "service_name", None) if mdns_cfg is not None else "clip"
+        )
+        mdns_enabled = (
+            getattr(mdns_cfg, "enabled", False) if mdns_cfg is not None else False
+        )
 
-        # Import service class and registration function
-        service_class, add_to_server_func = import_service_class(config.service_config)
+        # Select the single enabled service definition
+        service_name, services_config = select_enabled_service(config)
+        service_package = getattr(services_config, "package", None)
+
+        # import_ contains registry_class and add_to_server
+        service_import = services_config.import_
+        registry_class_path = service_import.registry_class
+        add_to_server_path = service_import.add_to_server
+
+        logger.info(
+            f"Configuration validated: {mdns_service_name} service enabled (service={service_name})"
+        )
+        if mdns_enabled:
+            logger.info("mDNS service enabled")
+        else:
+            logger.warning("mDNS service disabled")
+        logger.info(f"Deployment mode: {deployment_mode}")
+
+        # Import service class and registration function (with package fallback)
+        service_class = import_from_string(registry_class_path, package=service_package)
+        add_to_server_func = import_from_string(
+            add_to_server_path, package=service_package
+        )
+        logger.info(f"✓ Imported service class: {registry_class_path}")
+        logger.info(f"✓ Imported gRPC registration function: {add_to_server_path}")
 
         # Create gRPC server
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
 
-        # Initialize service from config
-        logger.info(f"Initializing {config.service_name} service...")
+        # Prepare cache_dir from metadata
+        cache_dir = Path(config.metadata.cache_dir).expanduser()
+
+        # Initialize service instance from config
         try:
+            # pass service config as dict with aliases to preserve 'import' alias if needed
+            svc_config_dict = services_config.model_dump(by_alias=True)
+            logger.info(f"Initializing service '{service_name}' from config...")
             service_instance = service_class.from_config(
-                config=config.service_config, cache_dir=config.cache_dir
+                config=svc_config_dict, cache_dir=cache_dir
             )
         except Exception as e:
             logger.exception(f"Failed to create service from config: {e}")
             sys.exit(1)
 
         # Register service with gRPC server
-        add_to_server_func(service_instance, server)
-        logger.info("✓ Service registered with gRPC server")
+        try:
+            add_to_server_func(service_instance, server)
+            logger.info("✓ Service registered with gRPC server")
+        except Exception as e:
+            logger.exception(f"Failed to register service with gRPC server: {e}")
+            sys.exit(1)
 
         # Initialize the service (load models, etc.)
         try:
@@ -339,7 +282,7 @@ def serve(config_path: str, port_override: Optional[int] = None) -> None:
             logger.exception(f"Fatal error during service initialization: {e}")
             sys.exit(1)
 
-        # Get capabilities for logging
+        # Get capabilities for logging (best-effort)
         try:
             from google.protobuf import empty_pb2
 
@@ -349,21 +292,25 @@ def serve(config_path: str, port_override: Optional[int] = None) -> None:
         except Exception as e:
             logger.warning(f"Could not retrieve capabilities: {e}")
 
-        # Start server
-        port = port_override if port_override is not None else config.port
+        # Decide port: CLI override > top-level server.port > default 50051
+        port = (
+            port_override
+            if port_override is not None
+            else (server_cfg.port if server_cfg is not None else 50051)
+        )
         listen_addr = f"[::]:{port}"
         server.add_insecure_port(listen_addr)
         server.start()
-        logger.info(f"🚀 {config.service_name} service listening on {listen_addr}")
+        logger.info(f"🚀 {service_name} service listening on {listen_addr}")
 
-        # Set up mDNS advertisement
+        # Set up mDNS advertisement if enabled
         zeroconf = None
         service_info = None
-        mdns_config = config.mdns_config
-        if mdns_config:
-            zeroconf, service_info = setup_mdns(port, mdns_config)
+        if mdns_cfg and getattr(mdns_cfg, "enabled", False):
+            # convert mdns model to dict for setup_mdns (which expects a mapping)
+            zeroconf, service_info = setup_mdns(port, mdns_cfg.dict(by_alias=True))
 
-        # Set up graceful shutdown
+        # Graceful shutdown handler
         def handle_shutdown(signum, frame):
             logger.info("Shutdown signal received. Stopping server...")
             try:

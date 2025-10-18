@@ -21,6 +21,7 @@ dependencies = [
     "importlib-resources",
     "colorama",
     "pygbif",
+    "colorlog",
     "zeroconf",
     "torch>=2.1.0",
     "torchvision>=0.16.0",

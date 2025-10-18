@@ -33,8 +33,7 @@ class ConfigValidator:
         """
         if schema_path is None:
             # Use bundled schema from docs/
-            package_root = Path(__file__).parent.parent.parent
-            schema_path = package_root / "docs" / "config-schema.yaml"
+            schema_path = Path(__file__).parent / "schemas" / "config-schema.yaml"
 
         if not schema_path.exists():
             raise FileNotFoundError(f"Schema file not found: {schema_path}")

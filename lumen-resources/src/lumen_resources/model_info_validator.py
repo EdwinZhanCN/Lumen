@@ -23,12 +23,7 @@ class ModelInfoValidator:
             schema_path: Path to model_info-schema.json. If None, uses default path.
         """
         if schema_path is None:
-            # Default to schema in docs directory
-            # __file__ is in src/lumen_resources/model_info_validator.py
-            # We need to go up to the package root (3 levels: file -> lumen_resources -> src -> root)
-            schema_path = (
-                Path(__file__).parent.parent.parent / "docs" / "model_info-schema.json"
-            )
+            schema_path = Path(__file__).parent / "schemas" / "model_info-schema.json"
         else:
             schema_path = Path(schema_path)
 

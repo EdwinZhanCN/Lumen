@@ -36,6 +36,7 @@ lumen-resources = "lumen_resources.cli:main"
 
 [tool.hatchling.build.targets.wheel]
 packages = ["src/lumen_resources"]
+include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
