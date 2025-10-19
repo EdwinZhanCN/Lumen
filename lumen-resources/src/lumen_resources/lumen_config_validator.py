@@ -12,7 +12,7 @@ import yaml
 from jsonschema import Draft7Validator
 from pydantic import ValidationError
 
-from .lumen_config import LumenServicesConfiguration
+from .lumen_config import LumenConfig
 from .exceptions import ConfigError
 
 
@@ -98,7 +98,7 @@ class ConfigValidator:
     ) -> tuple[bool, list[str]]:
         """Validate using Pydantic models"""
         try:
-            LumenServicesConfiguration(**config_data)
+            LumenConfig(**config_data)
             return True, []
         except ValidationError as e:
             # Parse pydantic validation errors
@@ -111,7 +111,7 @@ class ConfigValidator:
         except Exception as e:
             return False, [f"Validation error: {e}"]
 
-    def validate_and_load(self, config_path: Path | str) -> LumenServicesConfiguration:
+    def validate_and_load(self, config_path: Path | str) -> LumenConfig:
         """
         Validate and load configuration file.
 
@@ -119,7 +119,7 @@ class ConfigValidator:
             config_path: Path to configuration YAML file
 
         Returns:
-            Validated LumenServicesConfiguration instance
+            Validated LumenConfig instance
 
         Raises:
             ConfigError: If validation fails
@@ -138,7 +138,7 @@ class ConfigValidator:
         with open(config_path, "r", encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
-        return LumenServicesConfiguration(**config_data)
+        return LumenConfig(**config_data)
 
 
 def validate_config_file(
@@ -165,7 +165,7 @@ def validate_config_file(
     return validator.validate_file(config_path, strict=True)
 
 
-def load_and_validate_config(config_path: Path | str) -> LumenServicesConfiguration:
+def load_and_validate_config(config_path: Path | str) -> LumenConfig:
     """
     Load and validate configuration file.
 
@@ -175,7 +175,7 @@ def load_and_validate_config(config_path: Path | str) -> LumenServicesConfigurat
         config_path: Path to configuration YAML file
 
     Returns:
-        Validated LumenServicesConfiguration instance
+        Validated LumenConfig instance
 
     Raises:
         ConfigError: If validation fails or file not found

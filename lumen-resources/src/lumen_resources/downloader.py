@@ -1,7 +1,7 @@
 """
 Resource Downloader Manager
 
-@requires: Valid LumenServicesConfiguration and platform adapter
+@requires: Valid LumenConfig and platform adapter
 @returns: Download results with validation
 @errors: DownloadError, ValidationError
 """
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .exceptions import DownloadError, ModelInfoError, ValidationError
-from .lumen_config import LumenServicesConfiguration, ModelConfig, Region, Runtime
+from .lumen_config import LumenConfig, ModelConfig, Region, Runtime
 from .model_info import ModelInfo
 from .model_info_validator import load_and_validate_model_info
 from .platform import Platform, PlatformType
@@ -38,12 +38,12 @@ class Downloader:
     Main resource downloader.
 
     Contract:
-    @requires: Valid LumenServicesConfiguration
+    @requires: Valid LumenConfig
     @returns: Dictionary of DownloadResult per model type
     @errors: DownloadError for critical failures
     """
 
-    def __init__(self, config: LumenServicesConfiguration, verbose: bool = True):
+    def __init__(self, config: LumenConfig, verbose: bool = True):
         """
         Initialize downloader with configuration.
 
@@ -51,7 +51,7 @@ class Downloader:
             config: Lumen services configuration
             verbose: Whether to print progress messages
         """
-        self.config: LumenServicesConfiguration = config
+        self.config: LumenConfig = config
         self.verbose: bool = verbose
 
         # Determine platform type and owner from region
@@ -152,7 +152,7 @@ class Downloader:
 
         Args:
             model_type: Identifier for the model (e.g., "clip:default")
-            model_config: Model configuration from LumenServicesConfiguration
+            model_config: Model configuration from LumenConfig
             force: Force re-download
 
         Returns:
@@ -186,22 +186,25 @@ class Downloader:
             # Logical validation
             self._validate_model_config(model_info, model_config)
 
-            # If dataset specified, download by relative path from model_info.json
+            # If dataset specified, download by relative paths from model_info.json
             if model_config.dataset and model_info.datasets:
-                dataset_rel = model_info.datasets.get(model_config.dataset)
-                if dataset_rel:
-                    dataset_path = model_path / dataset_rel
-                    if not dataset_path.exists():
-                        # Download only the dataset file by its relative path
-                        try:
-                            _ = self.platform.download_model(
-                                repo_name=model_config.model,
-                                cache_dir=cache_dir,
-                                allow_patterns=[dataset_rel],
-                                force=False,
-                            )
-                        except DownloadError as e:
-                            raise DownloadError(f"Failed to download dataset: {e}")
+                dataset_files = model_info.datasets.get(model_config.dataset)
+                if dataset_files:
+                    for file_rel in [dataset_files.labels, dataset_files.embeddings]:
+                        dataset_path = model_path / file_rel
+                        if not dataset_path.exists():
+                            # Download only the dataset file by its relative path
+                            try:
+                                _ = self.platform.download_model(
+                                    repo_name=model_config.model,
+                                    cache_dir=cache_dir,
+                                    allow_patterns=[file_rel],
+                                    force=False,
+                                )
+                            except DownloadError as e:
+                                raise DownloadError(
+                                    f"Failed to download dataset file {file_rel}: {e}"
+                                )
 
             # Final: File integrity validation
             missing = self._validate_files(model_path, model_info, model_config)
@@ -250,7 +253,7 @@ class Downloader:
             raise ModelInfoError(msg)
 
         try:
-            return load_and_validate_model_info(info_file, strict=True)
+            return load_and_validate_model_info(info_file)
         except Exception as e:
             raise ModelInfoError(f"Failed to load/validate model_info.json: {e}")
 
@@ -339,12 +342,13 @@ class Downloader:
             if not full_path.exists():
                 missing.append(file_path)
 
-        # Check dataset file if specified
+        # Check dataset files if specified
         if model_config.dataset and model_info.datasets:
-            dataset_file = model_info.datasets.get(model_config.dataset)
-            if dataset_file:
-                dataset_path = model_path / dataset_file
-                if not dataset_path.exists():
-                    missing.append(dataset_file)
+            dataset_files = model_info.datasets.get(model_config.dataset)
+            if dataset_files:
+                for file_rel in [dataset_files.labels, dataset_files.embeddings]:
+                    dataset_path = model_path / file_rel
+                    if not dataset_path.exists():
+                        missing.append(file_rel)
 
         return missing

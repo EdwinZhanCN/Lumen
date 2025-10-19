@@ -147,9 +147,7 @@ def cmd_validate_model_info(args: argparse.Namespace) -> None:
 
         # Use ModelInfoValidator
         validator = ModelInfoValidator()
-        is_valid, _, errors = validator.validate_file(
-            model_info_path, strict=args.strict
-        )
+        is_valid, errors = validator.validate_file(model_info_path, strict=args.strict)
 
         if not is_valid:
             print("❌ Validation failed:\n")
@@ -158,7 +156,7 @@ def cmd_validate_model_info(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         # Load the validated model info
-        model_info = load_and_validate_model_info(model_info_path, strict=True)
+        model_info = load_and_validate_model_info(model_info_path)
 
         print("✅ Model info is valid!")
         print(f"\n📦 Model: {model_info.name}")

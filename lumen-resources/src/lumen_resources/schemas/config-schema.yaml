@@ -5,7 +5,7 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 $id: "https://github.com/Lumilio-Photos/lumen-config-spec/v1.0.0"
 
-title: Lumen Services Configuration
+title: Lumen Config
 description: Unified configuration schema for all Lumen ML services
 
 type: object
@@ -171,7 +171,8 @@ properties:
                                 examples:
                                     - "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
                                     - "lumen_face.proto.ml_service_pb2_grpc.add_FaceServicer_to_server"
-
+                    backend_settings:
+                        $ref: "#/definitions/BackendSettings"
                     models:
                         type: object
                         minProperties: 1
@@ -182,6 +183,26 @@ properties:
                                 $ref: "#/definitions/ModelConfig"
 
 definitions:
+    BackendSettings:
+        type: object
+        description: Optional settings for inference backend configuration.
+        properties:
+            device:
+                type: [string, "null"] # Allow string or null
+                description: "Preferred device ('cuda', 'mps', 'cpu'). If null, auto-detects best available."
+                default: null
+            batch_size:
+                type: integer
+                description: Maximum batch size for inference.
+                minimum: 1
+                default: 8
+            onnx_providers:
+                type: [array, "null"] # Allow array or null
+                items:
+                    type: string
+                description: "List of ONNX execution providers. If null, uses ONNX Runtime defaults."
+                default: null
+        additionalProperties: false
     ModelConfig:
         type: object
         required:

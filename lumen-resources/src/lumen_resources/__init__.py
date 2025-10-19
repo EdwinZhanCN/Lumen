@@ -23,7 +23,7 @@ Usage:
             print(f"Failed: {model_type} - {result.error}")
 """
 
-from .lumen_config import LumenServicesConfiguration, Runtime, Region
+from .lumen_config import LumenConfig, Runtime, Region
 from .downloader import Downloader, DownloadResult
 from .exceptions import (
     ResourceError,
@@ -42,7 +42,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     # Configuration
-    "LumenServicesConfiguration",
+    "LumenConfig",
     "Runtime",
     "Region",
     "load_and_validate_config",
