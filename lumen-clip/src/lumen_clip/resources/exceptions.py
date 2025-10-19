@@ -1,5 +1,5 @@
 """
-exceptions.py
+backend_exceptions.py
 
 Exception classes for the resources module.
 Defines all error types that can occur during resource loading and validation.

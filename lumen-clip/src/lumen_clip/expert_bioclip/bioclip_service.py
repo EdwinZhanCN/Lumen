@@ -1,4 +1,19 @@
-# clip_inference_service.py
+"""
+BioCLIP gRPC service.
+
+This module implements a gRPC Inference service for the BioCLIP model. It
+provides streaming request/response handling and exposes the following tasks
+via the Inference protocol:
+
+- "embed": Create a text embedding from a UTF-8 string.
+- "image_embed": Create an image embedding from binary image data.
+- "classify": Classify an image using the TreeOfLife dataset (when available).
+
+The service handles model initialization, optional fragment reassembly for
+large payloads, error reporting, and capability advertising for ML serving
+infrastructure integration.
+"""
+
 import json
 import logging
 import time
@@ -9,13 +24,12 @@ from typing_extensions import override
 import grpc
 from google.protobuf import empty_pb2
 
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
-from backends import TorchBackend, ONNXRTBackend
-from resources.loader import ModelResources, ResourceLoader
+import lumen_clip.proto.ml_service_pb2 as pb
+import lumen_clip.proto.ml_service_pb2_grpc as rpc
+from lumen_clip.backends import BaseClipBackend, TorchBackend, ONNXRTBackend
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
 from .bioclip_model import BioCLIPModelManager
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +40,23 @@ def _now_ms() -> int:
 
 class BioCLIPService(rpc.InferenceServicer):
     """
-    使用新的 Inference 协议，统一承载两个服务：
-      - 文本嵌入：task="embed"
-      - BioAtlas 分类：task="classify", meta.namespace="bioatlas"
+    gRPC InferenceServicer for the BioCLIP model.
+
+    This service implements the Inference protocol and exposes handlers for:
+      - Text embedding (task="embed")
+      - Image embedding (task="image_embed")
+      - TreeOfLife classification (task="classify", requires meta.namespace="bioatlas")
+
+    Attributes:
+        MODEL_VERSION: Default model version string.
+        model: `BioCLIPModelManager` instance used for inference.
+        start_time: Timestamp when the service instance was created.
+        is_initialized: Boolean indicating whether the model has been initialized.
     """
 
     MODEL_VERSION: str = "bioclip2"
 
-    def __init__(self, backend, resources: ModelResources) -> None:
+    def __init__(self, backend: BaseClipBackend, resources: ModelResources) -> None:
         """
         Initialize BioCLIPService.
 
@@ -58,8 +81,9 @@ class BioCLIPService(rpc.InferenceServicer):
         Create BioCLIPService from configuration.
 
         Args:
-            config: Service configuration dict
+            model_config: ModelConfig instance
             cache_dir: Cache directory path
+            backend_settings: BackendSettings instance or None
 
         Returns:
             Initialized BioCLIPService instance
@@ -68,7 +92,7 @@ class BioCLIPService(rpc.InferenceServicer):
             ResourceNotFoundError: If required resources are missing
             ConfigError: If configuration is invalid
         """
-        from resources.exceptions import ConfigError
+        from lumen_clip.resources.exceptions import ConfigError
 
         # Get dataset name if specified
         dataset = model_config.dataset
@@ -109,8 +133,8 @@ class BioCLIPService(rpc.InferenceServicer):
         # Log classification support status
         if not resources.has_classification_support():
             logger.warning(
-                f"BioCLIP service started without classification support "
-                f"(no {dataset} dataset found). Only embed tasks will be available."
+                "BioCLIP service started without classification support "
+                + f"(no {dataset} dataset found). Only embed tasks will be available."
             )
 
         return service
@@ -133,8 +157,8 @@ class BioCLIPService(rpc.InferenceServicer):
         self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext
     ):
         """
-        双向流的服务端实现（同步 style：生成器按需 yield 响应）。
-        embed / classify 都是一发一收；如客户端使用了分片 seq/total，这里也支持重组。
+        Bidirectional streaming server implementation (synchronous style: generator yields responses on demand).
+        Both embed and classify are one-request-one-response; supports reassembly if client uses seq/total for fragmentation.
         """
         if not self.is_initialized:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Model not initialized")
@@ -146,13 +170,13 @@ class BioCLIPService(rpc.InferenceServicer):
             t0 = _now_ms()
 
             try:
-                # --- 分片重组（可选）---
+                # --- Fragment reassembly (optional) ---
                 payload, ready = self._assemble(cid, req, buffers)
                 if not ready:
-                    # 分片尚未收齐，不返回响应，继续等下一个分片
+                    # Fragment not yet complete; wait for additional fragments
                     continue
 
-                # --- 路由任务 ---
+                # --- Route to task handler ---
                 if req.task == "embed":
                     result_bytes, result_mime, extra_meta = self._handle_embed(
                         req.payload_mime, payload, dict(req.meta)
@@ -166,7 +190,7 @@ class BioCLIPService(rpc.InferenceServicer):
                             error=pb.Error(
                                 code=pb.ERROR_CODE_INVALID_ARGUMENT,
                                 message="Classification not supported: no dataset loaded. "
-                                "Please ensure TreeOfLife dataset exists in the model directory.",
+                                + "Please ensure TreeOfLife dataset exists in the model directory.",
                             ),
                         )
                         continue
@@ -188,7 +212,7 @@ class BioCLIPService(rpc.InferenceServicer):
                     )
                     continue
 
-                # --- 成功响应 ---
+                # --- Successful response ---
                 meta = dict(extra_meta or {})
                 meta["lat_ms"] = str(_now_ms() - t0)
 
@@ -201,7 +225,7 @@ class BioCLIPService(rpc.InferenceServicer):
                     seq=0,
                     total=1,
                     offset=0,
-                    result_schema="",  # 可留空；有需要再填 "embedding_v1"/"labels_v1"
+                    result_schema="",  # May be left empty; use "embedding_v1" or "labels_v1" if needed
                 )
 
             except grpc.RpcError:
@@ -215,28 +239,32 @@ class BioCLIPService(rpc.InferenceServicer):
                 )
 
     # -------- Capabilities / Health ----------
+    @override
     def GetCapabilities(self, request, context) -> pb.Capability:
         return self._build_capability()
 
     @override
     def StreamCapabilities(self, request, context):
-        # 单实例就发一条；如果后续有动态热更，可以定时/按需再发
+        # Send a single capability message for this instance. If capabilities can
+        # change at runtime, this could be adapted to stream updates periodically
+        # or on demand.
         yield self._build_capability()
 
     @override
     def Health(self, request, context):
-        # 需要更细的健康信息可以扩展；当前协议就是 Empty
+        # Extend to provide richer health information if needed. The current
+        # protocol expects an empty response.
         return empty_pb2.Empty()
 
-    # -------- 具体任务：embed / classify ----------
+    # -------- IOTask：embed / classify ----------
     def _handle_embed(
         self, payload_mime: str, payload: bytes, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """
-        文本嵌入：
-          - 期望 payload_mime: "text/plain;charset=utf-8"
-          - 输出 result_mime:  "application/json;schema=embedding_v1"
-          - 输出 JSON: {"vector":[...], "dim":768, "model_id":"bioclip2"}
+        Text embedding:
+          - Expects payload_mime: "text/plain;charset=utf-8"
+          - Output result_mime: "application/json;schema=embedding_v1"
+          - Output JSON: {"vector":[...], "dim":768, "model_id":"bioclip2"}
         """
         if not payload_mime.startswith("text/"):
             raise ValueError(f"embed expects text/* payload, got {payload_mime!r}")
@@ -279,12 +307,12 @@ class BioCLIPService(rpc.InferenceServicer):
         self, payload_mime: str, payload: bytes, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """
-        BioAtlas 分类：
-          - 期望 payload_mime: "image/jpeg" / "image/png"
-          - 期望 meta.namespace="bioatlas"
-          - 可选 meta.topk（默认 5）
-          - 输出 result_mime: "application/json;schema=labels_v1"
-          - 输出 JSON: {"labels":[{"label":"...","score":0.91},...], "model_id":"bioclip2"}
+        TreeOfLife classification:
+          - Expects payload_mime: "image/jpeg" / "image/png"
+          - Expects meta.namespace="bioatlas"
+          - Optional meta.topk (default 5)
+          - Output result_mime: "application/json;schema=labels_v1"
+          - Output JSON: {"labels":[{"label":"...","score":0.91},...], "model_id":"bioclip2"}
         """
         if not payload_mime.startswith("image/"):
             raise ValueError(f"classify expects image/* payload, got {payload_mime!r}")
@@ -317,11 +345,13 @@ class BioCLIPService(rpc.InferenceServicer):
         self, cid: str, req: pb.InferRequest, buffers: dict[str, bytearray]
     ) -> tuple[bytes, bool]:
         """
-        返回 (payload_bytes, ready)
-        - 若客户端不使用 seq/total：直接 ready=True
-        - 若使用 seq/total：缓存到 buffers[cid]，直到收齐（seq+1==total）才 ready=True
+        Return a tuple (payload_bytes, ready).
+
+        - If the client does not use seq/total: ready is True immediately.
+        - If seq/total are used: buffer fragments in buffers[cid] until all
+          fragments are received (seq + 1 == total); then ready becomes True.
         """
-        # 无分片（默认路径）
+        # No fragmentation (default path)
         if not req.total and not req.seq and not req.offset:
             return bytes(req.payload), True
 
@@ -337,7 +367,6 @@ class BioCLIPService(rpc.InferenceServicer):
         """Constructs the capability message from authoritative sources."""
         # Authoritative sources: model resources and the BackendInfo object.
         res = self.model.resources
-        # CORRECT: Call .get_info() which returns a BackendInfo object.
         backend_info = self.model.backend.get_info()
 
         tasks = [
@@ -368,7 +397,6 @@ class BioCLIPService(rpc.InferenceServicer):
             model_ids=[res.model_info.name],
             runtime=res.runtime,
             max_concurrency=4,
-            # CORRECT: Access info via attributes, not dict keys.
             precisions=backend_info.precisions or ["unknown"],
             extra={
                 "device": backend_info.device or "unknown",

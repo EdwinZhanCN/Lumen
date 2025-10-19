@@ -14,8 +14,8 @@ import time
 from typing import Any
 
 import numpy as np
-from backends import BaseClipBackend
-from resources.loader import ModelResources
+from lumen_clip.backends import BaseClipBackend
+from lumen_clip.resources.loader import ModelResources
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)

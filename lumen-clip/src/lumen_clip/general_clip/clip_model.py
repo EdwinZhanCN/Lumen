@@ -1,11 +1,17 @@
 """
-clip_model.py
+CLIP Model Management Module
 
-Refactored CLIPModelManager to use ModelResources from lumen-resources.
-- Uses pre-loaded labels and embeddings from ModelResources
-- No longer downloads from HuggingFace
-- Simplified initialization (no caching logic needed)
-- Focuses on business logic: classification and embedding
+This module provides the `CLIPModelManager` class, which encapsulates the business logic for managing CLIP-based image classification and embedding tasks. It handles model initialization, label and embedding management, image and text encoding, and both fine-grained and high-level scene classification. The module also defines custom exceptions for error handling related to model data, cache integrity, and label mismatches.
+
+Classes:
+    - ModelDataNotFoundError: Raised when required model data is missing.
+    - CacheCorruptionError: Raised when cached data is corrupted or incompatible.
+    - LabelMismatchError: Raised when cached embeddings do not match current labels.
+    - CLIPModelManager: Main class for managing CLIP model inference and classification.
+
+Dependencies:
+    - Requires a backend implementing the BaseClipBackend interface.
+    - Uses ModelResources for pre-loaded model data and embeddings.
 """
 
 import logging
@@ -15,8 +21,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from backends import BaseClipBackend
-from resources.loader import ModelResources
+from lumen_clip.backends import BaseClipBackend
+from lumen_clip.resources.loader import ModelResources
 
 logger = logging.getLogger(__name__)
 

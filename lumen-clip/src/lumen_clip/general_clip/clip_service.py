@@ -15,14 +15,15 @@ import logging
 import time
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+from typing_extensions import override
 
 import grpc
 from google.protobuf import empty_pb2
 
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
-from backends import TorchBackend, ONNXRTBackend
-from resources.loader import ModelResources, ResourceLoader
+import lumen_clip.proto.ml_service_pb2 as pb
+import lumen_clip.proto.ml_service_pb2_grpc as rpc
+from lumen_clip.backends import TorchBackend, ONNXRTBackend
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
 from .clip_model import CLIPModelManager
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 
@@ -67,11 +68,12 @@ class GeneralCLIPService(rpc.InferenceServicer):
         Args:
             model_config: The specific model's configuration from lumen_config.
             cache_dir: Cache directory path.
+            backend_settings: Backend settings.
 
         Returns:
             Initialized GeneralCLIPService instance.
         """
-        from resources.exceptions import ConfigError
+        from lumen_clip.resources.exceptions import ConfigError
 
         # Load resources using the validated model_config
         logger.info(f"Loading resources for General CLIP model: {model_config.model}")
@@ -127,6 +129,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
 
     # -------- gRPC Service Methods ----------
 
+    @override
     def Infer(
         self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext
     ):
@@ -142,7 +145,6 @@ class GeneralCLIPService(rpc.InferenceServicer):
         for req in request_iterator:
             cid = req.correlation_id or f"cid-{_now_ms()}"
             t0 = _now_ms()
-
             try:
                 # 1. Reassemble payload if it was sent in chunks
                 payload, ready = self._assemble(cid, req, buffers)
@@ -199,14 +201,17 @@ class GeneralCLIPService(rpc.InferenceServicer):
                     error=pb.Error(code=pb.ERROR_CODE_INTERNAL, message=str(e)),
                 )
 
+    @override
     def GetCapabilities(self, request, context) -> pb.Capability:
         """Returns the capabilities of the service in a single response. [cite: 21]"""
         return self._build_capability()
 
+    @override
     def StreamCapabilities(self, request, context) -> Iterable[pb.Capability]:
         """Streams the capabilities of the service."""
         yield self._build_capability()
 
+    @override
     def Health(self, request, context):
         """A simple health check endpoint. [cite: 22]"""
         return empty_pb2.Empty()

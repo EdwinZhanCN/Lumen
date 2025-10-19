@@ -31,7 +31,8 @@ from numpy.typing import NDArray
 from PIL import Image, Image as PILImage
 from pathlib import Path
 
-from resources import ModelResources
+from lumen_clip.resources import ModelResources
+from tokenizers import Tokenizer as HFTokenizer
 
 try:
     import onnxruntime as ort
@@ -41,14 +42,8 @@ except ImportError:
         + "Install with: pip install onnxruntime"
     )
 
-from .base import (
-    BaseClipBackend,
-    BackendInfo,
-    BackendError,
-    ModelLoadingError,
-    InvalidInputError,
-    InferenceError,
-)
+from .backend_exceptions import *
+from .base import BaseClipBackend, BackendInfo
 
 logger = logging.getLogger(__name__)
 
@@ -266,8 +261,6 @@ class ONNXRTBackend(BaseClipBackend):
         """Load tokenizer from tokenizer.json or fallback to SimpleTokenizer."""
         if self.resources.tokenizer_config:
             try:
-                from tokenizers import Tokenizer as HFTokenizer
-
                 tokenizer_path = self.resources.model_root_path / "tokenizer.json"
                 hf_tokenizer = HFTokenizer.from_file(str(tokenizer_path))
 

@@ -26,20 +26,12 @@ from typing_extensions import override
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
-from resources.loader import ModelResources
+from lumen_clip.resources.loader import ModelResources
 
 import torch
 import open_clip
-
-from .base import (
-    BaseClipBackend,
-    BackendInfo,
-    BackendError,
-    ModelLoadingError,
-    DeviceUnavailableError,
-    InvalidInputError,
-    InferenceError,
-)
+from .backend_exceptions import *
+from .base import BaseClipBackend, BackendInfo
 
 logger = logging.getLogger(__name__)
 

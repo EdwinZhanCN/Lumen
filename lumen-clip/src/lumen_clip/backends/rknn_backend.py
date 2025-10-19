@@ -24,7 +24,7 @@ from numpy.typing import NDArray
 from .base import BaseClipBackend, BackendInfo
 
 if TYPE_CHECKING:
-    from resources import ModelResources
+    from lumen_clip.resources import ModelResources
 
 __all__ = ["RKNNBackend"]
 

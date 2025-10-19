@@ -18,20 +18,20 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, final
 from typing_extensions import override
 
 import grpc
 
 from google.protobuf import empty_pb2
-from backends import TorchBackend, ONNXRTBackend, BaseClipBackend
+from lumen_clip.backends import TorchBackend, ONNXRTBackend, BaseClipBackend
 
 # Import the service definition and model managers
-import ml_service_pb2 as pb
-import ml_service_pb2_grpc as rpc
-from expert_bioclip import BioCLIPModelManager
-from general_clip import CLIPModelManager
-from resources.loader import ModelResources, ResourceLoader
+import lumen_clip.proto.ml_service_pb2 as pb
+import lumen_clip.proto.ml_service_pb2_grpc as rpc
+from lumen_clip.expert_bioclip import BioCLIPModelManager
+from lumen_clip.general_clip import CLIPModelManager
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -93,9 +93,9 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         Returns:
             Initialized UnifiedCLIPService instance.
         """
-        from resources.exceptions import ConfigError
-        from general_clip.clip_model import CLIPModelManager
-        from expert_bioclip.bioclip_model import BioCLIPModelManager
+        from lumen_clip.resources.exceptions import ConfigError
+        from lumen_clip.general_clip.clip_model import CLIPModelManager
+        from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 
         # --- Helper function to create a backend from config ---
         def create_backend(resources: ModelResources, runtime: str):
@@ -130,9 +130,6 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         general_backend = create_backend(
             general_resources, general_model_config.runtime.value
         )
-        general_clip_manager = CLIPModelManager(
-            backend=general_backend, resources=general_resources
-        )
 
         # 2. Load resources and create backend for BioCLIP
         logger.info(
@@ -144,13 +141,10 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         bioclip_backend = create_backend(
             bioclip_resources, bioclip_model_config.runtime.value
         )
-        bioclip_manager = BioCLIPModelManager(
-            backend=bioclip_backend, resources=bioclip_resources
-        )
 
         # 3. Create the unified service instance
         service = cls(
-            clip_backend=bioclip_backend,
+            clip_backend=general_backend,
             bioclip_backend=bioclip_backend,
             clip_resources=general_resources,
             bioclip_resources=bioclip_resources,
@@ -412,11 +406,9 @@ class UnifiedCLIPService(rpc.InferenceServicer):
     def Health(self, request, context):
         return empty_pb2.Empty()
 
-    # 请用这个最终版本替换 UnifiedCLIPService 中的 _build_capability 方法
     def _build_capability(self) -> pb.Capability:
         """Constructs a unified capability message from both managed models."""
         general_res = self.clip_resources
-        # CORRECT: Call .get_info() on each backend.
         general_backend_info = self._clip_backend.get_info()
         bioclip_res = self.bioclip_resources
         bioclip_backend_info = self._bioclip_backend.get_info()
@@ -486,7 +478,6 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             model_ids=[general_res.model_info.name, bioclip_res.model_info.name],
             runtime=general_res.runtime,
             max_concurrency=4,
-            # CORRECT: Access info via attributes.
             precisions=general_backend_info.precisions or ["unknown"],
             extra={
                 "general_model_name": general_res.model_info.name,

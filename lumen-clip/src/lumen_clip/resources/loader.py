@@ -76,14 +76,23 @@ class ModelResources:
 
     def get_image_size(self) -> tuple[int, int] | None:
         """Get image input size from config.json."""
-        size = self.config.get("image_size")
-        if not size and "vision_cfg" in self.config:
-            size = self.config["vision_cfg"].get("image_size")
+        size = self.config.get("image_size", None)
+        if size is None:
+            vision_cfg = self.config.get("vision_cfg")
+            if isinstance(vision_cfg, dict):
+                size = vision_cfg.get("image_size", None)
 
         if isinstance(size, (list, tuple)) and len(size) == 2:
-            return tuple(size)
+            try:
+                h = int(size[0])
+                w = int(size[1])
+                return h, w
+            except (TypeError, ValueError):
+                return None
+
         if isinstance(size, int):
-            return (size, size)
+            return size, size
+
         return None
 
 

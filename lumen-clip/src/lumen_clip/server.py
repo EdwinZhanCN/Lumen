@@ -1,17 +1,20 @@
 """
-gRPC Server Runner for Lumen CLIP Services
+Lumen CLIP gRPC server runner.
 
-This script initializes and runs CLIP-based services (CLIP, BioCLIP, or Unified)
-based on YAML configuration files. It supports:
-- Dynamic service loading from config
-- Single-service-per-process enforcement
-- mDNS advertisement
-- Graceful shutdown
-- Resource validation before startup
+This module initializes and runs a CLIP-based gRPC service (General CLIP,
+BioCLIP, or a Unified SmartCLIP) according to a YAML configuration file.
 
-Usage:
-    python server.py --config config/clip_only.yaml
-    python server.py --config config/bioclip_only.yaml --port 50052
+Features:
+- Load and validate configuration
+- Download and verify required model resources
+- Select and initialize the appropriate service implementation
+- Advertise the service over mDNS (optional)
+- Graceful shutdown handling
+- Runtime capability reporting
+
+Typical usage:
+    python server.py --config examples/config/clip_onnx_cn.yaml
+    python server.py --config examples/config/clip_torch_cn.yaml --port 50052
 """
 
 import argparse
@@ -29,10 +32,10 @@ from zeroconf import ServiceInfo, Zeroconf
 
 import grpc
 from lumen_resources.lumen_config import Mdns
-import ml_service_pb2_grpc as pb_rpc
-from general_clip.clip_service import GeneralCLIPService
-from expert_bioclip.bioclip_service import BioCLIPService
-from unified_smartclip.smartclip_service import UnifiedCLIPService
+import lumen_clip.proto.ml_service_pb2_grpc as pb_rpc
+from lumen_clip.general_clip.clip_service import GeneralCLIPService
+from lumen_clip.expert_bioclip.bioclip_service import BioCLIPService
+from lumen_clip.unified_smartclip.smartclip_service import UnifiedCLIPService
 from lumen_resources.downloader import DownloadResult
 
 logger = logging.getLogger(__name__)
@@ -46,10 +49,10 @@ class ConfigError(Exception):
 
 def setup_logging(log_level: str = "INFO"):
     """
-    Configures the root logger for the application.
+    Configure the root logger for the application.
 
-    This function removes any existing handlers, sets the specified log level,
-    and adds a single, colorized handler for console output.
+    This function clears any pre-existing handlers, sets the requested log
+    level, and attaches a single colorized stream handler for console output.
     """
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
@@ -58,11 +61,11 @@ def setup_logging(log_level: str = "INFO"):
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Add our custom colorized handler
+    # Add a colorized console handler
     handler = colorlog.StreamHandler()
     formatter = colorlog.ColoredFormatter(
-        # 新增了 %(cyan)s[%(name)-25s]%(reset)s
-        # 这会用青色打印出日志来源，并让它占据25个字符宽度以便对齐
+        # Include the logger name in cyan and keep a fixed-width field to
+        # improve alignment of log source labels.
         "%(log_color)s%(levelname)-8s%(cyan)s[%(name)s]%(reset)s %(message)s",
         reset=True,
         log_colors={
