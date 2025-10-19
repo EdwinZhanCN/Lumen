@@ -14,14 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import lumen_resources
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import ValidationError
 
 # Assuming these pydantic models are provided by the lumen_resources package
 from lumen_resources.lumen_config import ModelConfig
-from lumen_resources.model_info import ModelConfigurationSchema
+from lumen_resources.model_info import Datasets, ModelInfo
 
+from typing import cast
 
 from .exceptions import (
     ModelInfoError,
@@ -54,7 +56,7 @@ class ModelResources:
     runtime_files_path: Path
     model_name: str
     runtime: str
-    model_info: ModelConfigurationSchema
+    model_info: ModelInfo
     config: dict[str, Any]
     tokenizer_config: dict[str, Any] | None
     labels: NDArray[np.object_] | None
@@ -114,7 +116,7 @@ class ResourceLoader:
 
         # Step 1: Load the on-disk manifest (model_info.json)
         try:
-            model_info = ModelConfigurationSchema.from_json_file(
+            model_info = lumen_resources.load_and_validate_model_info(
                 model_root_path / "model_info.json"
             )
         except FileNotFoundError:
@@ -153,7 +155,7 @@ class ResourceLoader:
 
     @staticmethod
     def _validate_intent_and_get_paths(
-        model_root: Path, config: ModelConfig, info: ModelConfigurationSchema
+        model_root: Path, config: ModelConfig, info: ModelInfo
     ) -> Path:
         """
         Validates the user's ModelConfig intent against the model_info manifest.
@@ -231,48 +233,80 @@ class ResourceLoader:
 
     @staticmethod
     def _load_dataset(
-        model_path: Path, model_info: ModelConfigurationSchema, dataset: str | None
+        model_root_path: Path, model_info: ModelInfo, dataset: str | None
     ) -> tuple[NDArray[np.object_] | None, NDArray[np.float32] | None]:
-        """Load dataset labels and embeddings if available."""
         if not model_info.datasets:
             logger.info("No datasets configured in model_info.json")
             return None, None
 
-        dataset_name = dataset or "ImageNet_1k"  # Default for CLIP
-        if model_info.model_type == "bioclip":
-            dataset_name = dataset or "TreeOfLife-10M"
+        dataset_name = dataset
+        if not dataset_name:
+            if model_info.model_type == "clip":
+                dataset_name = "ImageNet_1k"
+            elif model_info.model_type == "bioclip":
+                dataset_name = "TreeOfLife-10M"
 
-        dataset_filename = model_info.datasets.get(dataset_name)
-        if not dataset_filename:
-            logger.warning(f"Dataset '{dataset_name}' not found in model_info.json")
-            return None, None
-
-        dataset_path = model_path / dataset_filename
-        if not dataset_path.exists():
+        if not dataset_name or dataset_name not in model_info.datasets:
             logger.warning(
-                f"Dataset file not found: {dataset_path}. Classification disabled."
+                f"Dataset '{dataset_name}' not in model_info.json. Disabling classification."
             )
             return None, None
 
+        dataset_info = model_info.datasets[dataset_name]
+
         try:
-            if dataset_path.suffix == ".npz":
+            labels: NDArray[np.object_] | None = None
+            embeddings: NDArray[np.float32] | None = None
+
+            if isinstance(dataset_info, Datasets):
+                labels_path = model_root_path / dataset_info.labels
+                embeddings_path = model_root_path / dataset_info.embeddings
+
+                if not labels_path.exists() or not embeddings_path.exists():
+                    raise FileNotFoundError(
+                        f"Missing dataset files: {labels_path} or {embeddings_path}"
+                    )
+
+                with open(labels_path, "r", encoding="utf-8") as f:
+                    labels = np.array(json.load(f), dtype=object)
+
+                logger.info(
+                    f"Loading embeddings for '{dataset_name}' with memory mapping..."
+                )
+                # FIX: Cast the result of np.load to the specific type we expect.
+                raw_embeddings = np.load(embeddings_path, mmap_mode="r")
+                embeddings = cast(NDArray[np.float32], raw_embeddings)
+
+            elif isinstance(dataset_info, str):
+                logger.warning(
+                    "Using legacy single-file dataset format. Memory mapping is not guaranteed."
+                )
+                dataset_path = model_root_path / dataset_info
+                if not dataset_path.exists():
+                    raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
+
                 data = np.load(dataset_path, allow_pickle=True)
-                labels, embeddings = data["labels"], data.get("embeddings")
-                logger.info(
-                    f"Loaded NPZ dataset '{dataset_name}': {len(labels)} classes"
-                )
-                return labels, embeddings
-            elif dataset_path.suffix == ".npy":
-                data = np.load(dataset_path, allow_pickle=True).item()
-                labels = np.array(data["labels"], dtype=object)
-                embeddings = data.get("embeddings")
-                logger.info(
-                    f"Loaded NPY dataset '{dataset_name}': {len(labels)} classes"
-                )
-                return labels, embeddings
+                if isinstance(data, np.lib.npyio.NpzFile):
+                    # FIX: Cast the arrays from the NpzFile.
+                    labels = cast(NDArray[np.object_], data["labels"])
+                    if "embeddings" in data.files:
+                        embeddings = cast(NDArray[np.float32], data["embeddings"])
+                    data.close()
+                else:
+                    data_dict = data.item()
+                    labels = np.array(data_dict["labels"], dtype=object)
+                    if "embeddings" in data_dict:
+                        embeddings = cast(NDArray[np.float32], data_dict["embeddings"])
             else:
-                logger.warning(f"Unsupported dataset format: {dataset_path.suffix}")
-                return None, None
+                raise TypeError(
+                    f"Unsupported format for dataset info: {type(dataset_info)}"
+                )
+
+            if labels is not None:
+                logger.info(f"Loaded dataset '{dataset_name}': {len(labels)} classes")
+
+            return labels, embeddings
+
         except Exception as e:
             logger.warning(
                 f"Failed to load dataset '{dataset_name}': {e}. Disabling classification."

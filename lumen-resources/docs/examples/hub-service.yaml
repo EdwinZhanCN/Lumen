@@ -1,5 +1,5 @@
 # Lumen Services Configuration - Hub Mode
-# yaml-language-server: $schema=../config-schema.yaml
+# yaml-language-server: $schema=https://doc.lumilio.org/schema/config-schema.yaml
 
 metadata:
     version: "1.0.0"

@@ -25,8 +25,10 @@ from concurrent import futures
 from pathlib import Path
 from lumen_resources import load_and_validate_config, Downloader
 import colorlog
+from zeroconf import ServiceInfo, Zeroconf
 
 import grpc
+from lumen_resources.lumen_config import Mdns
 import ml_service_pb2_grpc as pb_rpc
 from general_clip.clip_service import GeneralCLIPService
 from expert_bioclip.bioclip_service import BioCLIPService
@@ -34,13 +36,6 @@ from unified_smartclip.smartclip_service import UnifiedCLIPService
 from lumen_resources.downloader import DownloadResult
 
 logger = logging.getLogger(__name__)
-# Try to import zeroconf for mDNS support
-try:
-    from zeroconf import ServiceInfo, Zeroconf
-
-    ZEROCONF_AVAILABLE = True
-except ImportError:
-    ZEROCONF_AVAILABLE = False
 
 
 class ConfigError(Exception):
@@ -82,7 +77,9 @@ def setup_logging(log_level: str = "INFO"):
     root_logger.addHandler(handler)
 
 
-def setup_mdns(port: int, mdns_config: dict) -> tuple:
+def setup_mdns(
+    port: int, mdns_config: Mdns | None
+) -> tuple[Zeroconf | None, ServiceInfo | None]:
     """
     Set up mDNS service advertisement.
 
@@ -93,9 +90,6 @@ def setup_mdns(port: int, mdns_config: dict) -> tuple:
     Returns:
         Tuple of (zeroconf, service_info) or (None, None) if setup fails
     """
-    if not ZEROCONF_AVAILABLE:
-        logger.warning("Zeroconf not available; skipping mDNS advertisement")
-        return None, None
 
     try:
         # Determine advertised IP
@@ -113,8 +107,8 @@ def setup_mdns(port: int, mdns_config: dict) -> tuple:
         if ip.startswith("127."):
             logger.warning(
                 f"mDNS advertising loopback IP {ip}; "
-                "other devices may not reach the service. "
-                "Set ADVERTISE_IP to a LAN IP."
+                + "other devices may not reach the service. "
+                + "Set ADVERTISE_IP to a LAN IP."
             )
 
         # Build TXT record properties
@@ -124,9 +118,17 @@ def setup_mdns(port: int, mdns_config: dict) -> tuple:
             "version": os.getenv("SERVICE_VERSION", "1.0.0"),
         }
 
-        # Get service type and name from config
-        service_type = mdns_config.get("type", "_lumen-clip._tcp.local.")
-        instance_name = mdns_config.get("name", "CLIP-Service")
+        # Get service type and name from config (Mdns may be None or have different attribute names)
+        service_type = (
+            getattr(mdns_config, "type", None)
+            or getattr(mdns_config, "service_type", None)
+            or "_lumen._tcp.local."
+        )
+        instance_name = (
+            getattr(mdns_config, "name", None)
+            or getattr(mdns_config, "service_name", None)
+            or "CLIP-Service"
+        )
         full_name = f"{instance_name}.{service_type}"
 
         # Create service info
@@ -223,6 +225,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         service_instance = None
         service_display_name = "Unknown"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
+        backend_settings = service_config.backend_settings
         # Decision logic: choose the service based on which models are configured.
         if general_model_config and bioclip_model_config:
             # Case 1: Both models are defined -> Unified Service
@@ -234,6 +237,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
                 general_model_config=general_model_config,
                 bioclip_model_config=bioclip_model_config,
                 cache_dir=cache_dir,
+                backend_settings=backend_settings,
             )
 
         elif general_model_config:
@@ -243,7 +247,9 @@ def serve(config_path: str, port_override: int | None = None) -> None:
                 f"Configuration for '{service_display_name}' service identified."
             )
             service_instance = GeneralCLIPService.from_config(
-                model_config=general_model_config, cache_dir=cache_dir
+                model_config=general_model_config,
+                cache_dir=cache_dir,
+                backend_settings=backend_settings,
             )
 
         elif bioclip_model_config:
@@ -253,7 +259,9 @@ def serve(config_path: str, port_override: int | None = None) -> None:
                 f"Configuration for '{service_display_name}' service identified."
             )
             service_instance = BioCLIPService.from_config(
-                model_config=bioclip_model_config, cache_dir=cache_dir
+                model_config=bioclip_model_config,
+                cache_dir=cache_dir,
+                backend_settings=backend_settings,
             )
 
         else:
@@ -292,9 +300,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         # Step 5: Set up mDNS and graceful shutdown.
         zeroconf, service_info = None, None
         if config.server.mdns and config.server.mdns.enabled:
-            zeroconf, service_info = setup_mdns(
-                port, config.server.mdns.model_dump(by_alias=True)
-            )
+            zeroconf, service_info = setup_mdns(port, config.server.mdns)
 
         def handle_shutdown(signum, frame):
             logger.info("Shutdown signal received. Stopping server...")

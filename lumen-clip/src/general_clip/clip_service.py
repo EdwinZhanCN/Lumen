@@ -24,7 +24,7 @@ import ml_service_pb2_grpc as rpc
 from backends import TorchBackend, ONNXRTBackend
 from resources.loader import ModelResources, ResourceLoader
 from .clip_model import CLIPModelManager
-from lumen_resources.lumen_config import ModelConfig
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,12 @@ class GeneralCLIPService(rpc.InferenceServicer):
         self.is_initialized = False
 
     @classmethod
-    def from_config(cls, model_config: ModelConfig, cache_dir: Path):
+    def from_config(
+        cls,
+        model_config: ModelConfig,
+        cache_dir: Path,
+        backend_settings: BackendSettings | None,
+    ):
         """
         Create GeneralCLIPService from configuration.
 
@@ -67,7 +72,6 @@ class GeneralCLIPService(rpc.InferenceServicer):
             Initialized GeneralCLIPService instance.
         """
         from resources.exceptions import ConfigError
-        import os
 
         # Load resources using the validated model_config
         logger.info(f"Loading resources for General CLIP model: {model_config.model}")
@@ -75,20 +79,23 @@ class GeneralCLIPService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
+        device_pref = getattr(backend_settings, "device", "cpu")
+        max_batch_size = getattr(backend_settings, "batch_size", 8)
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
-                device_preference=os.getenv("DEVICE"),
-                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
             )
         elif runtime == "onnx":
-            providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
-            providers_list = [p.strip() for p in providers.split(",")]
+            providers_list = getattr(
+                backend_settings, "onnx_providers", ["CPUExecutionProvider"]
+            )
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
-                device_preference=os.getenv("DEVICE"),
-                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")
@@ -317,14 +324,11 @@ class GeneralCLIPService(rpc.InferenceServicer):
         return b"", False  # Not ready yet
 
     def _build_capability(self) -> pb.Capability:
-        """Constructs the capability message based on the model's current state."""
-        info = self.model.info()
-        backend_info_raw = info.get("backend_info", {})
-        backend_info = backend_info_raw if isinstance(backend_info_raw, dict) else {}
-        model_id_raw = info.get("model_id", "unknown")
-        model_id = str(model_id_raw) if model_id_raw is not None else "unknown"
+        """Constructs the capability message from authoritative sources."""
+        res = self.model.resources
+        # CORRECT: Call .get_info() which returns a BackendInfo object.
+        backend_info = self.model.backend.get_info()
 
-        # Base tasks (always available)
         tasks = [
             pb.IOTask(
                 name="embed",
@@ -338,7 +342,6 @@ class GeneralCLIPService(rpc.InferenceServicer):
             ),
         ]
 
-        # Classification tasks (only if dataset is available)
         if self.model.supports_classification:
             tasks.extend(
                 [
@@ -356,29 +359,17 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 ]
             )
 
-        runtime = backend_info.get("runtime", "unknown")
-        runtime_str = str(runtime) if runtime is not None else "unknown"
-
-        precisions_raw = backend_info.get("precisions", ["fp32"])
-        precisions = precisions_raw if isinstance(precisions_raw, list) else ["fp32"]
-
-        device = backend_info.get("device", "unknown")
-        device_str = str(device) if device is not None else "unknown"
-
-        embedding_dim = backend_info.get("embedding_dim", "unknown")
-        embedding_dim_str = (
-            str(embedding_dim) if embedding_dim is not None else "unknown"
-        )
-
         return pb.Capability(
             service_name=self.SERVICE_NAME,
-            model_ids=[model_id],
-            runtime=runtime_str,
+            model_ids=[res.model_info.name],
+            runtime=res.runtime,
             max_concurrency=4,
-            precisions=precisions,
+            # CORRECT: Access info via attributes, not dict keys.
+            precisions=backend_info.precisions or ["unknown"],
             extra={
-                "device": device_str,
-                "embedding_dim": embedding_dim_str,
+                "device": backend_info.device or "unknown",
+                "embedding_dim": str(res.get_embedding_dim()),
+                "model_version": res.model_info.version,
                 "supports_classification": str(self.model.supports_classification),
             },
             tasks=tasks,

@@ -14,7 +14,7 @@ import ml_service_pb2_grpc as rpc
 from backends import TorchBackend, ONNXRTBackend
 from resources.loader import ModelResources, ResourceLoader
 from .bioclip_model import BioCLIPModelManager
-from lumen_resources.lumen_config import ModelConfig
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
 import os
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,12 @@ class BioCLIPService(rpc.InferenceServicer):
         self.is_initialized: bool = False
 
     @classmethod
-    def from_config(cls, model_config: ModelConfig, cache_dir: Path):
+    def from_config(
+        cls,
+        model_config: ModelConfig,
+        cache_dir: Path,
+        backend_settings: BackendSettings | None,
+    ):
         """
         Create BioCLIPService from configuration.
 
@@ -77,20 +82,23 @@ class BioCLIPService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
+        device_pref = getattr(backend_settings, "device", "cpu")
+        max_batch_size = getattr(backend_settings, "batch_size", 8)
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
-                device_preference=os.getenv("DEVICE"),
-                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
             )
         elif runtime == "onnx":
-            providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
-            providers_list = [p.strip() for p in providers.split(",")]
+            providers_list = getattr(
+                backend_settings, "onnx_providers", ["CPUExecutionProvider"]
+            )
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
-                device_preference=os.getenv("DEVICE"),
-                max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")
@@ -325,20 +333,13 @@ class BioCLIPService(rpc.InferenceServicer):
             return data, True
         return b"", False
 
-    # -------- Capability ----------
     def _build_capability(self) -> pb.Capability:
-        info = {}
-        backend_info = {}
-        try:
-            info = self.model.info()
-            backend_info_raw = info.get("backend_info", {})
-            backend_info = (
-                backend_info_raw if isinstance(backend_info_raw, dict) else {}
-            )
-        except Exception:
-            pass
+        """Constructs the capability message from authoritative sources."""
+        # Authoritative sources: model resources and the BackendInfo object.
+        res = self.model.resources
+        # CORRECT: Call .get_info() which returns a BackendInfo object.
+        backend_info = self.model.backend.get_info()
 
-        # Base tasks (always available)
         tasks = [
             pb.IOTask(
                 name="embed",
@@ -352,7 +353,6 @@ class BioCLIPService(rpc.InferenceServicer):
             ),
         ]
 
-        # Classification task (only if dataset is available)
         if self.model.supports_classification:
             tasks.append(
                 pb.IOTask(
@@ -363,29 +363,17 @@ class BioCLIPService(rpc.InferenceServicer):
                 )
             )
 
-        runtime = backend_info.get("runtime", "unknown")
-        runtime_str = str(runtime) if runtime is not None else "unknown"
-
-        precisions_raw = backend_info.get("precisions", ["fp32"])
-        precisions = precisions_raw if isinstance(precisions_raw, list) else ["fp32"]
-
-        device = backend_info.get("device", "unknown")
-        device_str = str(device) if device is not None else "unknown"
-
-        embedding_dim = backend_info.get("embedding_dim", "unknown")
-        embedding_dim_str = (
-            str(embedding_dim) if embedding_dim is not None else "unknown"
-        )
-
         return pb.Capability(
             service_name="clip-bioclip",
-            model_ids=[self.MODEL_VERSION],
-            runtime=runtime_str,
+            model_ids=[res.model_info.name],
+            runtime=res.runtime,
             max_concurrency=4,
-            precisions=precisions,
+            # CORRECT: Access info via attributes, not dict keys.
+            precisions=backend_info.precisions or ["unknown"],
             extra={
-                "device": device_str,
-                "embedding_dim": embedding_dim_str,
+                "device": backend_info.device or "unknown",
+                "embedding_dim": str(res.get_embedding_dim()),
+                "model_version": res.model_info.version,
                 "supports_classification": str(self.model.supports_classification),
             },
             tasks=tasks,

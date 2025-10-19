@@ -81,6 +81,6 @@ search_path = ["./src"]
 type = "mkdocs"
 
 [[tool.pydoc-markdown.renderer.pages]]
-title = "API 文档"
+title = "API Doc"
 name = "index"
 contents = ["proto.*"]

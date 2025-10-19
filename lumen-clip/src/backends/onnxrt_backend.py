@@ -20,9 +20,10 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import io
 import logging
-from typing import Callable
+from typing import Callable, cast
 from typing_extensions import override
 
 import numpy as np
@@ -37,7 +38,7 @@ try:
 except ImportError:
     raise ImportError(
         "onnxruntime is required for ONNXRTBackend. "
-        "Install with: pip install onnxruntime"
+        + "Install with: pip install onnxruntime"
     )
 
 from .base import (
@@ -65,6 +66,10 @@ class ONNXRTModelLoadingError(ONNXRTBackendError, ModelLoadingError):
 
 
 class ONNXRTBackend(BaseClipBackend):
+    # Class-level attribute annotations to satisfy static type checkers
+    _providers: list[str]
+    _prefer_fp16: bool
+    _initialized: bool
     """
     ONNX Runtime backend implementing BaseClipBackend.
 
@@ -106,7 +111,7 @@ class ONNXRTBackend(BaseClipBackend):
         # Runtime objects
         self._sess_vision: ort.InferenceSession | None = None
         self._sess_text: ort.InferenceSession | None = None
-        self._tokenizer: Callable[[list[str]], np.ndarray] | None = None
+        self._tokenizer: Callable[[Sequence[str]], np.ndarray] | None = None
         self._image_preprocessor: Callable[[Image.Image], np.ndarray] | None = None
         self._load_time_seconds: float | None = None
 
@@ -167,7 +172,10 @@ class ONNXRTBackend(BaseClipBackend):
             self._text_input_dtype = self._onnx_type_to_numpy(text_input.type)
 
             # 3. Setup tokenizer
-            self._tokenizer = self._load_tokenizer()
+            # Cast to the declared callable signature to satisfy static type checkers.
+            self._tokenizer = cast(
+                Callable[[Sequence[str]], np.ndarray], self._load_tokenizer()
+            )
 
             # 4. Setup image preprocessor
             self._image_preprocessor = self._create_image_preprocessor()
@@ -202,7 +210,7 @@ class ONNXRTBackend(BaseClipBackend):
         Raises:
             ONNXRTModelLoadingError: If no suitable model file is found
         """
-        runtime_dir = self.resources.model_root_path
+        runtime_dir = self.resources.model_root_path / "onnx"
 
         # Try FP16 first if GPU and preferred
         if self._prefer_fp16:
@@ -254,7 +262,7 @@ class ONNXRTBackend(BaseClipBackend):
         }
         return any(p in gpu_providers for p in providers)
 
-    def _load_tokenizer(self) -> Callable[[list[str]], np.ndarray]:
+    def _load_tokenizer(self) -> Callable[[Sequence[str]], np.ndarray]:
         """Load tokenizer from tokenizer.json or fallback to SimpleTokenizer."""
         if self.resources.tokenizer_config:
             try:
@@ -265,13 +273,15 @@ class ONNXRTBackend(BaseClipBackend):
 
                 logger.info("Using custom tokenizer from tokenizer.json")
 
-                def tokenize_fn(texts: list[str]) -> np.ndarray:
-                    encoded = hf_tokenizer.encode_batch(texts)
+                def tokenize_fn(texts: Sequence[str]) -> np.ndarray:
+                    texts_list = list(texts)
+                    encoded = hf_tokenizer.encode_batch(texts_list)
                     tokens = [enc.ids for enc in encoded]
-                    # Pad to max length
-                    max_len = max(len(t) for t in tokens) if tokens else 77
-                    max_len = min(max_len, 77)  # CLIP's max context length
-                    padded = [t[:max_len] + [0] * (max_len - len(t)) for t in tokens]
+                    CLIP_MAX_LEN = 77
+                    padded = [
+                        t[:CLIP_MAX_LEN] + [0] * max(0, CLIP_MAX_LEN - len(t))
+                        for t in tokens
+                    ]
                     return np.array(padded, dtype=np.int64)
 
                 return tokenize_fn
@@ -293,8 +303,8 @@ class ONNXRTBackend(BaseClipBackend):
 
             simple_tokenizer = SimpleTokenizer()
 
-            def tokenize_fn(texts: list[str]) -> np.ndarray:
-                tokens = simple_tokenizer(texts)
+            def tokenize_fn(texts: Sequence[str]) -> np.ndarray:
+                tokens = simple_tokenizer(list(texts))
                 return tokens.numpy().astype(np.int64)
 
             return tokenize_fn
@@ -397,7 +407,7 @@ class ONNXRTBackend(BaseClipBackend):
             raise InferenceError(f"Image encoding failed: {e}") from e
 
     @override
-    def image_batch_to_vectors(self, images: list[bytes]) -> NDArray[np.float32]:
+    def image_batch_to_vectors(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         """Encode a batch of images using batched ONNX inference."""
         if not images:
             return np.empty((0, 0), dtype=np.float32)
@@ -436,7 +446,7 @@ class ONNXRTBackend(BaseClipBackend):
             raise InferenceError(f"Batch image encoding failed: {e}") from e
 
     @override
-    def text_batch_to_vectors(self, texts: list[str]) -> NDArray[np.float32]:
+    def text_batch_to_vectors(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """Encode a batch of texts using batched ONNX inference."""
         if not texts:
             return np.empty((0, 0), dtype=np.float32)
@@ -452,7 +462,7 @@ class ONNXRTBackend(BaseClipBackend):
                     raise InvalidInputError("text cannot be empty or whitespace only")
 
             # Tokenize all texts (always int64)
-            tokens = self._tokenizer(texts).astype(self._text_input_dtype)
+            tokens = self._tokenizer(list(texts)).astype(self._text_input_dtype)
 
             # Run batched inference
             input_name = self._sess_text.get_inputs()[0].name

@@ -14,16 +14,17 @@ Features:
 
 import json
 import logging
-import os
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable, Mapping
+from typing import Any
+from typing_extensions import override
 
 import grpc
 
 from google.protobuf import empty_pb2
-from backends import TorchBackend, ONNXRTBackend
+from backends import TorchBackend, ONNXRTBackend, BaseClipBackend
 
 # Import the service definition and model managers
 import ml_service_pb2 as pb
@@ -31,7 +32,7 @@ import ml_service_pb2_grpc as rpc
 from expert_bioclip import BioCLIPModelManager
 from general_clip import CLIPModelManager
 from resources.loader import ModelResources, ResourceLoader
-from lumen_resources.lumen_config import ModelConfig
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
     def __init__(
         self,
-        clip_backend,
-        bioclip_backend,
+        clip_backend: BaseClipBackend,
+        bioclip_backend: BaseClipBackend,
         clip_resources: ModelResources,
         bioclip_resources: ModelResources,
     ) -> None:
@@ -60,6 +61,8 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             bioclip_resources: ModelResources for BioCLIP model
         """
         # Initialize model managers with the selected backends
+        self.clip_resources = clip_resources
+        self.bioclip_resources = bioclip_resources
         self.clip_model = CLIPModelManager(
             backend=clip_backend, resources=clip_resources
         )
@@ -77,7 +80,8 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         general_model_config: ModelConfig,
         bioclip_model_config: ModelConfig,
         cache_dir: Path,
-    ):
+        backend_settings: BackendSettings | None,
+    ) -> "UnifiedCLIPService":
         """
         Create UnifiedCLIPService from configurations for both models.
 
@@ -95,20 +99,23 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
         # --- Helper function to create a backend from config ---
         def create_backend(resources: ModelResources, runtime: str):
+            device_pref = getattr(backend_settings, "device", "cpu")
+            max_batch_size = getattr(backend_settings, "batch_size", 8)
             if runtime == "torch":
                 return TorchBackend(
                     resources=resources,
-                    device_preference=os.getenv("DEVICE"),
-                    max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                    device_preference=device_pref,
+                    max_batch_size=max_batch_size,
                 )
             elif runtime == "onnx":
-                providers = os.getenv("ONNX_PROVIDERS", "CPUExecutionProvider")
-                providers_list = [p.strip() for p in providers.split(",")]
+                providers_list = getattr(
+                    backend_settings, "onnx_providers", ["CPUExecutionProvider"]
+                )
                 return ONNXRTBackend(
                     resources=resources,
                     providers=providers_list,
-                    device_preference=os.getenv("DEVICE"),
-                    max_batch_size=int(os.getenv("BATCH_SIZE", "8")),
+                    device_preference=device_pref,
+                    max_batch_size=max_batch_size,
                 )
             else:
                 raise ConfigError(f"Unsupported runtime: {runtime}")
@@ -143,8 +150,8 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
         # 3. Create the unified service instance
         service = cls(
-            clip_backend=general_clip_manager,
-            bioclip_backend=bioclip_manager,
+            clip_backend=bioclip_backend,
+            bioclip_backend=bioclip_backend,
             clip_resources=general_resources,
             bioclip_resources=bioclip_resources,
         )
@@ -165,9 +172,10 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         self.bioclip_model.initialize()
         logger.info("✅ All models initialized successfully.")
 
+    @override
     def Infer(
         self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext
-    ):
+    ) -> Iterable[pb.InferResponse]:
         """
         Handles bidirectional streaming inference with server-side batching.
         """
@@ -177,7 +185,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
             return
 
-        batch: List[pb.InferRequest] = []
+        batch: list[pb.InferRequest] = []
         for req in request_iterator:
             batch.append(req)
             if len(batch) >= BATCH_SIZE:
@@ -191,14 +199,14 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 yield response
 
     def _process_batch(
-        self, batch: List[pb.InferRequest]
+        self, batch: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         """Processes a batch of requests, groups them by task, and yields responses."""
         t0 = time.time()
         logger.info(f"Processing a batch of {len(batch)} requests...")
 
         # Group requests by their task name
-        tasks = defaultdict(list)
+        tasks: dict[str, list[pb.InferRequest]] = defaultdict(list)
         for req in batch:
             tasks[req.task].append(req)
 
@@ -236,7 +244,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
     # --- Task Handlers (process lists of requests) ---
 
     def _handle_clip_classify(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
             top_k = int(req.meta.get("topk", "5"))
@@ -246,7 +254,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_bioclip_classify(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
             top_k = int(req.meta.get("topk", "3"))
@@ -256,7 +264,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_smart_classify(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
             # Check if both models support classification
@@ -311,7 +319,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_clip_embed(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
             vec = self.clip_model.encode_text(req.payload.decode("utf-8")).tolist()
@@ -320,7 +328,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_bioclip_embed(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
             vec = self.bioclip_model.encode_text(req.payload.decode("utf-8")).tolist()
@@ -329,7 +337,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_clip_image_embed(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         # Use backend batch embedding (falls back to sequential in backend if not supported)
         image_bytes = [req.payload for req in requests]
@@ -341,7 +349,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             )
 
     def _handle_bioclip_image_embed(
-        self, requests: List[pb.InferRequest]
+        self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         # Use backend batch embedding (falls back to sequential in backend if not supported)
         image_bytes = [req.payload for req in requests]
@@ -357,9 +365,9 @@ class UnifiedCLIPService(rpc.InferenceServicer):
     def _build_label_response(
         self,
         cid: str,
-        scores: List[Tuple[str, float]],
-        model_info: dict,
-        meta: dict | None = None,
+        scores: list[tuple[str, float]],
+        model_info: Mapping[str, Any],
+        meta: dict[str, str] | None = None,
     ) -> pb.InferResponse:
         model_id = f"{model_info.get('model_name', model_info.get('model_version'))}:{model_info.get('pretrained', '')}"
         obj = {
@@ -378,7 +386,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         )
 
     def _build_embed_response(
-        self, cid: str, vec: list, model_info: dict
+        self, cid: str, vec: list[float], model_info: Mapping[str, Any]
     ) -> pb.InferResponse:
         model_id = f"{model_info.get('model_name', model_info.get('model_version'))}:{model_info.get('pretrained', '')}"
         obj = {"vector": vec, "dim": len(vec), "model_id": model_id.strip(":")}
@@ -392,31 +400,41 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
     # --- Capabilities and Health ---
 
+    @override
     def GetCapabilities(self, request, context) -> pb.Capability:
         return self._build_capability()
 
+    @override
     def StreamCapabilities(self, request, context) -> Iterable[pb.Capability]:
         yield self._build_capability()
 
+    @override
     def Health(self, request, context):
         return empty_pb2.Empty()
 
+    # 请用这个最终版本替换 UnifiedCLIPService 中的 _build_capability 方法
     def _build_capability(self) -> pb.Capability:
-        # Base tasks (always available)
+        """Constructs a unified capability message from both managed models."""
+        general_res = self.clip_resources
+        # CORRECT: Call .get_info() on each backend.
+        general_backend_info = self._clip_backend.get_info()
+        bioclip_res = self.bioclip_resources
+        bioclip_backend_info = self._bioclip_backend.get_info()
+
         tasks = [
             pb.IOTask(
                 name="clip_embed",
-                input_mimes=["text/plain"],
-                output_mimes=["application/json;schema=embedding_v1"],
-            ),
-            pb.IOTask(
-                name="bioclip_embed",
-                input_mimes=["text/plain"],
+                input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
                 name="clip_image_embed",
                 input_mimes=["image/jpeg", "image/png", "image/webp"],
+                output_mimes=["application/json;schema=embedding_v1"],
+            ),
+            pb.IOTask(
+                name="bioclip_embed",
+                input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
@@ -426,12 +444,18 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             ),
         ]
 
-        # Classification tasks (only if datasets are available)
         if self.clip_model.supports_classification:
             tasks.append(
                 pb.IOTask(
                     name="clip_classify",
-                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    input_mimes=["image/jpeg", "image/png"],
+                    output_mimes=["application/json;schema=labels_v1"],
+                )
+            )
+            tasks.append(
+                pb.IOTask(
+                    name="clip_classify_scene",
+                    input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
             )
@@ -440,39 +464,41 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             tasks.append(
                 pb.IOTask(
                     name="bioclip_classify",
-                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
             )
 
-        # Smart classify (only if CLIP classification is available)
-        if self.clip_model.supports_classification:
+        if (
+            self.clip_model.supports_classification
+            and self.bioclip_model.supports_classification
+        ):
             tasks.append(
                 pb.IOTask(
                     name="smart_classify",
-                    input_mimes=["image/jpeg", "image/png", "image/webp"],
+                    input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
             )
 
-        # Report effective runtime; if mixed backends are used, declare "mixed"
-        clip_rt = self.clip_model.backend.get_info().runtime
-        bio_rt = self.bioclip_model.backend.get_info().runtime
-        effective_runtime = clip_rt if clip_rt == bio_rt else "mixed"
-
         return pb.Capability(
-            service_name=self.SERVICE_NAME,
-            model_ids=[self.clip_model.model_id, self.bioclip_model.model_id],
-            runtime=effective_runtime,
-            max_concurrency=16,
-            tasks=tasks,
+            service_name="clip-unified",
+            model_ids=[general_res.model_info.name, bioclip_res.model_info.name],
+            runtime=general_res.runtime,
+            max_concurrency=4,
+            # CORRECT: Access info via attributes.
+            precisions=general_backend_info.precisions or ["unknown"],
             extra={
-                "batch_size": str(BATCH_SIZE),
-                "runtime.clip": clip_rt,
-                "runtime.bioclip": bio_rt,
-                "clip_classification": str(self.clip_model.supports_classification),
-                "bioclip_classification": str(
-                    self.bioclip_model.supports_classification
-                ),
+                "general_model_name": general_res.model_info.name,
+                "general_model_version": general_res.model_info.version,
+                "general_runtime": general_res.runtime,
+                "general_device": general_backend_info.device or "unknown",
+                "general_embedding_dim": str(general_res.get_embedding_dim()),
+                "bioclip_model_name": bioclip_res.model_info.name,
+                "bioclip_model_version": bioclip_res.model_info.version,
+                "bioclip_runtime": bioclip_res.runtime,
+                "bioclip_device": bioclip_backend_info.device or "unknown",
+                "bioclip_embedding_dim": str(bioclip_res.get_embedding_dim()),
             },
+            tasks=tasks,
         )
