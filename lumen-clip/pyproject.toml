@@ -23,6 +23,7 @@ dependencies = [
     "pygbif",
     "colorlog",
     "zeroconf",
+    "transformers",
     "torch>=2.1.0",
     "torchvision>=0.16.0",
     "torchaudio>=2.1.0",
@@ -53,7 +54,7 @@ mps = [
     "onnxruntime>=1.16.0",
 ]
 
-openvino2404 = [
+openvino246 = [
     "torch>=2.1.0",
     "torchvision>=0.16.0",
     "torchaudio>=2.1.0",
@@ -69,13 +70,3 @@ jp61 = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-image_classification = ["*.json"]
-
-[[tool.pydoc-markdown.loaders]]
-type = "python"
-search_path = ["./src"]
-
-[tool.pydoc-markdown.renderer]
-type = "mkdocs"

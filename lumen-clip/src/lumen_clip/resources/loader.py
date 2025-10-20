@@ -12,7 +12,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import lumen_resources
 import numpy as np
@@ -61,6 +61,8 @@ class ModelResources:
     tokenizer_config: dict[str, Any] | None
     labels: NDArray[np.object_] | None
     label_embeddings: NDArray[np.float32] | None
+    source_format: Literal["huggingface", "openclip", "modelscope", "custom"]
+    source_repo: str
 
     def get_model_file(self, filename: str) -> Path:
         """Get a file path within the runtime-specific directory."""
@@ -140,12 +142,30 @@ class ResourceLoader:
             model_root_path, model_config, model_info
         )
 
-        # Step 3: Load remaining resources
-        config = ResourceLoader._load_json(model_root_path / "config.json")
-        tokenizer_config = ResourceLoader._load_tokenizer(model_root_path)
+        # Step 3: Load config and tokenizer based on source format
+        source_format = model_info.source.format.value
+        if source_format == "openclip":
+            # Load model config.json (required) and attempt to load tokenizer.json (optional)
+            config = ResourceLoader._load_json(model_root_path / "config.json")
+            tokenizer_config = ResourceLoader._load_for_openclip(model_root_path)
+            if tokenizer_config is None:
+                logger.info(
+                    "No tokenizer config loaded for OpenCLIP model; using SimpleTokenizer fallback"
+                )
+        elif source_format == "huggingface":
+            config = ResourceLoader._load_json(model_root_path / "config.json")
+            tokenizer_config = ResourceLoader._load_for_huggingface(model_root_path)
+        else:
+            raise ModelInfoError(
+                f"Unsupported source_format '{source_format}'. Must be 'openclip' or 'huggingface'."
+            )
+
+        # Step 4: Load dataset if specified
         labels, embeddings = ResourceLoader._load_dataset(
             model_root_path, model_info, model_config.dataset
         )
+
+        source_repo = model_info.source.repo_id
 
         resources = ModelResources(
             model_root_path=model_root_path,
@@ -157,6 +177,8 @@ class ResourceLoader:
             tokenizer_config=tokenizer_config,
             labels=labels,
             label_embeddings=embeddings,
+            source_format=source_format,
+            source_repo=source_repo,
         )
 
         ResourceLoader._log_resource_summary(resources)
@@ -224,21 +246,39 @@ class ResourceLoader:
             raise ResourceNotFoundError(f"Failed to load {path.name}: {e}") from e
 
     @staticmethod
-    def _load_tokenizer(model_path: Path) -> dict[str, Any] | None:
-        """Load tokenizer.json if it exists."""
+    def _load_for_openclip(model_path: Path) -> dict[str, Any] | None:
+        """Load tokenizer for OpenCLIP models. Fallback to SimpleTokenizer if not found."""
         tokenizer_path = model_path / "tokenizer.json"
         if tokenizer_path.exists():
             try:
                 tokenizer_config = ResourceLoader._load_json(tokenizer_path)
-                logger.info("Loaded tokenizer.json")
+                logger.info("Loaded tokenizer.json for OpenCLIP model")
                 return tokenizer_config
             except Exception as e:
                 logger.warning(
                     f"Failed to load tokenizer.json: {e}. Fallback to SimpleTokenizer"
                 )
         else:
-            logger.info("No tokenizer.json found, will use SimpleTokenizer")
+            logger.info(
+                "No tokenizer.json found, will use SimpleTokenizer for OpenCLIP model"
+            )
         return None
+
+    @staticmethod
+    def _load_for_huggingface(model_path: Path) -> dict[str, Any] | None:
+        """Load tokenizer for HuggingFace models. tokenizer.json is required."""
+        tokenizer_path = model_path / "tokenizer.json"
+        if not tokenizer_path.exists():
+            logger.info("No tokenizer.json found, will use preprocessor.json for HuggingFace")
+            return None
+        try:
+            tokenizer_config = ResourceLoader._load_json(tokenizer_path)
+            logger.info("Loaded tokenizer.json for HuggingFace model")
+            return tokenizer_config
+        except Exception as e:
+            raise ResourceValidationError(
+                f"Failed to load tokenizer.json for HuggingFace model: {e}"
+            ) from e
 
     @staticmethod
     def _load_dataset(

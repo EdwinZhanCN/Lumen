@@ -124,7 +124,7 @@ class Downloader:
         Returns:
             List of glob patterns for files to download
         """
-        patterns = ["*.json"]  # Always include JSON metadata files
+        patterns = ["*.json", "*.txt"]  # Always include JSON, txt metadata files
 
         if runtime == Runtime.torch:
             patterns.extend(
