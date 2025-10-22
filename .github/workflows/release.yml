@@ -2,8 +2,8 @@ name: Release Packages
 
 on:
     push:
-        branches: [main, dev]
-        tags: ["v*"]
+        branches: [dev] # 只在 dev 分支触发自动发布
+        tags: ["v*"] # tag 触发正式发布
 
 jobs:
     build-and-release:
@@ -58,14 +58,25 @@ jobs:
                   done
 
             - name: Create Release
+              if: startsWith(github.ref, 'refs/tags/')
+              uses: actions/create-release@v1
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  if [[ $GITHUB_REF == refs/tags/* ]]; then
-                    TAG=${GITHUB_REF#refs/tags/}
-                    gh release create $TAG --title "Release $TAG" --generate-notes dist/*.whl
-                  elif [[ $GITHUB_REF == refs/heads/dev ]]; then
-                    # Use the version we already determined in the previous step
-                    echo "Using version: $VERSION"
-                    gh release create "v$VERSION-dev" --title "Dev Release $VERSION" --prerelease --generate-notes dist/*.whl
-                  fi
+              with:
+                  tag_name: ${{ github.ref_name }}
+                  release_name: Release ${{ github.ref_name }}
+                  draft: false
+                  prerelease: false
+                  files: dist/*.whl
+
+            - name: Create Dev Release
+              if: github.ref == 'refs/heads/dev'
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: v${{ env.VERSION }}-dev
+                  release_name: Dev Release ${{ env.VERSION }}
+                  draft: false
+                  prerelease: true
+                  files: dist/*.whl
