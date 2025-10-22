@@ -42,6 +42,9 @@ include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.
 [tool.hatch.version]
 source = "vcs"
 
+[tool.setuptools_scm]
+search_parent_directories = true
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
 ignore = []

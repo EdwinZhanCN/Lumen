@@ -57,3 +57,6 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "vcs"
 root = "../.."
+
+[tool.setuptools_scm]
+search_parent_directories = true
