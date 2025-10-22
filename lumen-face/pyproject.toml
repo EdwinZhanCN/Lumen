@@ -50,7 +50,7 @@ jp61cu126 = [
 lumen-face = "lumen_face:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
