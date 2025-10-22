@@ -22,6 +22,32 @@ jobs:
             - name: Install build tools
               run: pip install build setuptools_scm
 
+            - name: Get version from root
+              run: |
+                  # Get version from project root
+                  python -c "
+                  import setuptools_scm
+                  try:
+                      version = setuptools_scm.get_version()
+                      print(f'Version found: {version}')
+                      with open('version.txt', 'w') as f:
+                          f.write(version)
+                  except Exception as e:
+                      print(f'Error getting version: {e}')
+                      with open('version.txt', 'w') as f:
+                          f.write('0.0.0')
+                  "
+
+                  # Show the version and set environment variable
+                  if [ -f version.txt ]; then
+                    VERSION=$(cat version.txt)
+                    echo "Version determined: $VERSION"
+                    echo "VERSION=$VERSION" >> $GITHUB_ENV
+                  else
+                    echo "Failed to determine version"
+                    echo "VERSION=0.0.0" >> $GITHUB_ENV
+                  fi
+
             - name: Build all packages
               run: |
                   for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
@@ -39,8 +65,7 @@ jobs:
                     TAG=${GITHUB_REF#refs/tags/}
                     gh release create $TAG --title "Release $TAG" --generate-notes dist/*.whl
                   elif [[ $GITHUB_REF == refs/heads/dev ]]; then
-                    # Get version from any subpackage using setuptools_scm
-                    cd lumen-clip && python -c "import setuptools_scm; print(setuptools_scm.get_version())" > ../version.txt && cd ..
-                    VERSION=$(cat version.txt)
+                    # Use the version we already determined in the previous step
+                    echo "Using version: $VERSION"
                     gh release create "v$VERSION-dev" --title "Dev Release $VERSION" --prerelease --generate-notes dist/*.whl
                   fi

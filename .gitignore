@@ -4,7 +4,6 @@ data
 *.ropeproject
 *.venv
 __pycache__
-*.lock
 .idea
 .vscode
 build
