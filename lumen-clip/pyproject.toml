@@ -1,6 +1,6 @@
 [project]
 name = "lumen-clip"
-version = { attr = "lumen_clip._version.__version__" }
+dynamic = ["version"]
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -80,8 +80,13 @@ jp61cu126 = [
 
 
 [build-system]
-requires = ["setuptools>=45"]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+root = ".."
+search_parent_directories = true
+fallback_version = "0.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

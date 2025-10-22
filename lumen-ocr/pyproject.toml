@@ -1,6 +1,6 @@
 [project]
 name = "lumen-ocr"
-version = { attr = "lumen_ocr._version.__version__" }
+dynamic = ["version"]
 description = "Add your description here"
 readme = "README.md"
 license = { text = "MIT" }
@@ -50,8 +50,13 @@ jp61cu126 = [
 lumen-ocr = "lumen_ocr:main"
 
 [build-system]
-requires = ["setuptools>=45"]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+root = ".."
+search_parent_directories = true
+fallback_version = "0.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -39,8 +39,8 @@ jobs:
                     TAG=${GITHUB_REF#refs/tags/}
                     gh release create $TAG --title "Release $TAG" --generate-notes dist/*.whl
                   elif [[ $GITHUB_REF == refs/heads/dev ]]; then
-                    # Get version from root directory using setuptools_scm
-                    python -c "import setuptools_scm; print(setuptools_scm.get_version())" > version.txt
+                    # Get version from any subpackage using setuptools_scm
+                    cd lumen-clip && python -c "import setuptools_scm; print(setuptools_scm.get_version())" > ../version.txt && cd ..
                     VERSION=$(cat version.txt)
                     gh release create "v$VERSION-dev" --title "Dev Release $VERSION" --prerelease --generate-notes dist/*.whl
                   fi
