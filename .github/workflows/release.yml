@@ -22,54 +22,14 @@ jobs:
             - name: Install build tools
               run: pip install build setuptools_scm
 
-            - name: Build wheels for lumen-clip
-              uses: pypa/cibuildwheel@v2.16.5
-              with:
-                  package-dir: lumen-clip
-                  output-dir: dist
-                  config-file: ""
-              env:
-                  CIBW_BUILD: cp310-*
-                  CIBW_ARCHS_LINUX: x86_64 aarch64
-                  CIBW_ARCHS_MACOS: x86_64 arm64
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  CIBW_TEST_SKIP: "*"
-
-            - name: Build wheels for lumen-resources
-              uses: pypa/cibuildwheel@v2.16.5
-              with:
-                  package-dir: lumen-resources
-                  output-dir: dist
-              env:
-                  CIBW_BUILD: cp310-*
-                  CIBW_ARCHS_LINUX: x86_64 aarch64
-                  CIBW_ARCHS_MACOS: x86_64 arm64
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  CIBW_TEST_SKIP: "*"
-
-            - name: Build wheels for lumen-face
-              uses: pypa/cibuildwheel@v2.16.5
-              with:
-                  package-dir: lumen-face
-                  output-dir: dist
-              env:
-                  CIBW_BUILD: cp310-*
-                  CIBW_ARCHS_LINUX: x86_64 aarch64
-                  CIBW_ARCHS_MACOS: x86_64 arm64
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  CIBW_TEST_SKIP: "*"
-
-            - name: Build wheels for lumen-ocr
-              uses: pypa/cibuildwheel@v2.16.5
-              with:
-                  package-dir: lumen-ocr
-                  output-dir: dist
-              env:
-                  CIBW_BUILD: cp310-*
-                  CIBW_ARCHS_LINUX: x86_64 aarch64
-                  CIBW_ARCHS_MACOS: x86_64 arm64
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  CIBW_TEST_SKIP: "*"
+            - name: Build all packages
+              run: |
+                  for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
+                    echo "Building $pkg..."
+                    cd $pkg
+                    python -m build --outdir ../dist
+                    cd ..
+                  done
 
             - name: Create Release
               env:
