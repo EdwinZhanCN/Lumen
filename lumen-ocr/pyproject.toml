@@ -3,6 +3,7 @@ name = "lumen-ocr"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
+dynamic = ["version"]
 license = { text = "MIT" }
 authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }

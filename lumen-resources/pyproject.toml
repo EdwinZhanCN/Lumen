@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lumen-resources"
+dynamic = ["version"]
 description = "Unified model resource management for Lumen ML services"
 readme = "README.md"
 requires-python = ">=3.10"

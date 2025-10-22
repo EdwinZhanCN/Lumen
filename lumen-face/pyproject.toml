@@ -1,6 +1,6 @@
 [project]
 name = "lumen-face"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Add your description here"
 readme = "README.md"
 license = { text = "MIT" }

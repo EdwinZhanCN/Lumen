@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lumen-clip"
+dynamic = ["version"]
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
 requires-python = ">=3.10"
