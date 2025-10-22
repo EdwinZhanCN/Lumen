@@ -3,8 +3,8 @@
 
 metadata:
     version: "1.0.0"
-    region: "other" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "~/.lumen/models"
+    region: "cn" # "cn" for ModelScope, "other" for HuggingFace
+    cache_dir: "~/Lumen-Resources"
 
 deployment:
     mode: "single"
@@ -23,18 +23,15 @@ services:
         enabled: true
         package: "lumen_clip"
         import:
-            registry_class: "lumen_clip.service_registry.ClipService"
+            registry_class: "lumen_clip.service_registry.CLIPService"
             add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
-
+        backend_settings:
+            device: "mps"
+            onnx_providers:
+                - "CoreMLExecutionProvider"
+            batch_size: 8
         models:
-            # Default general-purpose CLIP model
-            default:
-                model: "ViT-B-32"
-                runtime: "torch"
-                dataset: "ImageNet_1k"
-
-            # Chinese CLIP model
-            cn_clip:
-                model: "CN-CLIP-ViT-B-16"
-                runtime: "torch"
-                dataset: "ImageNet_1k"
+            general:
+                model: "MobileCLIP2-S2" # CN-CLIP_ViT-L-14
+                runtime: torch
+                dataset: ImageNet_1k

@@ -217,7 +217,7 @@ class BaseClipBackend(abc.ABC):
             np.ndarray with shape (N, D) and dtype float32, each row L2-normalized.
         """
         if not texts:
-            return np.empty((0, 0), dtype=np.float32)
+            raise InferenceError("All texts in batch failed to encode, empty input.")
 
         try:
             vecs: list[NDArray[np.float32]] = []

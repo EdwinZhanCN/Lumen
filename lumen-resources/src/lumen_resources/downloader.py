@@ -118,13 +118,12 @@ class Downloader:
         """
         Get file patterns to download based on runtime.
 
-        Args:
-            runtime: Runtime type enum
-
-        Returns:
-            List of glob patterns for files to download
+        Always include `model_info.json`
         """
-        patterns = ["*.json", "*.txt"]  # Always include JSON, txt metadata files
+        patterns = [
+            "model_info.json",
+            "*config*",
+        ]  # Always include model_info.json and config files.
 
         if runtime == Runtime.torch:
             patterns.extend(
@@ -135,6 +134,9 @@ class Downloader:
                     "*.safetensors",
                     "pytorch_model*.bin",
                     "model.safetensors",
+                    "*vocab*",
+                    "*tokenizer*",
+                    "special_tokens_map.json",
                 ]
             )
         elif runtime == Runtime.onnx:

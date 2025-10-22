@@ -146,7 +146,7 @@ class ResourceLoader:
         source_format = model_info.source.format.value
         if source_format == "openclip":
             # Load model config.json (required) and attempt to load tokenizer.json (optional)
-            config = ResourceLoader._load_json(model_root_path / "config.json")
+            config = ResourceLoader._load_json(model_root_path / "open_clip_config.json")
             tokenizer_config = ResourceLoader._load_for_openclip(model_root_path)
             if tokenizer_config is None:
                 logger.info(
@@ -216,6 +216,8 @@ class ResourceLoader:
                     f"Supported devices: {runtime_info.devices}"
                 )
             runtime_path = model_root / runtime / config.rknn_device
+        elif runtime == "torch":
+            runtime_path = model_root
         else:
             runtime_path = model_root / runtime
 
@@ -284,33 +286,37 @@ class ResourceLoader:
     def _load_dataset(
         model_root_path: Path, model_info: ModelInfo, dataset: str | None
     ) -> tuple[NDArray[np.object_] | None, NDArray[np.float32] | None]:
+
+        # 1. check if repo provides datasets
         if not model_info.datasets:
-            logger.info("No datasets configured in model_info.json")
+            logger.info(f"No datasets configured in model_info.json {model_info.datasets}")
             return None, None
 
+        # 2. determine dataset name to load
         dataset_name = dataset
-        if not dataset_name:
-            if model_info.model_type == "clip":
-                dataset_name = "ImageNet_1k"
-            elif model_info.model_type == "bioclip":
-                dataset_name = "TreeOfLife-10M"
 
+        # 3. validate dataset name
         if not dataset_name or dataset_name not in model_info.datasets:
             logger.warning(
                 f"Dataset '{dataset_name}' not in model_info.json. Disabling classification."
             )
             return None, None
 
-        dataset_info = model_info.datasets[dataset_name]
+        # 4. get the dataset file relative paths
+        dataset_info: Datasets = model_info.datasets.get(dataset_name)
+        if not dataset_info:
+            logger.warning(
+                f"Dataset info for '{dataset_name}' is missing. Disabling classification."
+            )
+            return None, None
+        labels_path = model_root_path / dataset_info.labels
+        embeddings_path = model_root_path / dataset_info.embeddings
 
         try:
             labels: NDArray[np.object_] | None = None
             embeddings: NDArray[np.float32] | None = None
 
             if isinstance(dataset_info, Datasets):
-                labels_path = model_root_path / dataset_info.labels
-                embeddings_path = model_root_path / dataset_info.embeddings
-
                 if not labels_path.exists() or not embeddings_path.exists():
                     raise FileNotFoundError(
                         f"Missing dataset files: {labels_path} or {embeddings_path}"

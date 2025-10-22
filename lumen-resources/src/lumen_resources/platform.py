@@ -115,15 +115,16 @@ class Platform:
             DownloadError: If download fails
         """
         repo_id = f"{self.owner}/{repo_name}"
+        target_dir = cache_dir / "models" / repo_name
 
         try:
             if self.platform_type == PlatformType.HUGGINGFACE:
                 return self._download_from_huggingface(
-                    repo_id, cache_dir, allow_patterns, force
+                    repo_id, target_dir, allow_patterns, force
                 )
             elif self.platform_type == PlatformType.MODELSCOPE:
                 return self._download_from_modelscope(
-                    repo_id, cache_dir, allow_patterns, force
+                    repo_id, target_dir, allow_patterns, force
                 )
             else:
                 raise DownloadError(f"Unsupported platform type: {self.platform_type}")
@@ -149,23 +150,15 @@ class Platform:
         Returns:
             Path to downloaded model directory
         """
-        # HuggingFace uses its own cache structure, we'll organize it later
         snapshot_path = self._hf_hub.snapshot_download(
             repo_id=repo_id,
             allow_patterns=allow_patterns,
-            cache_dir=str(cache_dir / ".cache" / "huggingface"),
+            local_dir=cache_dir,
             local_files_only=False,
             force_download=force,
         )
 
-        # Organize into our standard structure
-        repo_name = repo_id.split("/")[-1]
-        target_dir = cache_dir / "models" / repo_name
-
-        # Create symlinks or copy files to maintain structure
-        self._organize_files(Path(snapshot_path), target_dir)
-
-        return target_dir
+        return cache_dir
 
     def _download_from_modelscope(
         self,
@@ -186,73 +179,21 @@ class Platform:
         Returns:
             Path to downloaded model directory
         """
-        ms_cache_dir = cache_dir / ".cache" / "modelscope"
 
         # Handle force download by clearing ModelScope cache
         if force:
-            model_cache_path = ms_cache_dir / repo_id
-            if model_cache_path.exists():
-                shutil.rmtree(model_cache_path)
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
 
         # ModelScope supports allow_patterns parameter (HuggingFace compatible)
         snapshot_path = self._ms_snapshot_download(
             model_id=repo_id,
-            cache_dir=str(ms_cache_dir),
+            local_dir=str(cache_dir),
             allow_patterns=allow_patterns,
             local_files_only=False,
         )
 
-        # Organize into our standard structure
-        repo_name = repo_id.split("/")[-1]
-        target_dir = cache_dir / "models" / repo_name
-
-        # Organize files into our standard structure (filtering already done by ModelScope)
-        self._organize_files(Path(snapshot_path), target_dir)
-
-        return target_dir
-
-    def _organize_files(
-        self,
-        source_dir: Path,
-        target_dir: Path,
-        patterns: Optional[list[str]] = None,
-    ) -> None:
-        """
-        Organize downloaded files into standard structure.
-
-        Args:
-            source_dir: Source directory from platform SDK
-            target_dir: Target directory in our standard structure
-            patterns: Optional list of patterns to filter files (only used for HuggingFace post-processing)
-        """
-        import fnmatch
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        for source_file in source_dir.rglob("*"):
-            if source_file.is_file():
-                # Get relative path from source
-                rel_path = source_file.relative_to(source_dir)
-
-                # If patterns specified, check if file matches (primarily for HuggingFace)
-                # ModelScope filtering is done during download via allow_patterns
-                if patterns:
-                    matches = any(
-                        fnmatch.fnmatch(str(rel_path), pattern) for pattern in patterns
-                    )
-                    if not matches:
-                        continue
-
-                # Create target path
-                target_file = target_dir / rel_path
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-
-                # Copy file if it doesn't exist or is different
-                if (
-                    not target_file.exists()
-                    or source_file.stat().st_mtime > target_file.stat().st_mtime
-                ):
-                    shutil.copy2(source_file, target_file)
+        return cache_dir
 
     def cleanup_model(self, repo_name: str, cache_dir: Path) -> None:
         """

@@ -24,47 +24,38 @@ dependencies = [
     "colorlog",
     "zeroconf",
     "transformers",
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
-    "torchaudio>=2.1.0",
-    "onnxruntime>=1.16.0",
     "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
     # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
 ]
 
 [project.optional-dependencies]
 cpu = [
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
-    "torchaudio>=2.1.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
     "onnxruntime>=1.16.0",
 ]
 
 cuda = [
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
-    "torchaudio>=2.1.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
     "onnxruntime-gpu>=1.16.0",
 ]
 
 mps = [
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
-    "torchaudio>=2.1.0",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
     "onnxruntime>=1.16.0",
 ]
 
 openvino246 = [
     "torch>=2.1.0",
     "torchvision>=0.16.0",
-    "torchaudio>=2.1.0",
     "onnxruntime-openvino==1.20.0",
 ]
 
 jp61 = [
     "torch==2.3.0",
     "torchvision==0.18.0",
-    "torchaudio==2.3.0",
     "onnxruntime-gpu==1.18.0",
 ]
 

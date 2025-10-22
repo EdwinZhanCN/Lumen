@@ -96,7 +96,6 @@ class CLIPModelManager:
             "a photo of nature",
             "a photo of an object",
             "a photo of a landscape",
-            "an abstract painting",
         ]
         self.scene_prompt_embeddings: NDArray[np.float32] | None = None
 
@@ -181,7 +180,8 @@ class CLIPModelManager:
                     self.scene_prompts
                 )
                 logger.info("Initialized scene classification embeddings (batched)")
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Batch processing failed: {e}")
                 # Fallback to sequential
                 embeddings_list = []
                 for prompt in self.scene_prompts:
