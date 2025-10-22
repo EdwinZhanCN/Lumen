@@ -27,11 +27,9 @@ services:
             add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:
             device: "mps"
-            onnx_providers:
-                - "CoreMLExecutionProvider"
             batch_size: 8
         models:
             general:
                 model: "MobileCLIP2-S2" # CN-CLIP_ViT-L-14 | CN-CLIP_ViT-B-16 | MobileCLIP2-S2
-                runtime: torch
+                runtime: onnx
                 dataset: ImageNet_1k

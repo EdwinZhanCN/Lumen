@@ -35,28 +35,43 @@ cpu = [
     "onnxruntime>=1.16.0",
 ]
 
-cuda = [
-    "torch>=2.6.0",
-    "torchvision>=0.21.0",
-    "onnxruntime-gpu>=1.16.0",
+
+# Python Dependency For Nvidia GPU Platform
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://download.pytorch.org/whl/cu126
+cu126 = [
+    "torch",
+    "torchvision",
+    "onnxruntime-gpu",
 ]
 
+# Python Dependency For Apple Sillicon (M Series) Platform.
+# Python Version Should be above 3.10.
+# All dependencies will be installed from PyPI. All backends are officially supported on M Series.
+# Torch: Metal Performance Shaders (MPS) backend.
+# ONNX Runtime: CoreMLEP backend.
 mps = [
-    "torch==2.6.0",
-    "torchvision==0.21.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
     "onnxruntime>=1.16.0",
 ]
 
-openvino246 = [
-    "torch>=2.1.0",
-    "torchvision>=0.16.0",
-    "onnxruntime-openvino==1.20.0",
+# Python Dependency For Intel OpenVINO Platform.
+# Python Version Should be 3.10 fixed.
+# Torch is Not Officially Supported on OpenVINO, to use OpenVINO, please choose onnxruntime-openvino as backend.
+openvino253 = [
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "onnxruntime-openvino==1.21.0",
 ]
 
-jp61 = [
-    "torch==2.3.0",
-    "torchvision==0.18.0",
-    "onnxruntime-gpu==1.18.0",
+# Python Dependency For Jetson Platform.
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+jp61cu126 = [
+    "torch",
+    "torchvision",
+    "onnxruntime-gpu",
 ]
 
 [tool.setuptools.packages.find]
