@@ -1,0 +1,84 @@
+name: Release Packages
+
+on:
+    push:
+        branches: [main, dev]
+        tags: ["v*"]
+
+jobs:
+    build-and-release:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: "3.10"
+
+            - name: Install build tools
+              run: pip install build hatch-vcs
+
+            - name: Build wheels for lumen-clip
+              uses: pypa/cibuildwheel@v2.16.5
+              with:
+                  package-dir: lumen-clip
+                  output-dir: dist
+                  config-file: ""
+              env:
+                  CIBW_BUILD: cp310-*
+                  CIBW_ARCHS_LINUX: x86_64 aarch64
+                  CIBW_ARCHS_MACOS: x86_64 arm64
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  CIBW_TEST_SKIP: "*"
+
+            - name: Build wheels for lumen-resources
+              uses: pypa/cibuildwheel@v2.16.5
+              with:
+                  package-dir: lumen-resources
+                  output-dir: dist
+              env:
+                  CIBW_BUILD: cp310-*
+                  CIBW_ARCHS_LINUX: x86_64 aarch64
+                  CIBW_ARCHS_MACOS: x86_64 arm64
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  CIBW_TEST_SKIP: "*"
+
+            - name: Build wheels for lumen-face
+              uses: pypa/cibuildwheel@v2.16.5
+              with:
+                  package-dir: lumen-face
+                  output-dir: dist
+              env:
+                  CIBW_BUILD: cp310-*
+                  CIBW_ARCHS_LINUX: x86_64 aarch64
+                  CIBW_ARCHS_MACOS: x86_64 arm64
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  CIBW_TEST_SKIP: "*"
+
+            - name: Build wheels for lumen-ocr
+              uses: pypa/cibuildwheel@v2.16.5
+              with:
+                  package-dir: lumen-ocr
+                  output-dir: dist
+              env:
+                  CIBW_BUILD: cp310-*
+                  CIBW_ARCHS_LINUX: x86_64 aarch64
+                  CIBW_ARCHS_MACOS: x86_64 arm64
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  CIBW_TEST_SKIP: "*"
+
+            - name: Create Release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  if [[ $GITHUB_REF == refs/tags/* ]]; then
+                    TAG=${GITHUB_REF#refs/tags/}
+                    gh release create $TAG --title "Release $TAG" --generate-notes dist/*.whl
+                  elif [[ $GITHUB_REF == refs/heads/dev ]]; then
+                    VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")  # 或hatch
+                    gh release create "v$VERSION-dev" --title "Dev Release $VERSION" --prerelease --generate-notes dist/*.whl
+                  fi

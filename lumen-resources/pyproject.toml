@@ -4,13 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lumen-resources"
-version = "0.1.0"
 description = "Unified model resource management for Lumen ML services"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Lumilio Photos", email = "modelscope@lumilio.org" }
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
 
 dependencies = [
@@ -37,6 +36,9 @@ lumen-resources = "lumen_resources.cli:main"
 [tool.hatchling.build.targets.wheel]
 packages = ["src/lumen_resources"]
 include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]

@@ -1,10 +1,9 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "lumen-clip"
-version = "0.1.0"
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +26,14 @@ dependencies = [
     "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
     # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
 ]
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
+
+
+[project.scripts]
+lumen-face = "lumen_clip:main"
 
 [project.optional-dependencies]
 cpu = [
@@ -74,5 +81,9 @@ jp61cu126 = [
     "onnxruntime-gpu",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/lumen_clip"]
+
+[tool.hatch.version]
+source = "vcs"

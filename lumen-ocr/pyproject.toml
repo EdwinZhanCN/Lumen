@@ -3,5 +3,55 @@ name = "lumen-ocr"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
+
+requires-python = ">=3.10"
 dependencies = []
+
+
+[project.optional-dependencies]
+cpu = [
+    "onnxruntime>=1.16.0",
+]
+
+
+# Python Dependency For Nvidia GPU Platform
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://download.pytorch.org/whl/cu126
+cu126 = [
+    "onnxruntime-gpu",
+]
+
+# Python Dependency For Apple Sillicon (M Series) Platform.
+# Python Version Should be above 3.10.
+# All dependencies will be installed from PyPI. All backends are officially supported on M Series.
+# ONNX Runtime: CoreMLEP backend.
+mps = [
+    "onnxruntime>=1.16.0",
+]
+
+# Python Dependency For Intel OpenVINO Platform.
+# Python Version Should be 3.10 fixed.
+openvino253 = [
+    "onnxruntime-openvino==1.21.0",
+]
+
+# Python Dependency For Jetson Platform.
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+jp61cu126 = [
+    "onnxruntime-gpu",
+]
+
+[project.scripts]
+lumen-face = "lumen_ocr:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
