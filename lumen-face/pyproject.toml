@@ -55,7 +55,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-root = "../.."
+root = "../"
 
-[tool.setuptools_scm]
-search_parent_directories = true
+[tool.hatchling.build.targets.wheel]
+packages = ["src/lumen_face"]

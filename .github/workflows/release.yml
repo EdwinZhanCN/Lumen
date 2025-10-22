@@ -34,7 +34,6 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-resources
               uses: pypa/cibuildwheel@v2.16.5
@@ -47,7 +46,6 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-face
               uses: pypa/cibuildwheel@v2.16.5
@@ -60,7 +58,6 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-ocr
               uses: pypa/cibuildwheel@v2.16.5
@@ -73,7 +70,6 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
 
             - name: Create Release
               env:
@@ -83,6 +79,8 @@ jobs:
                     TAG=${GITHUB_REF#refs/tags/}
                     gh release create $TAG --title "Release $TAG" --generate-notes dist/*.whl
                   elif [[ $GITHUB_REF == refs/heads/dev ]]; then
-                    VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")  # 或hatch
+                    # Get version from one of the subpackages using hatch-vcs
+                    cd lumen-clip && python -c "import hatch_vcs; print(hatch_vcs.get_version())" > ../version.txt && cd ..
+                    VERSION=$(cat version.txt)
                     gh release create "v$VERSION-dev" --title "Dev Release $VERSION" --prerelease --generate-notes dist/*.whl
                   fi

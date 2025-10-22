@@ -1,8 +1,3 @@
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
-root = "../.."
-
 [project]
 name = "lumen-resources"
 dynamic = ["version"]
@@ -35,16 +30,6 @@ config = ["pyyaml>=6.0.0"]
 [project.scripts]
 lumen-resources = "lumen_resources.cli:main"
 
-[tool.hatchling.build.targets.wheel]
-packages = ["src/lumen_resources"]
-include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
-
-[tool.hatch.version]
-source = "vcs"
-
-[tool.setuptools_scm]
-search_parent_directories = true
-
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
 ignore = []
@@ -53,3 +38,15 @@ ignore = []
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+root = "../"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/lumen_resources"]
+include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
