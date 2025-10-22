@@ -1,6 +1,6 @@
 [project]
 name = "lumen-face"
-dynamic = ["version"]
+version = { attr = "lumen_face._version.__version__" }
 description = "Add your description here"
 readme = "README.md"
 license = { text = "MIT" }
@@ -50,11 +50,8 @@ jp61cu126 = [
 lumen-face = "lumen_face:main"
 
 [build-system]
-requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=45"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools_scm]
-search_parent_directories = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
