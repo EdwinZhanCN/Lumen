@@ -23,6 +23,7 @@ jobs:
               run: pip install build setuptools_scm
 
             - name: Get version from root
+              id: get_version
               run: |
                   # Get version from project root
                   python -c "
@@ -43,9 +44,11 @@ jobs:
                     VERSION=$(cat version.txt)
                     echo "Version determined: $VERSION"
                     echo "VERSION=$VERSION" >> $GITHUB_ENV
+                    echo "version=$VERSION" >> $GITHUB_OUTPUT
                   else
                     echo "Failed to determine version"
                     echo "VERSION=0.0.0" >> $GITHUB_ENV
+                    echo "version=0.0.0" >> $GITHUB_OUTPUT
                   fi
 
             - name: Build all packages
@@ -57,26 +60,56 @@ jobs:
                     cd ..
                   done
 
-            - name: Create Release
+            - name: List built files
+              run: ls -la dist/
+
+            # 正式发布 - 使用更现代的 action
+            - name: Create Release for Tag
               if: startsWith(github.ref, 'refs/tags/')
-              uses: actions/create-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              uses: softprops/action-gh-release@v1
               with:
                   tag_name: ${{ github.ref_name }}
-                  release_name: Release ${{ github.ref_name }}
+                  name: Release ${{ github.ref_name }}
+                  body: |
+                      ## Release Notes
+                      Automated release created from tag ${{ github.ref_name }}
+
+                      **Packages included:**
+                      - lumen-clip
+                      - lumen-resources
+                      - lumen-face
+                      - lumen-ocr
                   draft: false
                   prerelease: false
-                  files: dist/*.whl
-
-            - name: Create Dev Release
-              if: github.ref == 'refs/heads/dev'
-              uses: actions/create-release@v1
+                  files: |
+                      dist/*.whl
+                      dist/*.tar.gz
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            # 开发版发布
+            - name: Create Dev Release
+              if: github.ref == 'refs/heads/dev'
+              uses: softprops/action-gh-release@v1
               with:
                   tag_name: v${{ env.VERSION }}-dev
-                  release_name: Dev Release ${{ env.VERSION }}
+                  name: Dev Release ${{ env.VERSION }}
+                  body: |
+                      ## Development Release
+                      Automated development release from dev branch
+
+                      **Version:** ${{ env.VERSION }}
+                      **Commit:** ${{ github.sha }}
+
+                      **Packages included:**
+                      - lumen-clip
+                      - lumen-resources
+                      - lumen-face
+                      - lumen-ocr
                   draft: false
                   prerelease: true
-                  files: dist/*.whl
+                  files: |
+                      dist/*.whl
+                      dist/*.tar.gz
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
