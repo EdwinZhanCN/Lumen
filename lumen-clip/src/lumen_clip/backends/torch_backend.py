@@ -2,16 +2,17 @@
 TorchBackend: an OpenCLIP-based backend that implements the BaseClipBackend
 interface using PyTorch.
 
-This backend:
-- Loads models from local files (no automatic downloads)
-- Uses config.json for model architecture
-- Uses tokenizer.json or falls back to SimpleTokenizer
-- Produces unit-normalized float32 embeddings for both text and images
-- Supports true batched image embedding on GPU/CPU
+This backend loads models from local files without automatic downloads, uses
+config.json for model architecture, and produces unit-normalized float32 embeddings.
 
 Notes:
-- Returned vectors are always L2-normalized float32.
-- image_batch_to_vectors performs a single forward pass for efficiency.
+    - Returned vectors are always L2-normalized float32.
+    - image_batch_to_vectors performs a single forward pass for efficiency.
+
+Args:
+    resources (ModelResources): ModelResources object containing model files and configs.
+    device_preference (str, optional): Hint for device selection ("cuda", "mps", "cpu").
+    max_batch_size (int, optional): Hint for batch size; not enforced by backend.
 """
 
 from __future__ import annotations
@@ -70,18 +71,17 @@ class TorchBackend(BaseClipBackend):
     """
     A PyTorch/OpenCLIP backend implementing BaseClipBackend.
 
-    Args:
-        resources: ModelResources object containing model files and configs
-        device_preference: Optional hint for device selection ("cuda", "mps", "cpu").
-        max_batch_size: Optional hint for batch size; not enforced by backend.
+    This backend loads models from local files without automatic downloads, uses
+    config.json for model architecture, and produces unit-normalized float32 embeddings.
 
-    Behavior:
-        - initialize() loads the model from local files, tokenizer, and preprocess pipeline
-        - Always loads FP32 weights (model.pt)
-        - Uses mixed precision (AMP) on GPU (CUDA/MPS) for inference
-        - text_to_vector() encodes a text prompt via the model's text encoder
-        - image_to_vector() decodes and preprocesses image bytes, then encodes via the image encoder
-        - image_batch_to_vectors() performs a single batched forward pass for multiple images
+    Notes:
+        - Returned vectors are always L2-normalized float32.
+        - image_batch_to_vectors performs a single forward pass for efficiency.
+
+    Args:
+        resources (ModelResources): ModelResources object containing model files and configs.
+        device_preference (str, optional): Hint for device selection ("cuda", "mps", "cpu").
+        max_batch_size (int, optional): Hint for batch size; not enforced by backend.
     """
 
     def __init__(
@@ -107,7 +107,7 @@ class TorchBackend(BaseClipBackend):
         self._hf_vision_model: CLIPVisionModel | ChineseCLIPVisionModel | None = None
         self._hf_processor: CLIPProcessor | ChineseCLIPProcessor | None = None
         self._hf_image_processor: CLIPImageProcessor | ChineseCLIPImageProcessor | None = None
-        # self._hf_tokenizer: AutoTokenizer | None = None Not explicitly used; use self._hf_tokenizer directly
+        # self._hf_tokenizer: AutoTokenizer | None Not explicitly used; use self._hf_tokenizer directly
 
         self._load_time_seconds: float | None = None
 
@@ -120,6 +120,15 @@ class TorchBackend(BaseClipBackend):
 
     @override
     def initialize(self) -> None:
+        """
+        Initialize the TorchBackend by loading the model, tokenizer, and preprocess pipeline.
+
+        This method loads the model from local files based on the source format (OpenCLIP or HuggingFace),
+        sets up the device, and configures mixed precision if applicable.
+
+        Raises:
+            TorchModelLoadingError: If model loading fails or dependencies are missing.
+        """
         if self._initialized:
             return
 
@@ -160,7 +169,14 @@ class TorchBackend(BaseClipBackend):
             raise TorchModelLoadingError(f"Model loading failed: {e}") from e
 
     def _initialize_openclip(self) -> None:
-        """Initializes an OpenCLIP model."""
+        """
+        Initialize an OpenCLIP model from local files or remote repo.
+
+        Attempts to load the model architecture and weights, with fallbacks for local path and remote repo.
+
+        Raises:
+            TorchModelLoadingError: If model loading fails.
+        """
         # 1. Get model architecture name from config
         model_name = self.resources.model_name
         model_remote_repo = self.resources.source_repo
@@ -180,7 +196,7 @@ class TorchBackend(BaseClipBackend):
             )
             try:
                 model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                    str(model_runtime_files_path),
+                    'local-dir:' + str(model_runtime_files_path),
                     pretrained=None,  # No automatic download
                 )
                 logger.info(
@@ -193,7 +209,7 @@ class TorchBackend(BaseClipBackend):
                 )
                 try:
                     model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                        model_remote_repo,
+                        'hf-hub:' + model_remote_repo,
                         pretrained=None,  # No automatic download
                     )
                     logger.info(
@@ -230,7 +246,14 @@ class TorchBackend(BaseClipBackend):
         self._openclip_tokenizer = self._load_tokenizer_openclip(model_name)
 
     def _initialize_huggingface(self) -> None:
-        """Initializes a HuggingFace Transformers model. Two Fallbacks: local disk, remote repo."""
+        """
+        Initialize a HuggingFace Transformers model from local files or remote repo.
+
+        Loads tokenizer, text model, vision model, and image processor, with fallbacks.
+
+        Raises:
+            TorchModelLoadingError: If model loading fails.
+        """
         model_runtime_files_path = self.resources.runtime_files_path
         model_remote_repo = self.resources.source_repo
         logger.info(
@@ -297,7 +320,18 @@ class TorchBackend(BaseClipBackend):
     def _load_tokenizer_openclip(
         self, model_name: str
     ) -> Callable[[list[str]], torch.Tensor]:
-        """Load tokenizer for OpenCLIP, from file or remote_repo."""
+        """
+        Load tokenizer for OpenCLIP from model name, local path, or remote repo.
+
+        Args:
+            model_name (str): The model name.
+
+        Returns:
+            Callable[[list[str]], torch.Tensor]: The tokenizer function.
+
+        Raises:
+            TorchModelLoadingError: If loading fails.
+        """
         model_remote_repo = self.resources.source_repo
         model_runtime_files_path = self.resources.runtime_files_path
         try:
@@ -331,6 +365,11 @@ class TorchBackend(BaseClipBackend):
 
     @override
     def close(self) -> None:
+        """
+        Close the backend and free resources.
+
+        Frees CUDA cached memory if using GPU.
+        """
         if self._device.type == "cuda":
             # Free cached memory for the device
             torch.cuda.empty_cache()
@@ -342,7 +381,19 @@ class TorchBackend(BaseClipBackend):
     def text_to_vector(self, text: str) -> NDArray[np.float32]:
         """
         Encode a text string into a unit-normalized float32 embedding vector.
+
         Uses mixed precision (AMP) on GPU for better performance.
+
+        Args:
+            text (str): The text string to encode.
+
+        Returns:
+            NDArray[np.float32]: The unit-normalized embedding vector.
+
+        Raises:
+            InvalidInputError: If text is empty or too long.
+            CUDAMemoryError: If CUDA out of memory.
+            InferenceError: If encoding fails.
         """
         self._ensure_initialized()
 
@@ -396,7 +447,19 @@ class TorchBackend(BaseClipBackend):
     def image_to_vector(self, image_bytes: bytes) -> NDArray[np.float32]:
         """
         Encode image bytes (RGB) into a unit-normalized float32 embedding vector.
+
         Uses mixed precision (AMP) on GPU for better performance.
+
+        Args:
+            image_bytes (bytes): The image bytes to encode.
+
+        Returns:
+            NDArray[np.float32]: The unit-normalized embedding vector.
+
+        Raises:
+            InvalidInputError: If image_bytes is empty.
+            CUDAMemoryError: If CUDA out of memory.
+            InferenceError: If encoding fails.
         """
         self._ensure_initialized()
 
@@ -451,8 +514,19 @@ class TorchBackend(BaseClipBackend):
     def image_batch_to_vectors(self, images: Sequence[bytes]) -> NDArray[np.float32]:
         """
         Encode a list of image bytes using a single batched forward pass.
+
         Uses mixed precision (AMP) on GPU for better performance.
         Falls back to BaseClipBackend's sequential implementation if images is empty.
+
+        Args:
+            images (Sequence[bytes]): Sequence of image bytes to encode.
+
+        Returns:
+            NDArray[np.float32]: Array of unit-normalized embedding vectors.
+
+        Raises:
+            CUDAMemoryError: If CUDA out of memory.
+            InferenceError: If encoding fails.
         """
         if not images:
             return np.empty((0, self.get_info().text_embedding_dim), dtype=np.float32)
@@ -511,13 +585,19 @@ class TorchBackend(BaseClipBackend):
     def text_batch_to_vectors(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """
         Encode a batch of text strings into unit-normalized float32 embedding vectors.
+
         Uses mixed precision (AMP) on GPU for better performance.
 
         Args:
-            texts: Sequence of text strings to encode.
+            texts (Sequence[str]): Sequence of text strings to encode.
 
         Returns:
-            np.ndarray with shape (N, D) and dtype float32, each row L2-normalized.
+            NDArray[np.float32]: Array of unit-normalized embedding vectors.
+
+        Raises:
+            InvalidInputError: If any text is empty or too long.
+            CUDAMemoryError: If CUDA out of memory.
+            InferenceError: If encoding fails.
         """
         self._ensure_initialized()
         if not texts:
@@ -576,6 +656,9 @@ class TorchBackend(BaseClipBackend):
     def get_info(self) -> BackendInfo:
         """
         Report runtime and model metadata.
+
+        Returns:
+            BackendInfo: Object containing backend information.
         """
         # Report precision: always loads fp32 weights, uses AMP on GPU
         if self._use_amp:

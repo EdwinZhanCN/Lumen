@@ -4,7 +4,7 @@
 metadata:
     version: "1.0.0"
     region: "cn" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "~/Lumen-Resources"
+    cache_dir: "~/Lumen-Resources" # ~/.lumen by default
 
 deployment:
     mode: "single"
@@ -32,6 +32,6 @@ services:
             batch_size: 8
         models:
             general:
-                model: "MobileCLIP2-S2"
-                runtime: onnx
+                model: "MobileCLIP2-S2" # CN-CLIP_ViT-L-14 | CN-CLIP_ViT-B-16 | MobileCLIP2-S2
+                runtime: torch
                 dataset: ImageNet_1k

@@ -14,7 +14,7 @@ Features:
 
 Typical usage:
     python server.py --config examples/config/clip_onnx_cn.yaml
-    python server.py --config examples/config/clip_torch_cn.yaml --port 50052
+    python server.py --config examples/config/clip_cn.yaml --port 50052
 """
 
 import argparse

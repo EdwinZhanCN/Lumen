@@ -147,7 +147,7 @@ class BioCLIPService(rpc.InferenceServicer):
         info = self.model.info()
         logger.info(
             "BioCLIP ready on %s (load %.2fs)",
-            info.get("device"),
+            info.get("backend_info", {}) or "unknown",
             info.get("load_time"),
         )
 

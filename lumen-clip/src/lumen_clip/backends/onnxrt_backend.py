@@ -519,20 +519,33 @@ class ONNXRTBackend(BaseClipBackend):
 
     @staticmethod
     def _default_providers(device_pref: str | None) -> list[str]:
-        """Select default ONNX Runtime providers based on device preference."""
-        pref = (device_pref or "").lower().strip()
+        """Select default ONNX Runtime providers based on availability and priority."""
+        available = set(ort.get_available_providers())
 
-        if pref == "cuda":
-            return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        if pref == "coreml":
-            return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
-        if pref == "directml":
-            return ["DmlExecutionProvider", "CPUExecutionProvider"]
-        if pref == "openvino":
-            return ["OpenVINOExecutionProvider", "CPUExecutionProvider"]
+        # Priority order: GPU first, then CPU
+        priority = [
+            "CUDAExecutionProvider",
+            "CoreMLExecutionProvider",
+            "DmlExecutionProvider",
+            "OpenVINOExecutionProvider",
+            "TensorrtExecutionProvider",
+            "CPUExecutionProvider"
+        ]
 
-        # Default: CPU only
-        return ["CPUExecutionProvider"]
+        selected = [p for p in priority if p in available]
+
+        # If device_pref specified, prioritize it if available
+        if device_pref:
+            pref_provider = {
+                "cuda": "CUDAExecutionProvider",
+                "coreml": "CoreMLExecutionProvider",
+                "directml": "DmlExecutionProvider",
+                "openvino": "OpenVINOExecutionProvider"
+            }.get(device_pref.lower())
+            if pref_provider and pref_provider in available:
+                selected.insert(0, selected.pop(selected.index(pref_provider)))
+
+        return selected if selected else ["CPUExecutionProvider"]
 
     @staticmethod
     def _infer_device_from_providers(providers: list[str]) -> str:
