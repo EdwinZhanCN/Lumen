@@ -54,8 +54,9 @@ jobs:
             - name: Build all packages
               run: |
                   for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
-                    echo "Building $pkg..."
+                    echo "Building $pkg with version $VERSION..."
                     cd $pkg
+                    export SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
                     python -m build --outdir ../dist
                     cd ..
                   done

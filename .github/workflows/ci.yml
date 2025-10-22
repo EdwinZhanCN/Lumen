@@ -25,9 +25,14 @@ jobs:
 
             - name: Build all packages
               run: |
+                  # Get version for consistent builds
+                  VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())" 2>/dev/null || echo "0.0.0")
+                  echo "Building packages with version: $VERSION"
+
                   for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
                     echo "Building $pkg..."
                     cd $pkg
+                    export SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
                     python -m build --outdir ../dist
                     cd ..
                   done
