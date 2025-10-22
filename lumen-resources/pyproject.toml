@@ -40,13 +40,14 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.version]
-source = "vcs"
-root = "../"
+[tool.setuptools_scm]
+search_parent_directories = true
 
-[tool.hatchling.build.targets.wheel]
-packages = ["src/lumen_resources"]
-include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"lumen_resources" = ["schemas/*.yaml", "schemas/*.json"]

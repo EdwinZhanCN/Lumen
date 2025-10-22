@@ -50,12 +50,11 @@ jp61cu126 = [
 lumen-face = "lumen_face:main"
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.version]
-source = "vcs"
-root = "../"
+[tool.setuptools_scm]
+search_parent_directories = true
 
-[tool.hatchling.build.targets.wheel]
-packages = ["src/lumen_face"]
+[tool.setuptools.packages.find]
+where = ["src"]
