@@ -88,3 +88,4 @@ packages = ["src/lumen_clip"]
 
 [tool.hatch.version]
 source = "vcs"
+root = "../.."

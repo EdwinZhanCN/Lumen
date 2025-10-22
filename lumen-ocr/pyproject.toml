@@ -56,3 +56,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+root = "../.."
