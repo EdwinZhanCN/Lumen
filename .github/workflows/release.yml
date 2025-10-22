@@ -34,7 +34,8 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LUMEN_CLIP: ${{ github.ref_name }}
+                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-resources
               uses: pypa/cibuildwheel@v2.16.5
@@ -47,7 +48,8 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LUMEN_RESOURCES: ${{ github.ref_name }}
+                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-face
               uses: pypa/cibuildwheel@v2.16.5
@@ -60,7 +62,8 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LUMEN_FACE: ${{ github.ref_name }}
+                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ github.ref_name }}
 
             - name: Build wheels for lumen-ocr
               uses: pypa/cibuildwheel@v2.16.5
@@ -73,7 +76,8 @@ jobs:
                   CIBW_ARCHS_MACOS: x86_64 arm64
                   CIBW_ARCHS_WINDOWS: AMD64
                   CIBW_TEST_SKIP: "*"
-                  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LUMEN_OCR: ${{ github.ref_name }}
+                  HATCH_VCS_FALLBACK_VERSION: ${{ github.ref_name }}
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ github.ref_name }}
 
             - name: Create Release
               env:
