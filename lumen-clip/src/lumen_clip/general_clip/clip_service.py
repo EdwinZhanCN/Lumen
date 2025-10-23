@@ -15,6 +15,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
 import grpc
@@ -25,7 +26,6 @@ import lumen_clip.proto.ml_service_pb2_grpc as rpc
 from lumen_clip.backends import TorchBackend, ONNXRTBackend
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 from .clip_model import CLIPModelManager
-from lumen_resources import ModelConfig
 
 logger = logging.getLogger(__name__)
 

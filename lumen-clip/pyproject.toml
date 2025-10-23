@@ -20,8 +20,8 @@ dependencies = [
     "colorlog",
     "zeroconf",
     "transformers",
-    "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
-    # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
+    "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources"
+    # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources"
 ]
 license = { text = "MIT" }
 authors = [
@@ -85,6 +85,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
+search_parent_directories = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
