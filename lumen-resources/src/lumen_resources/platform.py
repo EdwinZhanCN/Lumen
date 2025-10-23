@@ -10,7 +10,7 @@ Features:
 - Automatic cache management and file organization
 - Force download and cache invalidation support
 - Supports two-phase dataset downloads used by the Downloader:
-  1) First pass downloads runtime-specific files plus JSON metadata (to obtain model_info.json).
+  1) First pass downloads runtime-specific files plus JSON metadata (model_info.json).
   2) Second pass optionally fetches dataset files using the exact relative path from
      model_info.json's "datasets" mapping via allow_patterns=[relative_path].
 
@@ -22,7 +22,7 @@ Features:
 import shutil
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from types import ModuleType
 
 from .exceptions import DownloadError, PlatformUnavailableError
 
@@ -55,8 +55,8 @@ class Platform:
         Raises:
             PlatformUnavailableError: If required SDK is not installed
         """
-        self.platform_type = platform_type
-        self.owner = owner
+        self.platform_type: PlatformType = platform_type
+        self.owner: str = owner
         self._check_availability()
 
     def _check_availability(self) -> None:
@@ -70,11 +70,11 @@ class Platform:
             try:
                 import huggingface_hub
 
-                self._hf_hub = huggingface_hub
+                self._hf_hub: ModuleType = huggingface_hub
             except ImportError:
                 raise PlatformUnavailableError(
                     "HuggingFace Hub SDK not available. "
-                    "Install with: pip install huggingface_hub"
+                    + "Install with: pip install huggingface_hub"
                 )
         elif self.platform_type == PlatformType.MODELSCOPE:
             try:
@@ -150,7 +150,7 @@ class Platform:
         Returns:
             Path to downloaded model directory
         """
-        snapshot_path = self._hf_hub.snapshot_download(
+        _ = self._hf_hub.snapshot_download(
             repo_id=repo_id,
             allow_patterns=allow_patterns,
             local_dir=cache_dir,
@@ -186,7 +186,7 @@ class Platform:
                 shutil.rmtree(cache_dir)
 
         # ModelScope supports allow_patterns parameter (HuggingFace compatible)
-        snapshot_path = self._ms_snapshot_download(
+        _ = self._ms_snapshot_download(
             model_id=repo_id,
             local_dir=str(cache_dir),
             allow_patterns=allow_patterns,

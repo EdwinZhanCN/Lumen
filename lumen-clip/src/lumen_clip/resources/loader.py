@@ -146,7 +146,9 @@ class ResourceLoader:
         source_format = model_info.source.format.value
         if source_format == "openclip":
             # Load model config.json (required) and attempt to load tokenizer.json (optional)
-            config = ResourceLoader._load_json(model_root_path / "open_clip_config.json")
+            config = ResourceLoader._load_json(
+                model_root_path / "open_clip_config.json"
+            )
             tokenizer_config = ResourceLoader._load_for_openclip(model_root_path)
             if tokenizer_config is None:
                 logger.info(
@@ -196,7 +198,7 @@ class ResourceLoader:
         if runtime not in info.runtimes:
             raise RuntimeNotSupportedError(
                 f"Runtime '{runtime}' not listed in model_info.json. "
-                f"Available: {list(info.runtimes.keys())}"
+                + f"Available: {list(info.runtimes.keys())}"
             )
         runtime_info = info.runtimes[runtime]
         if not runtime_info.available:
@@ -213,7 +215,7 @@ class ResourceLoader:
             if runtime_info.devices and config.rknn_device not in runtime_info.devices:
                 raise RuntimeNotSupportedError(
                     f"Device '{config.rknn_device}' not supported for this model. "
-                    f"Supported devices: {runtime_info.devices}"
+                    + f"Supported devices: {runtime_info.devices}"
                 )
             runtime_path = model_root / runtime / config.rknn_device
         elif runtime == "torch":
@@ -271,7 +273,9 @@ class ResourceLoader:
         """Load tokenizer for HuggingFace models. tokenizer.json is required."""
         tokenizer_path = model_path / "tokenizer.json"
         if not tokenizer_path.exists():
-            logger.info("No tokenizer.json found, will use preprocessor.json for HuggingFace")
+            logger.info(
+                "No tokenizer.json found, will use preprocessor.json for HuggingFace"
+            )
             return None
         try:
             tokenizer_config = ResourceLoader._load_json(tokenizer_path)
@@ -286,10 +290,11 @@ class ResourceLoader:
     def _load_dataset(
         model_root_path: Path, model_info: ModelInfo, dataset: str | None
     ) -> tuple[NDArray[np.object_] | None, NDArray[np.float32] | None]:
-
         # 1. check if repo provides datasets
         if not model_info.datasets:
-            logger.info(f"No datasets configured in model_info.json {model_info.datasets}")
+            logger.info(
+                f"No datasets configured in model_info.json {model_info.datasets}"
+            )
             return None, None
 
         # 2. determine dataset name to load

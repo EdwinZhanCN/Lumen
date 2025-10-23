@@ -51,7 +51,7 @@ class IOTask(_message.Message):
     def __init__(self, name: _Optional[str] = ..., input_mimes: _Optional[_Iterable[str]] = ..., output_mimes: _Optional[_Iterable[str]] = ..., limits: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class Capability(_message.Message):
-    __slots__ = ("service_name", "model_ids", "runtime", "max_concurrency", "precisions", "extra", "tasks")
+    __slots__ = ("service_name", "model_ids", "runtime", "max_concurrency", "precisions", "extra", "tasks", "protocol_version")
     class ExtraEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -66,6 +66,7 @@ class Capability(_message.Message):
     PRECISIONS_FIELD_NUMBER: _ClassVar[int]
     EXTRA_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
+    PROTOCOL_VERSION_FIELD_NUMBER: _ClassVar[int]
     service_name: str
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     runtime: str
@@ -73,7 +74,8 @@ class Capability(_message.Message):
     precisions: _containers.RepeatedScalarFieldContainer[str]
     extra: _containers.ScalarMap[str, str]
     tasks: _containers.RepeatedCompositeFieldContainer[IOTask]
-    def __init__(self, service_name: _Optional[str] = ..., model_ids: _Optional[_Iterable[str]] = ..., runtime: _Optional[str] = ..., max_concurrency: _Optional[int] = ..., precisions: _Optional[_Iterable[str]] = ..., extra: _Optional[_Mapping[str, str]] = ..., tasks: _Optional[_Iterable[_Union[IOTask, _Mapping]]] = ...) -> None: ...
+    protocol_version: str
+    def __init__(self, service_name: _Optional[str] = ..., model_ids: _Optional[_Iterable[str]] = ..., runtime: _Optional[str] = ..., max_concurrency: _Optional[int] = ..., precisions: _Optional[_Iterable[str]] = ..., extra: _Optional[_Mapping[str, str]] = ..., tasks: _Optional[_Iterable[_Union[IOTask, _Mapping]]] = ..., protocol_version: _Optional[str] = ...) -> None: ...
 
 class InferRequest(_message.Message):
     __slots__ = ("correlation_id", "task", "payload", "meta", "payload_mime", "seq", "total", "offset")
