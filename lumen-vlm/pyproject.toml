@@ -1,0 +1,17 @@
+[project]
+name = "lumen-vlm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "EdwinZhan", email = "ed_zhan@outlook.com" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+lumen-vlm = "lumen_vlm:main"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"

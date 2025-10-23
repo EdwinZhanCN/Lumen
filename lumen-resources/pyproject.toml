@@ -1,16 +1,12 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "lumen-resources"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Unified model resource management for Lumen ML services"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Lumilio Photos", email = "modelscope@lumilio.org" }
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
 
 dependencies = [
@@ -34,10 +30,6 @@ config = ["pyyaml>=6.0.0"]
 [project.scripts]
 lumen-resources = "lumen_resources.cli:main"
 
-[tool.hatchling.build.targets.wheel]
-packages = ["src/lumen_resources"]
-include = ["src/lumen_resources/schemas/*.yaml", "src/lumen_resources/schemas/*.json"]
-
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
 ignore = []
@@ -46,3 +38,16 @@ ignore = []
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"lumen_resources" = ["schemas/*.yaml", "schemas/*.json"]

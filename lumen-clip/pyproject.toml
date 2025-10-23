@@ -1,10 +1,6 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "lumen-clip"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +23,14 @@ dependencies = [
     "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
     # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
 ]
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
+
+
+[project.scripts]
+lumen-face = "lumen_clip:main"
 
 [project.optional-dependencies]
 cpu = [
@@ -73,6 +77,14 @@ jp61cu126 = [
     "torchvision",
     "onnxruntime-gpu",
 ]
+
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]
