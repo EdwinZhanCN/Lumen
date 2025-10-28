@@ -18,7 +18,31 @@ from .platform import Platform, PlatformType
 
 @dataclass
 class DownloadResult:
-    """Result of a single model download operation."""
+    """Result of a single model download operation.
+
+    Contains information about the download attempt including success status,
+    file paths, missing files, and error messages if applicable.
+
+    Attributes:
+        model_type: Model type identifier (e.g., "clip:default").
+        model_name: Name of the model repository.
+        runtime: Runtime type used for the model.
+        success: Whether the download was successful. Defaults to False.
+        model_path: Local path where model was downloaded. None if failed.
+        missing_files: List of required files that are missing. None if no missing files.
+        error: Error message if download failed. None if successful.
+
+    Example:
+        >>> result = DownloadResult(
+        ...     model_type="clip:default",
+        ...     model_name="ViT-B-32",
+        ...     runtime="torch",
+        ...     success=True,
+        ...     model_path=Path("/models/clip_vit_b32")
+        ... )
+        >>> print(result.success)
+        True
+    """
 
     model_type: str
     model_name: str
@@ -29,27 +53,41 @@ class DownloadResult:
     error: str | None = None
 
     def __post_init__(self):
+        """Initialize missing_files as empty list if None."""
         if self.missing_files is None:
             self.missing_files = []
 
 
 class Downloader:
-    """
-    Main resource downloader.
+    """Main resource downloader for Lumen models.
 
-    Contract:
-    @requires: Valid LumenConfig
-    @returns: Dictionary of DownloadResult per model type
-    @errors: DownloadError for critical failures
+    Handles downloading models from various platforms (Hugging Face, ModelScope)
+    with support for different runtimes (torch, onnx, rknn) and validation
+    of model integrity and metadata.
+
+    Attributes:
+        config: Lumen services configuration.
+        verbose: Whether to print progress messages.
+        platform: Platform adapter for downloading models.
+
+    Example:
+        >>> config = load_and_validate_config("config.yaml")
+        >>> downloader = Downloader(config, verbose=True)
+        >>> results = downloader.download_all()
+        >>> for model_type, result in results.items():
+        ...     print(f"{model_type}: {'✅' if result.success else '❌'}")
     """
 
     def __init__(self, config: LumenConfig, verbose: bool = True):
-        """
-        Initialize downloader with configuration.
+        """Initialize downloader with configuration.
 
         Args:
-            config: Lumen services configuration
-            verbose: Whether to print progress messages
+            config: Validated Lumen services configuration.
+            verbose: Whether to print progress messages during download.
+
+        Raises:
+            ValidationError: If configuration is invalid.
+            OSError: If cache directory cannot be created.
         """
         self.config: LumenConfig = config
         self.verbose: bool = verbose
@@ -72,14 +110,25 @@ class Downloader:
         (cache_dir / "models").mkdir(parents=True, exist_ok=True)
 
     def download_all(self, force: bool = False) -> dict[str, DownloadResult]:
-        """
-        Download all enabled models from all enabled services.
+        """Download all enabled models from all enabled services.
+
+        Iterates through all enabled services and their model configurations,
+        downloading each model with its required files and validating integrity.
 
         Args:
-            force: Force re-download even if cached
+            force: Whether to force re-download even if models are already cached.
 
         Returns:
-            Dictionary mapping "service:alias" to DownloadResult
+            Dictionary mapping model type identifiers ("service:alias") to DownloadResult objects.
+
+        Example:
+            >>> downloader = Downloader(config)
+            >>> results = downloader.download_all(force=True)
+            >>> for model_type, result in results.items():
+            ...     if result.success:
+            ...         print(f"✅ {model_type} -> {result.model_path}")
+            ...     else:
+            ...         print(f"❌ {model_type}: {result.error}")
         """
         results: dict[str, DownloadResult] = {}
 
@@ -115,10 +164,21 @@ class Downloader:
         return results
 
     def _get_runtime_patterns(self, runtime: Runtime) -> list[str]:
-        """
-        Get file patterns to download based on runtime.
+        """Get file patterns to download based on runtime.
 
-        Always include `model_info.json`
+        Determines which file patterns to include in downloads based on the
+        model runtime. Always includes model_info.json and config files.
+
+        Args:
+            runtime: The model runtime (torch, onnx, rknn).
+
+        Returns:
+            List of file glob patterns for the download.
+
+        Example:
+            >>> patterns = downloader._get_runtime_patterns(Runtime.torch)
+            >>> print("model_info.json" in patterns)
+            True
         """
         patterns = [
             "model_info.json",
@@ -149,16 +209,24 @@ class Downloader:
     def _download_model(
         self, model_type: str, model_config: ModelConfig, force: bool
     ) -> DownloadResult:
-        """
-        Download a single model with its runtime files.
+        """Download a single model with its runtime files.
+
+        Handles the complete download process for a single model including
+        runtime files, metadata validation, and integrity checks. Performs
+        rollback on failure by cleaning up downloaded files.
 
         Args:
-            model_type: Identifier for the model (e.g., "clip:default")
-            model_config: Model configuration from LumenConfig
-            force: Force re-download
+            model_type: Identifier for the model (e.g., "clip:default").
+            model_config: Model configuration from LumenConfig.
+            force: Whether to force re-download even if already cached.
 
         Returns:
-            DownloadResult with success status and details
+            DownloadResult with success status, file paths, and error details.
+
+        Raises:
+            DownloadError: If platform download fails.
+            ModelInfoError: If model_info.json is missing or invalid.
+            ValidationError: If model configuration is not supported.
         """
         result = DownloadResult(
             model_type=model_type,
@@ -233,17 +301,24 @@ class Downloader:
         return result
 
     def _load_model_info(self, model_path: Path) -> ModelInfo:
-        """
-        Load and parse model_info.json using validator.
+        """Load and parse model_info.json using validator.
+
+        Loads the model_info.json file from the model directory and validates
+        it against the ModelInfo schema to ensure metadata integrity.
 
         Args:
-            model_path: Path to model directory
+            model_path: Path to the downloaded model directory.
 
         Returns:
-            Validated ModelInfo object
+            Validated ModelInfo object containing model metadata.
 
         Raises:
-            ModelInfoError: If file is missing or invalid
+            ModelInfoError: If model_info.json is missing or fails validation.
+
+        Example:
+            >>> model_info = downloader._load_model_info(Path("/models/clip_vit_b32"))
+            >>> print(model_info.name)
+            'ViT-B-32'
         """
         info_file = model_path / "model_info.json"
 
@@ -262,15 +337,22 @@ class Downloader:
     def _validate_model_config(
         self, model_info: ModelInfo, model_config: ModelConfig
     ) -> None:
-        """
-        Validate that model supports the requested configuration.
+        """Validate that model supports the requested configuration.
+
+        Checks if the model metadata indicates support for the requested
+        runtime, device (for RKNN), and dataset configurations.
 
         Args:
-            model_info: Validated model metadata
-            model_config: Requested configuration
+            model_info: Validated model metadata from model_info.json.
+            model_config: Requested model configuration from LumenConfig.
 
         Raises:
-            ValidationError: If configuration is not supported
+            ValidationError: If the requested configuration is not supported
+                by the model according to its metadata.
+
+        Example:
+            >>> downloader._validate_model_config(model_info, model_config)  # No exception
+            >>> # If runtime is not supported, raises ValidationError
         """
         runtime = model_config.runtime
         rknn_device = model_config.rknn_device
@@ -306,16 +388,27 @@ class Downloader:
     def _validate_files(
         self, model_path: Path, model_info: ModelInfo, model_config: ModelConfig
     ) -> list[str]:
-        """
-        Validate that required model files exist.
+        """Validate that required model files exist.
+
+        Checks that all required files for the specified runtime and device
+        are present in the downloaded model directory. Also validates dataset
+        files if specified in the configuration.
 
         Args:
-            model_path: Path to model directory
-            model_info: Validated model metadata
-            model_config: Model configuration
+            model_path: Path to the downloaded model directory.
+            model_info: Validated model metadata from model_info.json.
+            model_config: Model configuration specifying runtime and dataset.
 
         Returns:
-            List of missing file paths (empty if all present)
+            List of missing file paths relative to model directory.
+            Empty list if all required files are present.
+
+        Example:
+            >>> missing = downloader._validate_files(model_path, model_info, model_config)
+            >>> if not missing:
+            ...     print("All required files are present")
+            ... else:
+            ...     print(f"Missing files: {missing}")
         """
         missing: list[str] = []
 

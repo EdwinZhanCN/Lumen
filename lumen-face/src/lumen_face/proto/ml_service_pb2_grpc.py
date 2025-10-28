@@ -2,10 +2,9 @@
 """Client and server classes corresponding to protobuf-defined services."""
 
 import grpc
-import warnings
-
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
-from lumen_clip.proto import ml_service_pb2 as proto_dot_ml__service__pb2
+
+from lumen_face.proto import ml_service_pb2 as proto_dot_ml__service__pb2
 
 GRPC_GENERATED_VERSION = "1.75.1"
 GRPC_VERSION = grpc.__version__
@@ -23,14 +22,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f"The grpc package installed is at version {GRPC_VERSION},"
-        + f" but the generated code in proto/ml_service_pb2_grpc.py depends on"
+        + " but the generated code in proto/ml_service_pb2_grpc.py depends on"
         + f" grpcio>={GRPC_GENERATED_VERSION}."
         + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
         + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
     )
 
 
-class InferenceStub(object):
+class InferenceStub:
     """---- Service contract ----"""
 
     def __init__(self, channel):
@@ -65,7 +64,7 @@ class InferenceStub(object):
         )
 
 
-class InferenceServicer(object):
+class InferenceServicer:
     """---- Service contract ----"""
 
     def Infer(self, request_iterator, context):
@@ -126,7 +125,7 @@ def add_InferenceServicer_to_server(servicer, server):
 
 
 # This class is part of an EXPERIMENTAL API.
-class Inference(object):
+class Inference:
     """---- Service contract ----"""
 
     @staticmethod

@@ -1,21 +1,11 @@
 """
-Lumen CLIP gRPC server runner.
+Server startup module for Lumen Face Service.
 
-This module initializes and runs a CLIP-based gRPC service (General CLIP,
-BioCLIP, or a Unified SmartCLIP) according to a YAML configuration file.
-
-Features:
-- Load and validate configuration
-- Download and verify required model resources
-- Select and initialize the appropriate service implementation
-- Advertise the service over mDNS (optional)
-- Graceful shutdown handling
-- Runtime capability reporting
-
-Typical usage:
-    python server.py --config examples/config/clip_onnx_cn.yaml
-    python server.py --config examples/config/clip_cn.yaml --port 50052
+This module provides the main server initialization and startup logic,
+integrating with lumen-resources for configuration and model loading.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
@@ -26,17 +16,15 @@ import sys
 import uuid
 from concurrent import futures
 from pathlib import Path
-from lumen_resources import load_and_validate_config, Downloader
+
 import colorlog
+import grpc
+from lumen_resources import Downloader, DownloadResult, load_and_validate_config
+from lumen_resources.lumen_config import LumenConfig, Mdns
 from zeroconf import ServiceInfo, Zeroconf
 
-import grpc
-from lumen_resources.lumen_config import Mdns
-import lumen_clip.proto.ml_service_pb2_grpc as pb_rpc
-from lumen_clip.general_clip.clip_service import GeneralCLIPService
-from lumen_clip.expert_bioclip.bioclip_service import BioCLIPService
-from lumen_clip.unified_smartclip.smartclip_service import UnifiedCLIPService
-from lumen_resources.downloader import DownloadResult
+from lumen_face.general_face.face_service import GeneralFaceService
+from lumen_face.proto import ml_service_pb2_grpc as pb_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +72,7 @@ def setup_mdns(
     port: int, mdns_config: Mdns | None
 ) -> tuple[Zeroconf | None, ServiceInfo | None]:
     """
-    Set up mDNS service advertisement.
+    Set up mDNS general_face advertisement.
 
     Args:
         port: Service port number
@@ -110,7 +98,7 @@ def setup_mdns(
         if ip.startswith("127."):
             logger.warning(
                 f"mDNS advertising loopback IP {ip}; "
-                + "other devices may not reach the service. "
+                + "other devices may not reach the general_face. "
                 + "Set ADVERTISE_IP to a LAN IP."
             )
 
@@ -121,7 +109,7 @@ def setup_mdns(
             "version": os.getenv("SERVICE_VERSION", "1.0.0"),
         }
 
-        # Get service type and name from config (Mdns may be None or have different attribute names)
+        # Get general_face type and name from config (Mdns may be None or have different attribute names)
         service_type = (
             getattr(mdns_config, "type", None)
             or getattr(mdns_config, "service_type", None)
@@ -130,11 +118,11 @@ def setup_mdns(
         instance_name = (
             getattr(mdns_config, "name", None)
             or getattr(mdns_config, "service_name", None)
-            or "CLIP-Service"
+            or "Face-Service"
         )
         full_name = f"{instance_name}.{service_type}"
 
-        # Create service info
+        # Create general_face info
         service_info = ServiceInfo(
             type_=service_type,
             name=full_name,
@@ -144,7 +132,7 @@ def setup_mdns(
             server=f"{socket.gethostname()}.local.",
         )
 
-        # Register service
+        # Register general_face
         zeroconf = Zeroconf()
         zeroconf.register_service(service_info)
         logger.info(f"✓ mDNS advertised: {full_name} at {ip}:{port}")
@@ -163,7 +151,7 @@ def handle_download_results(results: dict[str, DownloadResult]):
     successful_downloads = []
     failed_downloads = []
 
-    for model_type, result in results.items():
+    for _model_type, result in results.items():
         if result.success:
             successful_downloads.append(result)
         else:
@@ -195,14 +183,14 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
     This server runner acts as an orchestrator:
     1. Loads and validates the master lumen_config.yaml.
-    2. Determines which service to run (General, Bio, or Unified) based on the models defined.
-    3. Delegates the creation of the service instance to the appropriate Service.from_config factory.
-    4. Initializes the service, which loads the ML models.
-    5. Attaches the service to the gRPC server and starts listening.
+    2. Determines which general_face to run based on the models defined in LumenConfig.
+    3. Delegates the creation of the general_face instance to the appropriate Service.from_config factory.
+    4. Initializes the general_face, which loads the ML models.
+    5. Attaches the general_face to the gRPC server and starts listening.
     """
     try:
         # Step 1: Load and validate the main configuration file.
-        config = load_and_validate_config(config_path)
+        config: LumenConfig = load_and_validate_config(config_path)
 
         # Step 1a: Verify and download all required model assets before proceeding.
         logger.info("Verifying and downloading model assets...")
@@ -216,17 +204,16 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             logger.error("This server is designed for 'single' deployment mode only.")
             sys.exit(1)
 
-        # Step 2: Determine which service to instantiate based on model definitions.
-        service_config = config.services.get("clip")
+        # Step 2: Determine which general_face to instantiate based on model definitions.
+        service_config = config.services.get("face")
         if not service_config or not service_config.models:
-            logger.error("Configuration error: 'services.clip.models' is not defined.")
+            logger.error("Configuration error: 'services.face.models' is not defined.")
             sys.exit(1)
 
-        general_model_config = service_config.models.get("general")
-        bioclip_model_config = service_config.models.get("bioclip")
-        if not general_model_config or not bioclip_model_config:
+        model_config = service_config.models.get("general")
+        if not model_config or not model_config.model:
             logger.error(
-                "Configuration error: 'services.clip.models.general' or 'services.clip.bioclip' is not defined."
+                "Configuration error: 'services.face.models.general' is not defined."
             )
             sys.exit(1)
 
@@ -234,52 +221,27 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         service_display_name = "Unknown"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
         backend_settings = service_config.backend_settings
-        # Decision logic: choose the service based on which models are configured.
-        if general_model_config and bioclip_model_config:
-            # Case 1: Both models are defined -> Unified Service
-            service_display_name = "Unified SmartCLIP"
+        # Decision logic: choose the general_face based on which models are configured.
+        if model_config:
+            service_display_name = "General Face Recognition"
             logger.info(
-                f"Configuration for '{service_display_name}' service identified."
-            )
-            service_instance = UnifiedCLIPService.from_config(
-                general_model_config=general_model_config,
-                bioclip_model_config=bioclip_model_config,
-                cache_dir=cache_dir,
-                backend_settings=backend_settings,
+                f"Configuration for '{service_display_name}' general_face identified."
             )
 
-        elif general_model_config:
-            # Case 2: Only general model is defined -> General CLIP Service
-            service_display_name = "General CLIP"
-            logger.info(
-                f"Configuration for '{service_display_name}' service identified."
-            )
-            service_instance = GeneralCLIPService.from_config(
-                model_config=general_model_config,
-                cache_dir=cache_dir,
-                backend_settings=backend_settings,
-            )
-
-        elif bioclip_model_config:
-            # Case 3: Only BioCLIP model is defined -> BioCLIP Service
-            service_display_name = "BioCLIP"
-            logger.info(
-                f"Configuration for '{service_display_name}' service identified."
-            )
-            service_instance = BioCLIPService.from_config(
-                model_config=bioclip_model_config,
+            service_instance = GeneralFaceService.from_config(
+                model_config=model_config,
                 cache_dir=cache_dir,
                 backend_settings=backend_settings,
             )
 
         else:
             logger.error(
-                "Configuration error: No valid models ('general' or 'bioclip') found under 'services.clip'."
+                "Configuration error: No valid model 'general' found under 'services.face'."
             )
             sys.exit(1)
 
-        # Step 3: Initialize the chosen service (this loads the ML models).
-        logger.info(f"Initializing {service_display_name} service...")
+        # Step 3: Initialize the chosen general_face (this loads the ML models).
+        logger.info(f"Initializing {service_display_name} general_face...")
         service_instance.initialize()
 
         # Step 4: Set up and start the gRPC server.
@@ -293,9 +255,11 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         listen_addr = f"[::]:{port}"
         server.add_insecure_port(listen_addr)
         server.start()
-        logger.info(f"🚀 {service_display_name} service listening on {listen_addr}")
+        logger.info(
+            f"🚀 {service_display_name} general_face listening on {listen_addr}"
+        )
 
-        # Log service capabilities now that it's initialized.
+        # Log general_face capabilities now that it's initialized.
         try:
             from google.protobuf import empty_pb2
 
@@ -303,7 +267,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             supported_tasks = [cap.name for cap in capabilities.tasks]
             logger.info(f"✓ Supported tasks: {', '.join(supported_tasks)}")
         except Exception as e:
-            logger.warning(f"Could not retrieve service capabilities: {e}")
+            logger.warning(f"Could not retrieve general_face capabilities: {e}")
 
         # Step 5: Set up mDNS and graceful shutdown.
         zeroconf, service_info = None, None
@@ -313,7 +277,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         def handle_shutdown(signum, frame):
             logger.info("Shutdown signal received. Stopping server...")
             if zeroconf and service_info:
-                logger.info("Unregistering mDNS service...")
+                logger.info("Unregistering mDNS general_face...")
                 zeroconf.unregister_service(service_info)
                 zeroconf.close()
             server.stop(grace=5.0)
@@ -340,17 +304,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run CLIP service with default config settings
-  python server.py --config config/clip_only.yaml
-
-  # Run BioCLIP service on custom port
-  python server.py --config config/bioclip_only.yaml --port 50052
-
-  # Run unified service
-  python server.py --config config/unified_service.yaml
+  # Run General Face general_face with default config settings
+  python server.py --config config/face_cn.yaml
 
   # Validate config without starting server
-  lumen-resources validate config/clip_only.yaml
+  lumen-resources validate config/face_cn.yaml
         """,
     )
 

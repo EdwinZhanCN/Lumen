@@ -25,6 +25,7 @@ Lumen/
 ```bash
 # 切换到 dev 分支
 git checkout dev
+# 从 main 合并 （ tag 在 main 中更新，所以必须合并)
 git pull origin dev
 
 # 创建功能分支（可选）
