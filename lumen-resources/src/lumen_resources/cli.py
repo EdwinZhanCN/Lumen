@@ -17,14 +17,23 @@ from .model_info_validator import (
 
 
 def print_banner():
-    """Print welcome banner."""
+    """Print welcome banner.
+
+    Displays the Lumen Resources application banner with formatting
+    to provide a professional command-line interface experience.
+    """
     print("=" * 60)
     print("  Lumen Resources - Model Resource Manager")
     print("=" * 60)
 
 
 def print_summary(results: dict[str, DownloadResult]) -> None:
-    """Print download summary."""
+    """Print download summary with results and statistics.
+
+    Args:
+        results: Dictionary mapping model type identifiers to DownloadResult objects.
+            Contains information about download success status, file paths, and errors.
+    """
     print("\n" + "=" * 60)
     print("📊 Download Summary")
     print("=" * 60)
@@ -48,7 +57,20 @@ def print_summary(results: dict[str, DownloadResult]) -> None:
 
 
 def cmd_download(args: argparse.Namespace) -> None:
-    """Handle download command."""
+    """Handle download command for model resources.
+
+    Downloads all enabled models from the configuration file, with support for
+    forced re-downloading and detailed progress reporting. Validates configuration
+    before downloading and provides a comprehensive summary of results.
+
+    Args:
+        args: Parsed command line arguments containing:
+            - config: Path to configuration YAML file
+            - force: Whether to force re-download even if models are cached
+
+    Raises:
+        SystemExit: If configuration validation fails or downloads encounter errors.
+    """
     config_path = Path(args.config)
 
     try:
@@ -85,7 +107,20 @@ def cmd_download(args: argparse.Namespace) -> None:
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
-    """Handle validate command."""
+    """Handle validate command for configuration files.
+
+    Validates YAML configuration files against the Lumen configuration schema
+    with options for strict Pydantic validation or flexible JSON Schema validation.
+    Displays detailed configuration information when validation succeeds.
+
+    Args:
+        args: Parsed command line arguments containing:
+            - config: Path to configuration YAML file
+            - strict: Whether to use strict Pydantic validation
+
+    Raises:
+        SystemExit: If configuration validation fails.
+    """
     config_path = Path(args.config)
 
     try:
@@ -139,7 +174,20 @@ def cmd_validate(args: argparse.Namespace) -> None:
 
 
 def cmd_validate_model_info(args: argparse.Namespace) -> None:
-    """Handle validate-model-info command."""
+    """Handle validate-model-info command for model metadata files.
+
+    Validates model_info.json files against the model information schema
+    with options for strict Pydantic validation or flexible JSON Schema validation.
+    Displays comprehensive model information when validation succeeds.
+
+    Args:
+        args: Parsed command line arguments containing:
+            - model_info: Path to model_info.json file
+            - strict: Whether to use strict Pydantic validation
+
+    Raises:
+        SystemExit: If model_info.json validation fails.
+    """
     model_info_path = Path(args.model_info)
 
     try:
@@ -208,7 +256,16 @@ def cmd_validate_model_info(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    """Handle list command."""
+    """Handle list command for cached models.
+
+    Lists all models currently cached in the specified cache directory,
+    showing model information including version, available runtimes, and
+    file contents when model_info.json files are available.
+
+    Args:
+        args: Parsed command line arguments containing:
+            - cache_dir: Path to cache directory (defaults to ~/.lumen/)
+    """
     cache_dir = Path(args.cache_dir).expanduser()
     models_dir = cache_dir / "models"
 
@@ -255,7 +312,15 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    """Main CLI entry point."""
+    """Main CLI entry point.
+
+    Sets up the argument parser with subcommands for different operations
+    (download, validate, validate-model-info, list) and dispatches to the
+    appropriate handler functions. Handles help display and error cases.
+
+    Raises:
+        SystemExit: If no command is provided or if a command handler exits with an error.
+    """
     parser = argparse.ArgumentParser(
         prog="lumen-resources",
         description="Lumen Resources - Model Resource Manager",

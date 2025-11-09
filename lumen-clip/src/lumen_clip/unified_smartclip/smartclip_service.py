@@ -94,8 +94,6 @@ class UnifiedCLIPService(rpc.InferenceServicer):
             Initialized UnifiedCLIPService instance.
         """
         from lumen_clip.resources.exceptions import ConfigError
-        from lumen_clip.general_clip.clip_model import CLIPModelManager
-        from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 
         # --- Helper function to create a backend from config ---
         def create_backend(resources: ModelResources, runtime: str):
@@ -237,7 +235,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
     # --- Task Handlers (process lists of requests) ---
 
-    def _handle_clip_classify(
+    def _handle_lumen_clip_classify(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
@@ -247,7 +245,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 req.correlation_id, scores, self.clip_model.info()
             )
 
-    def _handle_bioclip_classify(
+    def _handle_lumen_bioclip_classify(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
@@ -257,7 +255,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 req.correlation_id, scores, self.bioclip_model.info()
             )
 
-    def _handle_smart_classify(
+    def _handle_lumen_clip_smart_classify(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
@@ -312,7 +310,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 meta={"source": "bioclip_classification"},
             )
 
-    def _handle_clip_embed(
+    def _handle_lumen_clip_embed(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
@@ -321,7 +319,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 req.correlation_id, vec, self.clip_model.info()
             )
 
-    def _handle_bioclip_embed(
+    def _handle_lumen_bioclip_embed(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         for req in requests:
@@ -330,7 +328,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 req.correlation_id, vec, self.bioclip_model.info()
             )
 
-    def _handle_clip_image_embed(
+    def _handle_lumen_clip_image_embed(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         # Use backend batch embedding (falls back to sequential in backend if not supported)
@@ -342,7 +340,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
                 req.correlation_id, vec, self.clip_model.info()
             )
 
-    def _handle_bioclip_image_embed(
+    def _handle_lumen_bioclip_image_embed(
         self, requests: list[pb.InferRequest]
     ) -> Iterable[pb.InferResponse]:
         # Use backend batch embedding (falls back to sequential in backend if not supported)
@@ -415,22 +413,22 @@ class UnifiedCLIPService(rpc.InferenceServicer):
 
         tasks = [
             pb.IOTask(
-                name="clip_embed",
+                name="lumen_clip_embed",
                 input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="clip_image_embed",
+                name="lumen_clip_image_embed",
                 input_mimes=["image/jpeg", "image/png", "image/webp"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="bioclip_embed",
+                name="lumen_bioclip_embed",
                 input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="bioclip_image_embed",
+                name="lumen_bioclip_image_embed",
                 input_mimes=["image/jpeg", "image/png", "image/webp"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
@@ -439,14 +437,14 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         if self.clip_model.supports_classification:
             tasks.append(
                 pb.IOTask(
-                    name="clip_classify",
+                    name="lumen_clip_classify",
                     input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
             )
             tasks.append(
                 pb.IOTask(
-                    name="clip_classify_scene",
+                    name="lumen_clip_classify_scene",
                     input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
@@ -455,7 +453,7 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         if self.bioclip_model.supports_classification:
             tasks.append(
                 pb.IOTask(
-                    name="bioclip_classify",
+                    name="lumen_bioclip_classify",
                     input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
@@ -467,14 +465,14 @@ class UnifiedCLIPService(rpc.InferenceServicer):
         ):
             tasks.append(
                 pb.IOTask(
-                    name="smart_classify",
+                    name="lumen_clip_smart_classify",
                     input_mimes=["image/jpeg", "image/png"],
                     output_mimes=["application/json;schema=labels_v1"],
                 )
             )
 
         return pb.Capability(
-            service_name="clip-unified",
+            service_name="lumen_smart_clip",
             model_ids=[general_res.model_info.name, bioclip_res.model_info.name],
             runtime=general_res.runtime,
             max_concurrency=4,

@@ -28,43 +28,71 @@ from .exceptions import DownloadError, PlatformUnavailableError
 
 
 class PlatformType(str, Enum):
-    """Supported platforms."""
+    """Supported model repository platforms.
+
+    Defines the platforms that can be used for downloading models.
+    Each platform has its own SDK and API requirements.
+
+    Attributes:
+        HUGGINGFACE: Hugging Face Hub platform.
+        MODELSCOPE: ModelScope Hub platform.
+
+    Example:
+        >>> platform_type = PlatformType.HUGGINGFACE
+        >>> print(platform_type.value)
+        'huggingface'
+    """
 
     HUGGINGFACE = "huggingface"
     MODELSCOPE = "modelscope"
 
 
 class Platform:
-    """
-    Unified platform adapter for HuggingFace and ModelScope.
+    """Unified platform adapter for HuggingFace and ModelScope.
 
-    Contract:
-    @requires: Platform SDK properly installed and configured
-    @returns: Path to downloaded model directory
-    @errors: DownloadError, PlatformUnavailableError
+    Provides a consistent interface for downloading models from different
+    repositories while handling platform-specific requirements and optimizations.
+    Supports efficient file filtering during download to minimize bandwidth usage.
+
+    Attributes:
+        platform_type: The type of platform (HUGGINGFACE or MODELSCOPE).
+        owner: Organization/owner name for model repositories.
+
+    Example:
+        >>> platform = Platform(PlatformType.HUGGINGFACE, "openai")
+        >>> model_path = platform.download_model(
+        ...     repo_name="clip-vit-base-patch32",
+        ...     cache_dir=Path("/cache"),
+        ...     allow_patterns=["*.json", "*.pt"]
+        ... )
     """
 
     def __init__(self, platform_type: PlatformType, owner: str):
-        """
-        Initialize platform adapter.
+        """Initialize platform adapter.
 
         Args:
-            platform_type: Type of platform (HUGGINGFACE or MODELSCOPE)
-            owner: Organization/owner name on the platform
+            platform_type: Type of platform (HUGGINGFACE or MODELSCOPE).
+            owner: Organization/owner name on the platform.
 
         Raises:
-            PlatformUnavailableError: If required SDK is not installed
+            PlatformUnavailableError: If required SDK is not installed.
         """
         self.platform_type: PlatformType = platform_type
         self.owner: str = owner
         self._check_availability()
 
     def _check_availability(self) -> None:
-        """
-        Check if the required platform SDK is available.
+        """Check if the required platform SDK is available.
+
+        Validates that the appropriate SDK (huggingface_hub or modelscope)
+        is installed and imports the necessary functions for the platform.
 
         Raises:
-            PlatformUnavailableError: If SDK is not installed
+            PlatformUnavailableError: If the required SDK is not installed.
+
+        Example:
+            >>> platform = Platform(PlatformType.HUGGINGFACE, "owner")
+            >>> # If huggingface_hub is not installed, raises PlatformUnavailableError
         """
         if self.platform_type == PlatformType.HUGGINGFACE:
             try:
@@ -93,26 +121,37 @@ class Platform:
         allow_patterns: list[str],
         force: bool = False,
     ) -> Path:
-        """
-        Download model files from the platform with efficient filtering.
+        """Download model files from the platform with efficient filtering.
 
-        Both HuggingFace and ModelScope now support pattern-based filtering
-        during download, eliminating the need to download unwanted files.
+        Downloads model files using pattern-based filtering to minimize bandwidth
+        usage. Supports both HuggingFace and ModelScope platforms with their
+        respective SDKs while providing a unified interface.
 
         Args:
-            repo_name: Repository name (without owner prefix)
-            cache_dir: Local cache directory
-            allow_patterns: List of glob patterns for files to download
-                          (e.g., ['*.json', '*.bin', 'tokenizer/*'])
-            force: Force re-download even if cached
-                  - HuggingFace: Uses native force_download parameter
-                  - ModelScope: Clears cache directory before download
+            repo_name: Repository name (without owner prefix).
+            cache_dir: Local cache directory for storing downloaded models.
+            allow_patterns: List of glob patterns for files to download.
+                Examples: ['*.json', '*.bin', 'tokenizer/*', 'model_info.json'].
+            force: Force re-download even if cached.
+                - HuggingFace: Uses native force_download parameter.
+                - ModelScope: Clears cache directory before download.
 
         Returns:
-            Path to the downloaded model directory
+            Path to the downloaded model directory.
 
         Raises:
-            DownloadError: If download fails
+            DownloadError: If download fails for any reason.
+
+        Example:
+            >>> platform = Platform(PlatformType.HUGGINGFACE, "openai")
+            >>> model_path = platform.download_model(
+            ...     repo_name="clip-vit-base-patch32",
+            ...     cache_dir=Path("/cache"),
+            ...     allow_patterns=["*.json", "*.pt"],
+            ...     force=True
+            ... )
+            >>> print(model_path.name)
+            'clip-vit-base-patch32'
         """
         repo_id = f"{self.owner}/{repo_name}"
         target_dir = cache_dir / "models" / repo_name
@@ -138,17 +177,25 @@ class Platform:
         allow_patterns: list[str],
         force: bool,
     ) -> Path:
-        """
-        Download from HuggingFace Hub.
+        """Download from HuggingFace Hub.
+
+        Uses the huggingface_hub library to download model files with
+        pattern-based filtering and optional force re-download.
 
         Args:
-            repo_id: Full repository ID (owner/repo)
-            cache_dir: Local cache directory
-            allow_patterns: File patterns to download
-            force: Force re-download
+            repo_id: Full repository ID (owner/repo).
+            cache_dir: Local cache directory for storing files.
+            allow_patterns: File patterns to download.
+            force: Whether to force re-download ignoring cache.
 
         Returns:
-            Path to downloaded model directory
+            Path to the downloaded model directory.
+
+        Example:
+            >>> platform = Platform(PlatformType.HUGGINGFACE, "owner")
+            >>> path = platform._download_from_huggingface(
+            ...     "owner/repo", Path("/cache"), ["*.json"], False
+            ... )
         """
         _ = self._hf_hub.snapshot_download(
             repo_id=repo_id,
@@ -167,17 +214,25 @@ class Platform:
         allow_patterns: list[str],
         force: bool,
     ) -> Path:
-        """
-        Download from ModelScope Hub.
+        """Download from ModelScope Hub.
+
+        Uses the ModelScope SDK to download model files with pattern-based filtering.
+        Implements force download by clearing the cache directory before download.
 
         Args:
-            repo_id: Full repository ID (owner/repo)
-            cache_dir: Local cache directory
-            allow_patterns: File patterns to download
-            force: Force re-download by clearing cache first
+            repo_id: Full repository ID (owner/repo).
+            cache_dir: Local cache directory for storing files.
+            allow_patterns: File patterns to download.
+            force: Force re-download by clearing cache first.
 
         Returns:
-            Path to downloaded model directory
+            Path to the downloaded model directory.
+
+        Example:
+            >>> platform = Platform(PlatformType.MODELSCOPE, "owner")
+            >>> path = platform._download_from_modelscope(
+            ...     "owner/repo", Path("/cache"), ["*.json"], False
+            ... )
         """
 
         # Handle force download by clearing ModelScope cache
@@ -196,14 +251,19 @@ class Platform:
         return cache_dir
 
     def cleanup_model(self, repo_name: str, cache_dir: Path) -> None:
-        """
-        Remove a model directory from cache.
+        """Remove a model directory from cache.
 
-        Used for rollback when download/validation fails.
+        Used for cleanup when download/validation fails or for manual cache management.
+        Removes the entire model directory including all downloaded files.
 
         Args:
-            repo_name: Repository name
-            cache_dir: Cache directory
+            repo_name: Repository name (without owner prefix).
+            cache_dir: Base cache directory containing models.
+
+        Example:
+            >>> platform = Platform(PlatformType.HUGGINGFACE, "owner")
+            >>> platform.cleanup_model("model-name", Path("/cache"))
+            >>> # Model directory removed if it existed
         """
         target_dir = cache_dir / "models" / repo_name
         if target_dir.exists():

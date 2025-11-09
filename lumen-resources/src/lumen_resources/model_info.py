@@ -11,30 +11,105 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class Format(Enum):
-    huggingface = 'huggingface'
-    openclip = 'openclip'
-    modelscope = 'modelscope'
-    custom = 'custom'
+    """Model source format type.
+
+    Defines the format and source platform for a model. Different formats
+    have different loading mechanisms and repository structures.
+
+    Attributes:
+        huggingface: Hugging Face Hub model format.
+        openclip: OpenCLIP model format.
+        modelscope: ModelScope model format.
+        custom: Custom model format.
+
+    Example:
+        >>> source = Source(format=Format.huggingface, repo_id="openai/clip-vit-base-patch32")
+        >>> print(source.format.value)
+        'huggingface'
+    """
+
+    huggingface = "huggingface"
+    openclip = "openclip"
+    modelscope = "modelscope"
+    custom = "custom"
 
 
 class Source(BaseModel):
+    """Model source information.
+
+    Contains information about where and how to obtain the model, including
+    the format type and repository identifier.
+
+    Attributes:
+        format: Model format type (huggingface, openclip, modelscope, custom).
+        repo_id: Repository identifier for the model source.
+
+    Example:
+        >>> source = Source(
+        ...     format=Format.huggingface,
+        ...     repo_id="openai/clip-vit-base-patch32"
+        ... )
+        >>> print(source.repo_id)
+        'openai/clip-vit-base-patch32'
+    """
+
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     format: Format
     repo_id: str = Field(
-        ..., description='Repository identifier for model source', min_length=1
+        ..., description="Repository identifier for model source", min_length=1
     )
 
 
 class Requirements(BaseModel):
+    """Python environment requirements for model runtime.
+
+    Specifies the Python version and package dependencies required to run
+    the model in a specific runtime configuration.
+
+    Attributes:
+        python: Minimum Python version requirement.
+        dependencies: List of required Python package dependencies.
+
+    Example:
+        >>> req = Requirements(
+        ...     python=">=3.8",
+        ...     dependencies=["torch", "transformers", "pillow"]
+        ... )
+        >>> print(req.python)
+        '>=3.8'
+    """
+
     python: str | None = None
     dependencies: list[str] | None = None
 
 
 class Runtimes(BaseModel):
+    """Runtime configuration for a specific model execution environment.
+
+    Defines the availability, file requirements, device compatibility, and
+    dependencies for a model runtime (e.g., torch, onnx, rknn).
+
+    Attributes:
+        available: Whether this runtime is available for the model.
+        files: List of required files or dict mapping runtime to file lists.
+        devices: List of compatible devices for this runtime.
+        requirements: Python environment requirements for this runtime.
+
+    Example:
+        >>> runtime = Runtimes(
+        ...     available=True,
+        ...     files=["model.pt", "config.json"],
+        ...     devices=["cuda", "cpu"],
+        ...     requirements=Requirements(python=">=3.8", dependencies=["torch"])
+        ... )
+        >>> print(runtime.available)
+        True
+    """
+
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     available: bool
     files: list[str] | dict[str, list[str]] | None = None
@@ -43,16 +118,56 @@ class Runtimes(BaseModel):
 
 
 class Datasets(BaseModel):
+    """Dataset configuration for model evaluation and inference.
+
+    Defines the label and embedding datasets used for zero-shot classification
+    or other dataset-specific model operations.
+
+    Attributes:
+        labels: Dataset identifier for class labels.
+        embeddings: Dataset identifier for embeddings.
+
+    Example:
+        >>> dataset = Datasets(
+        ...     labels="imagenet1k_labels",
+        ...     embeddings="imagenet1k_embeddings"
+        ... )
+        >>> print(dataset.labels)
+        'imagenet1k_labels'
+    """
+
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     labels: str
     embeddings: str
 
 
 class Metadata(BaseModel):
+    """Model metadata information.
+
+    Contains descriptive metadata about the model including licensing,
+    authorship, creation dates, and categorization tags.
+
+    Attributes:
+        license: License identifier for the model.
+        author: Model author or organization.
+        created_at: Model creation date.
+        updated_at: Last model update timestamp.
+        tags: List of descriptive tags for categorization.
+
+    Example:
+        >>> metadata = Metadata(
+        ...     license="MIT",
+        ...     author="OpenAI",
+        ...     tags=["computer-vision", "multimodal", "clip"]
+        ... )
+        >>> print(metadata.license)
+        'MIT'
+    """
+
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     license: str | None = None
     author: str | None = None
@@ -62,28 +177,55 @@ class Metadata(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    """
-    Schema for Lumen AI model configuration files
+    """Schema for Lumen AI model configuration files.
+
+    Complete model definition including source information, runtime configurations,
+    dataset compatibility, and metadata. This is the top-level schema for
+    model_info.json files.
+
+    Attributes:
+        name: Model name identifier, also OpenCLIP model identifier if applicable.
+        version: Model version following semantic versioning (X.Y.Z).
+        description: Model description and purpose.
+        model_type: Type/category of the model.
+        embedding_dim: Dimension of the model's embedding space.
+        source: Model source information including format and repository.
+        runtimes: Dictionary mapping runtime names to runtime configurations.
+        datasets: Optional dataset configurations for model evaluation.
+        metadata: Optional model metadata including license and author.
+
+    Example:
+        >>> model_info = ModelInfo(
+        ...     name="ViT-B-32",
+        ...     version="1.0.0",
+        ...     description="Vision Transformer for CLIP",
+        ...     model_type="vision-transformer",
+        ...     embedding_dim=512,
+        ...     source=Source(format=Format.huggingface, repo_id="openai/clip-vit-base-patch32"),
+        ...     runtimes={"torch": Runtimes(available=True)}
+        ... )
+        >>> print(model_info.name)
+        'ViT-B-32'
     """
 
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str = Field(
         ...,
-        description='Model name identifier, this is also openclip model identifier if openclip is set as source format',
+        description="Model name identifier, this is also openclip model identifier if openclip is set as source format",
         max_length=100,
         min_length=1,
     )
     version: str = Field(
-        ..., description='Model version', pattern='^[0-9]+\\.[0-9]+\\.[0-9]+$'
+        ..., description="Model version", pattern="^[0-9]+\\.[0-9]+\\.[0-9]+$"
     )
     description: str = Field(
-        ..., description='Model description and purpose', max_length=500, min_length=1
+        ..., description="Model description and purpose", max_length=500, min_length=1
     )
-    model_type: str = Field(..., description='Type of the model')
+    model_type: str = Field(..., description="Type of the model")
     embedding_dim: int = Field(
-        ..., description='Dimension of the embedding space', ge=1, le=100000
+        ..., description="Dimension of the embedding space", ge=1, le=100000
     )
     source: Source
     runtimes: dict[str, Runtimes]

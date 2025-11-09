@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FaceV1",
+  "description": "Universal schema for face detection and embedding responses across Lumen services",
+  "type": "object",
+  "properties": {
+    "faces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Bounding box coordinates [x1, y1, x2, y2]"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Detection confidence score"
+          },
+          "landmarks": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            ],
+            "description": "Facial landmark points (optional)"
+          }
+        },
+        "required": ["bbox", "confidence"],
+        "additionalProperties": true
+      },
+      "description": "Detected faces with bounding boxes and metadata"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of detected faces"
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Model identifier"
+    },
+    "embeddings": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "minItems": 1,
+        "maxItems": 2048,
+        "description": "Face embedding vector"
+      },
+      "description": "Face embeddings corresponding to detected faces (optional)"
+    },
+    "embedding_dim": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2048,
+      "description": "Embedding dimension (required if embeddings provided)"
+    }
+  },
+  "required": ["faces", "count", "model_id"],
+  "additionalProperties": true,
+  "examples": [
+    {
+      "faces": [
+        {
+          "bbox": [100, 50, 200, 150],
+          "confidence": 0.95,
+          "landmarks": [[120, 80], [180, 80], [150, 120]]
+        }
+      ],
+      "count": 1,
+      "model_id": "buffalo_l_onnx"
+    },
+    {
+      "faces": [
+        {
+          "bbox": [100, 50, 200, 150],
+          "confidence": 0.95,
+          "landmarks": [[120, 80], [180, 80], [150, 120]]
+        },
+        {
+          "bbox": [300, 100, 400, 200],
+          "confidence": 0.87
+        }
+      ],
+      "count": 2,
+      "model_id": "buffalo_l_onnx",
+      "embeddings": [
+        [0.1234, -0.5678, 0.9012],
+        [0.2345, -0.6789, 0.8901]
+      ],
+      "embedding_dim": 3
+    }
+  ]
+}

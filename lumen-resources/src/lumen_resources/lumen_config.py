@@ -11,188 +11,449 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
 class Region(Enum):
-    """
-    Platform region selection (cn=ModelScope, other=HuggingFace)
+    """Platform region selection for model repositories.
+
+    Determines which model repository platform to use for downloading models.
+    Different regions have access to different model platforms and content.
+
+    Attributes:
+        cn: China region - uses ModelScope platform
+        other: Other regions - uses Hugging Face platform
+
+    Example:
+        >>> config = Metadata(version="1.0.0", region=Region.cn, cache_dir="~/.lumen")
+        >>> print(config.region.value)
+        'cn'
     """
 
-    cn = 'cn'
-    other = 'other'
+    cn = "cn"
+    other = "other"
 
 
 class Metadata(BaseModel):
+    """Configuration metadata for Lumen services.
+
+    Contains version information, region settings, and cache directory configuration.
+    This is required for all Lumen service configurations.
+
+    Attributes:
+        version: Configuration version following semantic versioning (X.Y.Z format).
+        region: Platform region for model downloads (cn=ModelScope, other=HuggingFace).
+        cache_dir: Directory path for caching downloaded models (supports ~ expansion).
+
+    Example:
+        >>> metadata = Metadata(
+        ...     version="1.0.0",
+        ...     region=Region.other,
+        ...     cache_dir="~/.lumen/models"
+        ... )
+        >>> print(metadata.version)
+        '1.0.0'
+    """
+
     version: str = Field(
         ...,
-        description='Configuration version (semantic versioning)',
-        examples=['1.0.0', '2.1.3'],
-        pattern='^\\d+\\.\\d+\\.\\d+$',
+        description="Configuration version (semantic versioning)",
+        examples=["1.0.0", "2.1.3"],
+        pattern="^\\d+\\.\\d+\\.\\d+$",
     )
     region: Region = Field(
-        ..., description='Platform region selection (cn=ModelScope, other=HuggingFace)'
+        ..., description="Platform region selection (cn=ModelScope, other=HuggingFace)"
     )
     cache_dir: str = Field(
         ...,
-        description='Model cache directory path (supports ~ expansion)',
-        examples=['~/.lumen/models', '/opt/lumen/models'],
+        description="Model cache directory path (supports ~ expansion)",
+        examples=["~/.lumen/models", "/opt/lumen/models"],
     )
 
 
 class Mode(Enum):
-    """
-    Deployment mode
+    """Deployment mode for Lumen services.
+
+    Determines how services are deployed and managed. Different modes support
+    different service architectures and scaling patterns.
+
+    Attributes:
+        single: Single service deployment - runs one specific service
+        hub: Hub service deployment - runs multiple services as a hub
+
+    Example:
+        >>> deployment = Deployment(mode=Mode.single, service="clip")
+        >>> print(deployment.mode.value)
+        'single'
     """
 
-    single = 'single'
-    hub = 'hub'
+    single = "single"
+    hub = "hub"
 
 
 class Service(RootModel[str]):
-    root: str = Field(..., pattern='^[a-z][a-z0-9_]*$')
+    """Service identifier for Lumen deployments.
+
+    A string-based root model that validates service names according to naming
+    conventions. Service names must start with a lowercase letter and can contain
+    lowercase letters, numbers, and underscores.
+
+    Attributes:
+        root: Service name string matching the pattern.
+
+    Example:
+        >>> service = Service("clip_service")
+        >>> print(service.root)
+        'clip_service'
+        >>> invalid_service = Service("Invalid-Name")  # Raises ValidationError
+    """
+
+    root: str = Field(..., pattern="^[a-z][a-z0-9_]*$")
 
 
 class Deployment(BaseModel):
-    mode: Literal['single'] = Field(..., description='Deployment mode')
+    """Deployment configuration for single service mode.
+
+    Configuration for deploying a single Lumen service. This class is used
+    when the deployment mode is set to 'single', requiring a specific service
+    name to be provided.
+
+    Attributes:
+        mode: Deployment mode, fixed to 'single' for this class.
+        service: Name of the single service to deploy.
+        services: List of services for hub mode (should be None for single mode).
+
+    Example:
+        >>> deployment = Deployment(
+        ...     mode="single",
+        ...     service="clip"
+        ... )
+        >>> print(deployment.service)
+        'clip'
+    """
+
+    mode: Literal["single"] = Field(..., description="Deployment mode")
     service: str = Field(
         ...,
-        description='Service name for single mode (required if mode=single)',
-        pattern='^[a-z][a-z0-9_]*$',
+        description="Service name for single mode (required if mode=single)",
+        pattern="^[a-z][a-z0-9_]*$",
     )
     services: list[Service] | None = Field(
         None,
-        description='Service names for hub mode (required if mode=hub)',
+        description="Service names for hub mode (required if mode=hub)",
         min_length=1,
     )
 
 
 class Deployment1(BaseModel):
-    mode: Literal['hub'] = Field(..., description='Deployment mode')
+    """Deployment configuration for hub service mode.
+
+    Configuration for deploying multiple Lumen services as a hub. This class is used
+    when the deployment mode is set to 'hub', requiring a list of services to be provided.
+
+    Attributes:
+        mode: Deployment mode, fixed to 'hub' for this class.
+        service: Service name for single mode (should be None for hub mode).
+        services: List of services to deploy in hub mode (required).
+
+    Example:
+        >>> deployment = Deployment1(
+        ...     mode="hub",
+        ...     services=[Service("clip"), Service("face")]
+        ... )
+        >>> print(len(deployment.services))
+        2
+    """
+
+    mode: Literal["hub"] = Field(..., description="Deployment mode")
     service: str | None = Field(
         None,
-        description='Service name for single mode (required if mode=single)',
-        pattern='^[a-z][a-z0-9_]*$',
+        description="Service name for single mode (required if mode=single)",
+        pattern="^[a-z][a-z0-9_]*$",
     )
     services: list[Service] = Field(
         ...,
-        description='Service names for hub mode (required if mode=hub)',
+        description="Service names for hub mode (required if mode=hub)",
         min_length=1,
     )
 
 
 class Mdns(BaseModel):
-    enabled: bool | None = Field(False, description='Enable mDNS service discovery')
+    """mDNS service discovery configuration.
+
+    Configuration for multicast DNS service discovery, allowing Lumen services
+    to be automatically discoverable on local networks.
+
+    Attributes:
+        enabled: Whether to enable mDNS service discovery. Defaults to False.
+        service_name: mDNS service name, required if enabled is True.
+
+    Example:
+        >>> mdns = Mdns(
+        ...     enabled=True,
+        ...     service_name="lumen-clip"
+        ... )
+        >>> print(mdns.enabled)
+        True
+    """
+
+    enabled: bool | None = Field(False, description="Enable mDNS service discovery")
     service_name: str | None = Field(
         None,
-        description='mDNS service name (required if enabled=true)',
-        examples=['lumen-clip', 'lumen-hub'],
-        pattern='^[a-z][a-z0-9-]*$',
+        description="mDNS service name (required if enabled=true)",
+        examples=["lumen-clip", "lumen-hub"],
+        pattern="^[a-z][a-z0-9-]*$",
     )
 
 
 class Server(BaseModel):
-    port: int = Field(..., description='gRPC server port', ge=1024, le=65535)
+    """gRPC server configuration.
+
+    Configuration for the gRPC server that hosts Lumen services, including
+    network settings and optional mDNS service discovery.
+
+    Attributes:
+        port: gRPC server port number (1024-65535).
+        host: Server bind address. Defaults to "0.0.0.0".
+        mdns: Optional mDNS configuration for service discovery.
+
+    Example:
+        >>> server = Server(
+        ...     port=50051,
+        ...     host="127.0.0.1",
+        ...     mdns=Mdns(enabled=True, service_name="lumen-clip")
+        ... )
+        >>> print(server.port)
+        50051
+    """
+
+    port: int = Field(..., description="gRPC server port", ge=1024, le=65535)
     host: str | None = Field(
-        '0.0.0.0',
-        description='Server bind address',
-        examples=['0.0.0.0', '127.0.0.1', '[::]'],
+        "0.0.0.0",
+        description="Server bind address",
+        examples=["0.0.0.0", "127.0.0.1", "[::]"],
     )
     mdns: Mdns | None = None
 
 
 class Import(BaseModel):
+    """Service import configuration for dynamic loading.
+
+    Configuration for dynamically importing and registering Lumen services
+    with the gRPC server. Contains paths to the service registry class
+    and the gRPC server registration function.
+
+    Attributes:
+        registry_class: Full dotted path to the service registry class.
+        add_to_server: Full dotted path to the gRPC add_to_server function.
+
+    Example:
+        >>> import_config = Import(
+        ...     registry_class="lumen_clip.service_registry.ClipService",
+        ...     add_to_server="lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        ... )
+        >>> print("clip" in import_config.registry_class)
+        True
+    """
+
     registry_class: str = Field(
         ...,
-        description='Full dotted path to service registry class',
+        description="Full dotted path to service registry class",
         examples=[
-            'lumen_clip.service_registry.ClipService',
-            'lumen_face.service_registry.FaceService',
+            "lumen_clip.service_registry.ClipService",
+            "lumen_face.service_registry.FaceService",
         ],
-        pattern='^[a-z_][a-z0-9_.]*\\.[A-Z][a-zA-Z0-9]*$',
+        pattern="^[a-z_][a-z0-9_.]*\\.[A-Z][a-zA-Z0-9]*$",
     )
     add_to_server: str = Field(
         ...,
-        description='Full dotted path to gRPC add_to_server function',
+        description="Full dotted path to gRPC add_to_server function",
         examples=[
-            'lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server',
-            'lumen_face.proto.ml_service_pb2_grpc.add_FaceServicer_to_server',
+            "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server",
+            "lumen_face.proto.ml_service_pb2_grpc.add_FaceServicer_to_server",
         ],
-        pattern='^[a-z_][a-z0-9_.]*\\.add_[A-Za-z0-9_]+_to_server$',
+        pattern="^[a-z_][a-z0-9_.]*\\.add_[A-Za-z0-9_]+_to_server$",
     )
 
 
 class BackendSettings(BaseModel):
-    """
-    Optional settings for inference backend configuration.
+    """Optional settings for inference backend configuration.
+
+    Configuration for inference backend optimization including device selection,
+    batch processing, and ONNX runtime provider settings.
+
+    Attributes:
+        device: Preferred compute device ('cuda', 'mps', 'cpu'). If None, auto-detects.
+        batch_size: Maximum batch size for inference processing. Defaults to 8.
+        onnx_providers: List of ONNX execution providers. If None, uses defaults.
+
+    Example:
+        >>> backend = BackendSettings(
+        ...     device="cuda",
+        ...     batch_size=16,
+        ...     onnx_providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+        ... )
+        >>> print(backend.device)
+        'cuda'
     """
 
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     device: str | None = Field(
         None,
         description="Preferred device ('cuda', 'mps', 'cpu'). If null, auto-detects best available.",
     )
     batch_size: int | None = Field(
-        8, description='Maximum batch size for inference.', ge=1
+        8, description="Maximum batch size for inference.", ge=1
     )
     onnx_providers: list[str] | None = Field(
         None,
-        description='List of ONNX execution providers. If null, uses ONNX Runtime defaults.',
+        description="List of ONNX execution providers. If null, uses ONNX Runtime defaults.",
     )
 
 
 class Runtime(Enum):
-    """
-    Model runtime type
+    """Model runtime type for inference execution.
+
+    Determines which runtime environment to use for model inference.
+    Different runtimes have different performance characteristics and
+    hardware requirements.
+
+    Attributes:
+        torch: PyTorch runtime for native PyTorch models.
+        onnx: ONNX runtime for optimized cross-platform inference.
+        rknn: RKNN runtime for Rockchip NPU acceleration.
+
+    Example:
+        >>> config = ModelConfig(
+        ...     model="ViT-B-32",
+        ...     runtime=Runtime.torch
+        ... )
+        >>> print(config.runtime.value)
+        'torch'
     """
 
-    torch = 'torch'
-    onnx = 'onnx'
-    rknn = 'rknn'
+    torch = "torch"
+    onnx = "onnx"
+    rknn = "rknn"
 
 
 class ModelConfig(BaseModel):
+    """Configuration for a single model within a service.
+
+    Defines the model repository, runtime requirements, and optional settings
+    for dataset and device-specific configurations.
+
+    Attributes:
+        model: Model repository name or identifier.
+        runtime: Runtime environment for model execution.
+        rknn_device: RKNN device identifier, required if runtime is rknn.
+        dataset: Dataset name for zero-shot classification tasks.
+
+    Example:
+        >>> config = ModelConfig(
+        ...     model="ViT-B-32",
+        ...     runtime=Runtime.torch,
+        ...     dataset="ImageNet_1k"
+        ... )
+        >>> print(config.model)
+        'ViT-B-32'
+    """
+
     model: str = Field(
         ...,
-        description='Model repository name',
-        examples=['ViT-B-32', 'CN-CLIP-ViT-B-16', 'MobileCLIP-S2'],
+        description="Model repository name",
+        examples=["ViT-B-32", "CN-CLIP-ViT-B-16", "MobileCLIP-S2"],
     )
-    runtime: Runtime = Field(..., description='Model runtime type')
+    runtime: Runtime = Field(..., description="Model runtime type")
     rknn_device: str | None = Field(
         None,
-        description='RKNN device identifier (required if runtime=rknn)',
-        examples=['rk3566', 'rk3588'],
-        pattern='^rk\\d+$',
+        description="RKNN device identifier (required if runtime=rknn)",
+        examples=["rk3566", "rk3588"],
+        pattern="^rk\\d+$",
     )
     dataset: str | None = Field(
         None,
-        description='Dataset name for zero-shot classification (optional)',
-        examples=['ImageNet_1k', 'TreeOfLife-10M'],
+        description="Dataset name for zero-shot classification (optional)",
+        examples=["ImageNet_1k", "TreeOfLife-10M"],
     )
 
 
 class Services(BaseModel):
-    enabled: bool = Field(..., description='Whether to load this service')
+    """Configuration for a Lumen service.
+
+    Defines a complete service configuration including package information,
+    import settings, backend optimization, and model configurations.
+
+    Attributes:
+        enabled: Whether this service should be loaded and started.
+        package: Python package name containing the service implementation.
+        import_: Dynamic import configuration for the service.
+        backend_settings: Optional backend optimization settings.
+        models: Dictionary of model configurations keyed by alias.
+
+    Example:
+        >>> service = Services(
+        ...     enabled=True,
+        ...     package="lumen_clip",
+        ...     import_=Import(
+        ...         registry_class="lumen_clip.service_registry.ClipService",
+        ...         add_to_server="lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        ...     ),
+        ...     models={"default": ModelConfig(model="ViT-B-32", runtime=Runtime.torch)}
+        ... )
+        >>> print(service.package)
+        'lumen_clip'
+    """
+
+    enabled: bool = Field(..., description="Whether to load this service")
     package: str = Field(
         ...,
-        description='Python package name',
-        examples=['lumen_clip', 'lumen_face'],
-        pattern='^[a-z][a-z0-9_]*$',
+        description="Python package name",
+        examples=["lumen_clip", "lumen_face"],
+        pattern="^[a-z][a-z0-9_]*$",
     )
-    import_: Import = Field(..., alias='import')
+    import_: Import = Field(..., alias="import")
     backend_settings: BackendSettings | None = None
     models: dict[str, ModelConfig] = Field(
-        ..., description='Model configurations (alias → config)'
+        ..., description="Model configurations (alias → config)"
     )
 
 
 class LumenConfig(BaseModel):
-    """
-    Unified configuration schema for all Lumen ML services
+    """Unified configuration schema for all Lumen ML services.
+
+    Root configuration model that combines metadata, deployment settings,
+    server configuration, and service definitions into a complete
+    configuration for Lumen ML services.
+
+    Attributes:
+        metadata: Configuration metadata including version and region settings.
+        deployment: Deployment configuration (single or hub mode).
+        server: gRPC server configuration.
+        services: Dictionary of service configurations keyed by service name.
+
+    Example:
+        >>> config = LumenConfig(
+        ...     metadata=Metadata(
+        ...         version="1.0.0",
+        ...         region=Region.other,
+        ...         cache_dir="~/.lumen/models"
+        ...     ),
+        ...     deployment=Deployment(mode="single", service="clip"),
+        ...     server=Server(port=50051),
+        ...     services={"clip": Services(
+        ...         enabled=True,
+        ...         package="lumen_clip",
+        ...         import_=Import(...),
+        ...         models={}
+        ...     )}
+        ... )
+        >>> print(config.metadata.version)
+        '1.0.0'
     """
 
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     metadata: Metadata
     deployment: Deployment | Deployment1
     server: Server
-    services: dict[str, Services] = Field(..., description='Service definitions')
+    services: dict[str, Services] = Field(..., description="Service definitions")

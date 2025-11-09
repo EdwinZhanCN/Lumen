@@ -42,8 +42,6 @@ class GeneralCLIPService(rpc.InferenceServicer):
     scene classification tasks.
     """
 
-    SERVICE_NAME = "clip-general"
-
     def __init__(self, backend, resources: ModelResources) -> None:
         """
         Initialize CLIPService.
@@ -152,19 +150,19 @@ class GeneralCLIPService(rpc.InferenceServicer):
                     continue
 
                 # 2. Route to the correct handler based on the task
-                if req.task == "embed":
+                if req.task == "lumen_clip_embed":
                     result_bytes, result_mime, extra_meta = self._handle_embed(
                         payload, dict(req.meta)
                     )
-                elif req.task == "image_embed":
+                elif req.task == "lumen_clip_image_embed":
                     result_bytes, result_mime, extra_meta = self._handle_image_embed(
                         payload, dict(req.meta)
                     )
-                elif req.task == "classify":
+                elif req.task == "lumen_clip_classify":
                     result_bytes, result_mime, extra_meta = self._handle_classify(
                         payload, dict(req.meta)
                     )
-                elif req.task == "classify_scene":
+                elif req.task == "lumen_clip_classify_scene":
                     result_bytes, result_mime, extra_meta = self._handle_classify_scene(
                         payload, dict(req.meta)
                     )
@@ -336,12 +334,12 @@ class GeneralCLIPService(rpc.InferenceServicer):
 
         tasks = [
             pb.IOTask(
-                name="embed",
+                name="lumen_clip_embed",
                 input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="image_embed",
+                name="lumen_clip_image_embed",
                 input_mimes=["image/jpeg", "image/png", "image/webp"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
@@ -351,13 +349,13 @@ class GeneralCLIPService(rpc.InferenceServicer):
             tasks.extend(
                 [
                     pb.IOTask(
-                        name="classify",
+                        name="lumen_clip_classify",
                         input_mimes=["image/jpeg", "image/png", "image/webp"],
                         output_mimes=["application/json;schema=labels_v1"],
                         limits={"topk_max": "50"},
                     ),
                     pb.IOTask(
-                        name="classify_scene",
+                        name="lumen_clip_classify_scene",
                         input_mimes=["image/jpeg", "image/png", "image/webp"],
                         output_mimes=["application/json;schema=labels_v1"],
                     ),
@@ -365,7 +363,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
             )
 
         return pb.Capability(
-            service_name=self.SERVICE_NAME,
+            service_name="lumen_clip",
             model_ids=[res.model_info.name],
             runtime=res.runtime,
             max_concurrency=4,
