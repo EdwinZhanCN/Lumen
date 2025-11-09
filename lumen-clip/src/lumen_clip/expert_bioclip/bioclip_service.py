@@ -177,11 +177,11 @@ class BioCLIPService(rpc.InferenceServicer):
                     continue
 
                 # --- Route to task handler ---
-                if req.task == "embed":
+                if req.task == "lumen_bioclip_embed":
                     result_bytes, result_mime, extra_meta = self._handle_embed(
                         req.payload_mime, payload, dict(req.meta)
                     )
-                elif req.task == "classify":
+                elif req.task == "lumen_bioclip_classify":
                     # Check if classification is supported
                     if not self.model.supports_classification:
                         yield pb.InferResponse(
@@ -197,7 +197,7 @@ class BioCLIPService(rpc.InferenceServicer):
                     result_bytes, result_mime, extra_meta = self._handle_classify(
                         req.payload_mime, payload, dict(req.meta)
                     )
-                elif req.task == "image_embed":
+                elif req.task == "lumen_bioclip_image_embed":
                     result_bytes, result_mime, extra_meta = self._handle_image_embed(
                         req.payload_mime, payload, dict(req.meta)
                     )
@@ -371,12 +371,12 @@ class BioCLIPService(rpc.InferenceServicer):
 
         tasks = [
             pb.IOTask(
-                name="embed",
+                name="lumen_bioclip_embed",
                 input_mimes=["text/plain;charset=utf-8"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
             pb.IOTask(
-                name="image_embed",
+                name="lumen_bioclip_image_embed",
                 input_mimes=["image/jpeg", "image/png", "image/webp"],
                 output_mimes=["application/json;schema=embedding_v1"],
             ),
@@ -385,7 +385,7 @@ class BioCLIPService(rpc.InferenceServicer):
         if self.model.supports_classification:
             tasks.append(
                 pb.IOTask(
-                    name="classify",
+                    name="lumen_bioclip_classify",
                     input_mimes=["image/jpeg", "image/png", "image/webp"],
                     output_mimes=["application/json;schema=labels_v1"],
                     limits={"topk_max": "50"},
@@ -393,7 +393,7 @@ class BioCLIPService(rpc.InferenceServicer):
             )
 
         return pb.Capability(
-            service_name="clip-bioclip",
+            service_name="lumen_bioclip",
             model_ids=[res.model_info.name],
             runtime=res.runtime,
             max_concurrency=4,

@@ -23,6 +23,8 @@ import lumen_face.proto.ml_service_pb2 as pb
 import lumen_face.proto.ml_service_pb2_grpc as rpc
 from lumen_face.backends import FaceRecognitionBackend, ONNXRTBackend
 from lumen_face.resources.loader import ModelResources, ResourceLoader
+from lumen_face.registry import TaskRegistry
+from lumen_resources import validate_response
 
 from .face_model import FaceModelManager
 
@@ -97,7 +99,11 @@ class GeneralFaceService(rpc.InferenceServicer):
             Call `initialize()` to load models before serving requests.
         """
         self.model = FaceModelManager(backend=backend, resources=resources)
+        self.registry = TaskRegistry()
         self.is_initialized = False
+
+        # Initialize task registry
+        self._setup_task_registry()
 
     @classmethod
     def from_config(
@@ -175,6 +181,44 @@ class GeneralFaceService(rpc.InferenceServicer):
 
         return service
 
+    def _setup_task_registry(self) -> None:
+        """Initialize the task registry with all supported tasks.
+
+        This method serves as the single source of truth for task definitions.
+        All task names, handlers, and metadata are registered here.
+        """
+        # Register face detection task
+        self.registry.register_task(
+            task_id="detect",
+            name="lumen_face_detect",
+            handler=self._handle_detect,
+            description="Face detection with bounding boxes and landmarks",
+            input_mimes=["image/jpeg", "image/png"],
+            output_mime="application/json;schema=face_detection_v1"
+        )
+
+        # Register face embedding task
+        self.registry.register_task(
+            task_id="embed",
+            name="lumen_face_embed",
+            handler=self._handle_embed,
+            description="Face embedding extraction with optional alignment",
+            input_mimes=["image/jpeg", "image/png"],
+            output_mime="application/json;schema=embedding_v1"
+        )
+
+        # Register combined detect and embed task
+        self.registry.register_task(
+            task_id="detect_and_embed",
+            name="lumen_face_detect_and_embed",
+            handler=self._handle_detect_and_embed,
+            description="Combined face detection and embedding extraction",
+            input_mimes=["image/jpeg", "image/png"],
+            output_mime="application/json;schema=embedding_v1"
+        )
+
+        logger.info(f"Task registry initialized with {len(self.registry.list_task_names())} tasks")
+
     def initialize(self) -> None:
         """Loads the model and prepares it for inference."""
         logger.info("Initializing FaceModelManager...")
@@ -183,9 +227,9 @@ class GeneralFaceService(rpc.InferenceServicer):
         info = self.model.get_info()
         logger.info(
             "Face model ready: %s with %s (loaded in %.2fs)",
-            info.get("model_name"),
-            info.get("backend_info", {}) or "unknown",
-            info.get("load_time", 0.0),
+            info.model_name,
+            info.backend_info or "unknown",
+            info.load_time,
         )
 
     # -------- gRPC Service Methods ----------
@@ -214,21 +258,13 @@ class GeneralFaceService(rpc.InferenceServicer):
                 if not ready:
                     continue  # Wait for more chunks
 
-                # 2. Route to the correct handler
-                if req.task == "detect":
-                    result_bytes, result_mime, extra_meta = self._handle_detect(
-                        payload, dict(req.meta)
-                    )
-                elif req.task == "embed":
-                    result_bytes, result_mime, extra_meta = self._handle_embed(
-                        payload, dict(req.meta)
-                    )
-                elif req.task == "detect_and_embed":
-                    result_bytes, result_mime, extra_meta = (
-                        self._handle_detect_and_embed(payload, dict(req.meta))
-                    )
-                else:
-                    raise ValueError(f"Unsupported task: {req.task}")
+                # 2. Route to the correct handler using TaskRegistry
+                try:
+                    handler = self.registry.get_handler(req.task)
+                    result_bytes, result_mime, extra_meta = handler(payload, dict(req.meta))
+                except ValueError as e:
+                    # Task not found in registry
+                    raise ValueError(f"Unsupported task: {req.task}. Available tasks: {self.registry.list_task_names()}") from e
 
                 # 3. Stream response back
                 yield pb.InferResponse(
@@ -269,30 +305,14 @@ class GeneralFaceService(rpc.InferenceServicer):
 
         # Get model info
         model_info = self.model.get_info()
-        backend_info = model_info.get("backend_info", {})
+        backend_info = model_info.backend_info
 
-        # Build capabilities
-        tasks = [
-            pb.IOTask(
-                name="detect",
-                input_mimes=["image/jpeg", "image/png"],
-                output_mimes=["application/json"],
-            ),
-            pb.IOTask(
-                name="embed",
-                input_mimes=["image/jpeg", "image/png"],
-                output_mimes=["application/json"],
-            ),
-            pb.IOTask(
-                name="detect_and_embed",
-                input_mimes=["image/jpeg", "image/png"],
-                output_mimes=["application/json"],
-            ),
-        ]
+        # Get tasks from TaskRegistry (single source of truth)
+        tasks = self.registry.get_all_tasks()
 
         extra_meta = {
-            "model_name": model_info.get("model_name", "unknown"),
-            "model_id": model_info.get("model_id", "unknown"),
+            "model_name": model_info.model_name,
+            "model_id": model_info.model_id,
             "face_embedding_dim": str(backend_info.get("face_embedding_dim", 512)),
             "supports_landmarks": str(
                 backend_info.get("supports_landmarks", False)
@@ -301,7 +321,7 @@ class GeneralFaceService(rpc.InferenceServicer):
 
         return pb.Capability(
             service_name=self.SERVICE_NAME,
-            model_ids=[model_info.get("model_id", "unknown")],
+            model_ids=[model_info.model_id],
             runtime=backend_info.get("runtime", "unknown"),
             max_concurrency=1,
             precisions=backend_info.get("precisions", ["fp32"]),
@@ -344,10 +364,21 @@ class GeneralFaceService(rpc.InferenceServicer):
                 for face in faces
             ],
             "count": len(faces),
+            "model_id": self.model.get_info().model_id,
         }
 
         result_bytes = json.dumps(result).encode("utf-8")
-        return result_bytes, "application/json", {"face_count": str(len(faces))}
+
+        # Validate response against schema
+        is_valid, error = validate_response(result_bytes, "face_v1")
+        if not is_valid:
+            logger.error(f"Response validation failed: {error}")
+
+        return (
+            result_bytes,
+            "application/json;schema=face_v1",
+            {"face_count": str(len(faces))},
+        )
 
     def _handle_embed(
         self, payload: bytes, meta: dict[str, str]
@@ -369,14 +400,27 @@ class GeneralFaceService(rpc.InferenceServicer):
             face_image=payload, landmarks=landmarks
         )
 
-        # Convert to JSON-serializable format
+        info = self.model.get_info()
+        model_id = info.model_id
+
         result = {
-            "embedding": embedding.tolist(),
-            "dimension": len(embedding),
+            "vector": embedding.tolist(),
+            "dim": len(embedding),
+            "model_id": model_id,
         }
 
         result_bytes = json.dumps(result).encode("utf-8")
-        return result_bytes, "application/json", {"embedding_dim": str(len(embedding))}
+
+        # Validate response against schema
+        is_valid, error = validate_response(result_bytes, "embedding_v1")
+        if not is_valid:
+            logger.error(f"Response validation failed: {error}")
+
+        return (
+            result_bytes,
+            "application/json;schema=embedding_v1",
+            {"dim": str(len(embedding))},
+        )
 
     def _handle_detect_and_embed(
         self, payload: bytes, meta: dict[str, str]
@@ -427,10 +471,21 @@ class GeneralFaceService(rpc.InferenceServicer):
         result = {
             "faces": results,
             "count": len(results),
+            "model_id": self.model.get_info().model_id,
         }
 
         result_bytes = json.dumps(result).encode("utf-8")
-        return result_bytes, "application/json", {"face_count": str(len(results))}
+
+        # Validate response against schema
+        is_valid, error = validate_response(result_bytes, "face_v1")
+        if not is_valid:
+            logger.error(f"Response validation failed: {error}")
+
+        return (
+            result_bytes,
+            "application/json;schema=face_v1",
+            {"face_count": str(len(results))},
+        )
 
     # -------- Helper Methods ----------
 

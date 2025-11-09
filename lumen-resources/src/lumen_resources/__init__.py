@@ -52,6 +52,14 @@ from .lumen_config_validator import load_and_validate_config
 
 from .model_info import ModelInfo, Source, Runtimes, Metadata
 from .model_info_validator import load_and_validate_model_info
+from .result_schemas import (
+    validate_response,
+    validate_response_with_conversion,
+    list_available_schemas,
+    get_schema_model,
+    FaceV1,
+    EmbeddingV1,
+)
 
 __version__ = "0.1.0"
 
@@ -67,6 +75,13 @@ __all__ = [
     "Runtimes",
     "Metadata",
     "load_and_validate_model_info",
+    # Response Validation
+    "validate_response",
+    "validate_response_with_conversion",
+    "list_available_schemas",
+    "get_schema_model",
+    "FaceV1",
+    "EmbeddingV1",
     # Downloader
     "Downloader",
     "DownloadResult",

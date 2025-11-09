@@ -637,22 +637,3 @@ To add support for a new runtime:
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Hugging Face](https://huggingface.co/) for the amazing model hub and libraries
-- [ModelScope](https://modelscope.cn/) for providing access to models in China
-- [Pydantic](https://pydantic-docs.helpmanual.io/) for excellent data validation
-- The open-source community for inspiration and feedback
-
-## 📚 Additional Resources
-
-- [Lumen Documentation](https://doc.lumilio.org/)
-- [Configuration Schema Reference](https://doc.lumilio.org/schema/config-schema.yaml)
-- [Model Information Schema](https://doc.lumilio.org/schema/model_info-schema.json)
-- [GitHub Repository](https://github.com/EdwinZhanCN/Lumen)
-- [Issue Tracker](https://github.com/EdwinZhanCN/Lumen/issues)
-
----
-
-**Lumen Resources** - Making model resource management simple, reliable, and efficient. 🚀

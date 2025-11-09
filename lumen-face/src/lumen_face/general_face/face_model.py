@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -41,6 +42,39 @@ class LabelMismatchError(Exception):
     """Raised when cached embeddings don't match current labels."""
 
     pass
+
+
+@dataclass
+class ModelInfo:
+    """Runtime information and metadata for FaceModelManager.
+
+    This dataclass provides comprehensive information about the face model manager
+    state, including backend configuration, performance metrics, and model metadata.
+    It's designed to be consistent with the lumen-clip interface pattern.
+
+    Attributes:
+        model_name: Name of the model (e.g., "buffalo_l", "arcface_resnet100").
+        model_id: Unique identifier for the model combination (e.g., "buffalo_l_onnx").
+        backend_info: Backend runtime information as a dictionary.
+        load_time: Time taken for initialization in seconds.
+        initialized: Whether the model manager is ready for inference.
+    """
+
+    model_name: str
+    model_id: str
+    backend_info: dict[str, Any]
+    load_time: float
+    initialized: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        """Convert to a plain dict (safe for JSON serialization)."""
+        return {
+            "model_name": self.model_name,
+            "model_id": self.model_id,
+            "backend_info": self.backend_info,
+            "load_time": self.load_time,
+            "initialized": self.initialized,
+        }
 
 
 class FaceModelManager:
@@ -468,31 +502,22 @@ class FaceModelManager:
             # Return default face crop
             return np.zeros((112, 112, 3), dtype=np.float32)
 
-    def get_info(self) -> dict[str, Any]:
+    def get_info(self) -> ModelInfo:
         """
         Get model runtime information (consistent with lumen-clip interface).
 
         Returns:
-            Dictionary containing model metadata and configuration
+            ModelInfo containing model metadata and configuration
         """
         backend_info = self._backend.get_runtime_info()
 
-        return {
-            "model_name": backend_info.model_name or "unknown",
-            "model_id": backend_info.model_id or "unknown",
-            "backend_info": backend_info.as_dict(),
-            "load_time": self._load_time or 0.0,
-            "initialized": self.is_initialized,
-        }
-
-    def get_model_info(self) -> dict[str, Any]:
-        """
-        Get model runtime information.
-
-        Returns:
-            Dictionary containing model metadata and configuration
-        """
-        return self.get_info()
+        return ModelInfo(
+            model_name=backend_info.model_name or "unknown",
+            model_id=backend_info.model_id or "unknown",
+            backend_info=backend_info.as_dict(),
+            load_time=self._load_time or 0.0,
+            initialized=self.is_initialized,
+        )
 
     def __repr__(self) -> str:
         """String representation of FaceModelManager."""
