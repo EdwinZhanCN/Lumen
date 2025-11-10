@@ -1,0 +1,34 @@
+# Test configuration for CLIP model - Torch Runtime
+# Copied from examples/config/clip_cn.yaml with runtime variations
+
+metadata:
+    version: "1.0.0"
+    region: "cn"
+    cache_dir: "~/Lumen-Resources"
+
+deployment:
+    mode: "single"
+    service: "clip"
+
+server:
+    port: 50051
+    host: "0.0.0.0"
+    mdns:
+        enabled: true
+        service_name: "lumen-clip-test"
+
+services:
+    clip:
+        enabled: true
+        package: "lumen_clip"
+        import:
+            registry_class: "lumen_clip.service_registry.CLIPServiceRegistry"
+            add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        backend_settings:
+            device: "cpu"  # Changed from mps for testing
+            batch_size: 1  # Changed from 8 for testing
+        models:
+            general:
+                model: "MobileCLIP2-S2"
+                runtime: torch  # Explicitly set to torch
+                dataset: ImageNet_1k

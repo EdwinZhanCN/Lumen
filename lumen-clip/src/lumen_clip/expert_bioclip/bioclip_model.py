@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 from lumen_clip.backends import BaseClipBackend
 from lumen_clip.resources.loader import ModelResources
+from lumen_clip.models import ModelInfo, BackendInfo
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
@@ -265,34 +266,36 @@ class BioCLIPModelManager:
 
         return results
 
-    def info(self) -> dict[str, str | int | float | bool | dict[str, Any]]:
+    def info(self) -> ModelInfo:
         """
         Return model manager information including fixed version and performance data.
 
         Returns:
-            Dictionary containing model metadata and performance info
+            ModelInfo containing model metadata and performance info
         """
-        backend_info: dict[str, Any] = {}
+        backend_info = None
         if hasattr(self, "backend"):
             info = self.backend.get_info()
-            backend_info = {
-                "runtime": info.runtime,
-                "model_id": info.model_id,
-                "model_name": info.model_name,
-                "version": info.version,
-                "embedding_dim": info.image_embedding_dim,
-            }
+            backend_info = BackendInfo(
+                runtime=info.runtime,
+                model_id=info.model_id,
+                model_name=info.model_name,
+                version=info.version,
+                embedding_dim=info.image_embedding_dim,
+                device=getattr(info, 'device', None),
+                precisions=getattr(info, 'precisions', None),
+            )
 
-        return {
-            "model_version": self.model_version,
-            "model_name": self.resources.model_name,
-            "model_id": self.model_id,
-            "num_species": len(self.labels),
-            "supports_classification": self.supports_classification,
-            "load_time": self._load_time if self._load_time is not None else "",
-            "is_initialized": self.is_initialized,
-            "backend_info": backend_info,
-        }
+        return ModelInfo(
+            model_name=self.resources.model_name,
+            model_id=self.model_id,
+            model_version=self.model_version,
+            supports_classification=self.supports_classification,
+            is_initialized=self.is_initialized,
+            load_time=self._load_time if self._load_time is not None else 0.0,
+            num_labels=len(self.labels) if self.labels else None,
+            backend_info=backend_info,
+        )
 
     def _ensure_initialized(self) -> None:
         """

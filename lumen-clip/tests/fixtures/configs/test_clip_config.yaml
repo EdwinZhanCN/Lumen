@@ -1,0 +1,27 @@
+# Test configuration for CLIP model
+# This uses the same format as production config but with test-specific values
+
+services:
+  clip:
+    models:
+      general:
+        model: "openai/clip-vit-base-patch32"
+        runtime: "torch"
+        dataset: "imagenet1k"
+
+    backend_settings:
+      device: "cpu"
+      batch_size: 1
+
+    # Test-specific paths - these should point to actual test models
+    model_paths:
+      torch: "test_models/clip-vit-base-patch32.pt"
+      onnx: "test_models/clip-vit-base-patch32.onnx"
+
+# Test cache directory
+cache_dir: "./test_cache"
+
+# Logging configuration
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

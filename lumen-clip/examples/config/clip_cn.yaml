@@ -31,5 +31,5 @@ services:
         models:
             general:
                 model: "MobileCLIP2-S2" # CN-CLIP_ViT-L-14 | CN-CLIP_ViT-B-16 | MobileCLIP2-S2
-                runtime: onnx
+                runtime: torch
                 dataset: ImageNet_1k

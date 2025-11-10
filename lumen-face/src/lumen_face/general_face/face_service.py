@@ -187,34 +187,36 @@ class GeneralFaceService(rpc.InferenceServicer):
         This method serves as the single source of truth for task definitions.
         All task names, handlers, and metadata are registered here.
         """
+        self.registry.set_service_name("lumen-face")
+
         # Register face detection task
         self.registry.register_task(
-            task_id="detect",
-            name="lumen_face_detect",
+            name="face_detect",
             handler=self._handle_detect,
             description="Face detection with bounding boxes and landmarks",
             input_mimes=["image/jpeg", "image/png"],
-            output_mime="application/json;schema=face_detection_v1"
+            output_mime="application/json;schema=face_v1",
+            metadata={"task_type": "face_detection", "framework": "onnx"},
         )
 
         # Register face embedding task
         self.registry.register_task(
-            task_id="embed",
-            name="lumen_face_embed",
+            name="face_embed",
             handler=self._handle_embed,
             description="Face embedding extraction with optional alignment",
             input_mimes=["image/jpeg", "image/png"],
-            output_mime="application/json;schema=embedding_v1"
+            output_mime="application/json;schema=embedding_v1",
+            metadata={"task_type": "face_embedding", "framework": "onnx"},
         )
 
         # Register combined detect and embed task
         self.registry.register_task(
-            task_id="detect_and_embed",
-            name="lumen_face_detect_and_embed",
+            name="face_detect_and_embed",
             handler=self._handle_detect_and_embed,
             description="Combined face detection and embedding extraction",
             input_mimes=["image/jpeg", "image/png"],
-            output_mime="application/json;schema=embedding_v1"
+            output_mime="application/json;schema=face_v1",
+            metadata={"task_type": "face_detection_embedding", "framework": "onnx"},
         )
 
         logger.info(f"Task registry initialized with {len(self.registry.list_task_names())} tasks")
@@ -260,8 +262,10 @@ class GeneralFaceService(rpc.InferenceServicer):
 
                 # 2. Route to the correct handler using TaskRegistry
                 try:
+                    meta = dict(req.meta)
+
                     handler = self.registry.get_handler(req.task)
-                    result_bytes, result_mime, extra_meta = handler(payload, dict(req.meta))
+                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
                 except ValueError as e:
                     # Task not found in registry
                     raise ValueError(f"Unsupported task: {req.task}. Available tasks: {self.registry.list_task_names()}") from e
@@ -307,10 +311,8 @@ class GeneralFaceService(rpc.InferenceServicer):
         model_info = self.model.get_info()
         backend_info = model_info.backend_info
 
-        # Get tasks from TaskRegistry (single source of truth)
-        tasks = self.registry.get_all_tasks()
-
-        extra_meta = {
+        # Use registry to build capability automatically
+        extra_metadata = {
             "model_name": model_info.model_name,
             "model_id": model_info.model_id,
             "face_embedding_dim": str(backend_info.get("face_embedding_dim", 512)),
@@ -319,21 +321,18 @@ class GeneralFaceService(rpc.InferenceServicer):
             ).lower(),
         }
 
-        return pb.Capability(
+        return self.registry.build_capability(
             service_name=self.SERVICE_NAME,
-            model_ids=[model_info.model_id],
+            model_id=model_info.model_id,
             runtime=backend_info.get("runtime", "unknown"),
-            max_concurrency=1,
             precisions=backend_info.get("precisions", ["fp32"]),
-            extra=extra_meta,
-            tasks=tasks,
-            protocol_version="1.0",
+            extra_metadata=extra_metadata,
         )
 
     # -------- Task Handlers ----------
 
     def _handle_detect(
-        self, payload: bytes, meta: dict[str, str]
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """Handle face detection task."""
         # Extract parameters from meta
@@ -381,7 +380,7 @@ class GeneralFaceService(rpc.InferenceServicer):
         )
 
     def _handle_embed(
-        self, payload: bytes, meta: dict[str, str]
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """Handle face embedding task."""
         # Extract landmarks from meta if provided
@@ -423,7 +422,7 @@ class GeneralFaceService(rpc.InferenceServicer):
         )
 
     def _handle_detect_and_embed(
-        self, payload: bytes, meta: dict[str, str]
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """Handle detect and embed task."""
         # Extract parameters from meta

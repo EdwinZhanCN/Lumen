@@ -35,7 +35,7 @@ from lumen_resources.lumen_config import Mdns
 import lumen_clip.proto.ml_service_pb2_grpc as pb_rpc
 from lumen_clip.general_clip.clip_service import GeneralCLIPService
 from lumen_clip.expert_bioclip.bioclip_service import BioCLIPService
-from lumen_clip.unified_smartclip.smartclip_service import UnifiedCLIPService
+from lumen_clip.unified_smartclip.smartclip_service import SmartCLIPService
 from lumen_resources.downloader import DownloadResult
 
 logger = logging.getLogger(__name__)
@@ -224,11 +224,12 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
         general_model_config = service_config.models.get("general")
         bioclip_model_config = service_config.models.get("bioclip")
-        if not general_model_config or not bioclip_model_config:
+        if not (general_model_config or bioclip_model_config):
             logger.error(
-                "Configuration error: 'services.clip.models.general' or 'services.clip.bioclip' is not defined."
+                "Configuration error: at least one of `services.clip.models.general` or `services.clip.models.bioclip` must be defined."
             )
             sys.exit(1)
+
 
         service_instance = None
         service_display_name = "Unknown"
@@ -241,9 +242,9 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             logger.info(
                 f"Configuration for '{service_display_name}' service identified."
             )
-            service_instance = UnifiedCLIPService.from_config(
-                general_model_config=general_model_config,
-                bioclip_model_config=bioclip_model_config,
+            service_instance = SmartCLIPService.from_config(
+                clip_config=general_model_config,
+                bioclip_config=bioclip_model_config,
                 cache_dir=cache_dir,
                 backend_settings=backend_settings,
             )

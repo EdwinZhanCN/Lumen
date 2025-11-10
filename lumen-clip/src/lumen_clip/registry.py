@@ -1,9 +1,9 @@
 """
-Task Registry for Lumen Face Services.
+Task Registry for Lumen CLIP Services.
 
-Provides a centralized registry for managing face service tasks with
+Provides a centralized registry for managing CLIP service tasks with
 automatic capability generation and handler routing. Follows the same
-pattern as lumen-clip for consistency across Lumen services.
+pattern as lumen-face for consistency across Lumen services.
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
-import lumen_face.proto.ml_service_pb2 as pb
+import lumen_clip.proto.ml_service_pb2 as pb
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class TaskDefinition:
-    """Definition of a face service task with metadata."""
+    """Definition of a CLIP service task with metadata."""
 
     name: str
     handler: Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]] # def handler(payload, payload_mime, meta) -> (result, result_mime, meta)
@@ -43,7 +43,7 @@ class TaskDefinition:
 
 
 class TaskRegistry:
-    """Centralized registry for face service tasks."""
+    """Centralized registry for CLIP service tasks."""
 
     def __init__(self):
         # [{name, definition}, ...]

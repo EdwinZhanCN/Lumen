@@ -23,6 +23,7 @@ from numpy.typing import NDArray
 
 from lumen_clip.backends import BaseClipBackend
 from lumen_clip.resources.loader import ModelResources
+from lumen_clip.models import ModelInfo, BackendInfo
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,10 @@ class CLIPModelManager:
         Raises:
             RuntimeError: If model is not initialized or classification not supported
         """
+        # Temporarily enable debug logging for this method
+        logging.getLogger("lumen_clip.backends.onnxrt_backend").setLevel(logging.DEBUG)
+        logging.getLogger("lumen_clip.general_clip.clip_model").setLevel(logging.DEBUG)
+
         self._ensure_initialized()
 
         if not self.supports_classification:
@@ -259,16 +264,44 @@ class CLIPModelManager:
         # Get image embedding via backend
         img_embedding = self.encode_image(image_bytes)
 
+        # Check for invalid values in image embedding
+        if np.any(np.isnan(img_embedding)) or np.any(np.isinf(img_embedding)):
+            logger.error(f"Invalid values in image embedding: NaN={np.any(np.isnan(img_embedding))}, Inf={np.any(np.isinf(img_embedding))}")
+            logger.error(f"Embedding stats: min={np.min(img_embedding):.6f}, max={np.max(img_embedding):.6f}, mean={np.mean(img_embedding):.6f}")
+            raise RuntimeError(f"Image embedding contains invalid values (NaN/Inf)")
+
         # Compute similarities using numpy (standard operations)
-        img_embedding = img_embedding / np.linalg.norm(
-            img_embedding
-        )  # Ensure unit norm
+        img_norm = np.linalg.norm(img_embedding)
+        if img_norm == 0:
+            raise RuntimeError("Image embedding has zero norm - cannot normalize")
+
+        img_embedding = img_embedding / img_norm  # Ensure unit norm
+
+        logger.debug(f"Image embedding norm after normalization: {np.linalg.norm(img_embedding)}")
+
+        # Check text embeddings for invalid values
+        if np.any(np.isnan(self.text_embeddings)) or np.any(np.isinf(self.text_embeddings)):
+            logger.error(f"Invalid values in text embeddings: NaN={np.any(np.isnan(self.text_embeddings))}, Inf={np.any(np.isinf(self.text_embeddings))}")
+            raise RuntimeError(f"Text embeddings contain invalid values (NaN/Inf)")
+
         text_embeddings_norm = self.text_embeddings / np.linalg.norm(
             self.text_embeddings, axis=1, keepdims=True
         )
 
+        # Check for zero norms in text embeddings
+        text_norms = np.linalg.norm(self.text_embeddings, axis=1)
+        zero_norm_count = np.sum(text_norms == 0)
+        if zero_norm_count > 0:
+            logger.error(f"Found {zero_norm_count} text embeddings with zero norm")
+            raise RuntimeError(f"{zero_norm_count} text embeddings have zero norm - cannot normalize")
+
         # Compute cosine similarities
         similarities = np.dot(img_embedding, text_embeddings_norm.T)
+
+        logger.debug(f"Image embedding norm: {np.linalg.norm(img_embedding)}")
+        logger.debug(f"Text embeddings shape: {text_embeddings_norm.shape}")
+        logger.debug(f"Similarities stats: min={np.min(similarities):.4f}, max={np.max(similarities):.4f}, mean={np.mean(similarities):.4f}")
+        logger.debug(f"Any NaN in similarities: {np.any(np.isnan(similarities))}")
 
         # Convert to probabilities (softmax)
         similarities_scaled = similarities * 100.0  # Temperature scaling
@@ -276,6 +309,9 @@ class CLIPModelManager:
             similarities_scaled - np.max(similarities_scaled)
         )  # Numerical stability
         probabilities = exp_sims / np.sum(exp_sims)
+
+        logger.debug(f"Probabilities stats: min={np.min(probabilities):.4f}, max={np.max(probabilities):.4f}, sum={np.sum(probabilities):.4f}")
+        logger.debug(f"Any NaN in probabilities: {np.any(np.isnan(probabilities))}")
 
         # Get top-k results
         top_indices = np.argsort(probabilities)[::-1][:top_k]
@@ -326,34 +362,37 @@ class CLIPModelManager:
 
         return scene_label, confidence
 
-    def info(self) -> dict[str, str | int | float | bool | dict[str, Any] | None]:
+    def info(self) -> ModelInfo:
         """
         Return model manager information.
 
         Returns:
-            Dictionary containing model metadata and performance info
+            ModelInfo containing model metadata and performance info
         """
-        backend_info: dict[str, Any] = {}
+        backend_info = None
         if hasattr(self, "backend"):
             info = self.backend.get_info()
-            backend_info = {
-                "runtime": info.runtime,
-                "model_id": info.model_id,
-                "model_name": info.model_name,
-                "version": info.version,
-                "embedding_dim": info.image_embedding_dim,
-            }
+            backend_info = BackendInfo(
+                runtime=info.runtime,
+                model_id=info.model_id,
+                model_name=info.model_name,
+                version=info.version,
+                image_embedding_dim=info.image_embedding_dim,
+                text_embedding_dim=info.text_embedding_dim,
+                device=getattr(info, 'device', None),
+                precisions=getattr(info, 'precisions', None),
+            )
 
-        return {
-            "model_name": self.resources.model_name,
-            "model_id": self.model_id,
-            "num_labels": len(self.labels),
-            "supports_classification": self.supports_classification,
-            "load_time": self._load_time,
-            "is_initialized": self.is_initialized,
-            "backend_info": backend_info,
-            "scene_classification_available": self.scene_prompt_embeddings is not None,
-        }
+        return ModelInfo(
+            model_name=self.resources.model_name,
+            model_id=self.model_id,
+            supports_classification=self.supports_classification,
+            is_initialized=self.is_initialized,
+            load_time=self._load_time,
+            num_labels=len(self.labels) if self.labels else None,
+            backend_info=backend_info,
+            scene_classification_available=self.scene_prompt_embeddings is not None,
+        )
 
     def _ensure_initialized(self) -> None:
         """
