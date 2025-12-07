@@ -1,20 +1,18 @@
 [project]
 name = "lumen-face"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Face Recognition Module Built For Lumen AI"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
-
 requires-python = ">=3.10"
 dependencies = [
     "grpcio",
     "grpcio-tools",
     "protobuf",
-    "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources",
-    # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources",
+    "lumen-resources>=0.2.0",
     "opencv-python",
     "numpy",
     "pillow>=12.0.0",
@@ -22,13 +20,14 @@ dependencies = [
     "zeroconf>=0.148.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.optional-dependencies]
 cpu = [
     "onnxruntime>=1.16.0",
 ]
-
-
 
 # Python Dependency For Nvidia GPU Platform
 # Cuda Version should be 12.6 fixed.
@@ -56,6 +55,11 @@ openvino253 = [
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
 jp61cu126 = [
     "onnxruntime-gpu",
+]
+
+# Python Dependency For Rockchip NPU Platform.
+rknn = [
+    "rknn-toolkit-lite2",
 ]
 
 [project.scripts]

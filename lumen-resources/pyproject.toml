@@ -8,13 +8,16 @@ license = { text = "MIT" }
 authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
-
 dependencies = [
     "huggingface_hub>=0.20.0",
     "modelscope>=1.11.0",
     "pydantic>=2.0.0",
     "jsonschema>=4.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.optional-dependencies]
 dev = [

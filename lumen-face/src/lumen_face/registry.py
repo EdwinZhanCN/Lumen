@@ -1,20 +1,15 @@
 """
-Task Registry for Lumen Face Service.
+Task Registry for Lumen Face Services.
 
-This module provides a centralized task definition and routing system that serves
-as the single source of truth for all IOTasks provided by this node.
-
-Key Features:
-- Single source of truth for task definitions
-- Automatic capability generation
-- Dynamic request routing based on task names
-- Extensible task registration system
+Provides a centralized registry for managing face service tasks with
+automatic capability generation and handler routing. Follows the same
+pattern as lumen-clip for consistency across Lumen services.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
 import lumen_face.proto.ml_service_pb2 as pb
@@ -24,171 +19,114 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TaskDefinition:
-    """Definition of an ML task with its handler and metadata.
+    """Definition of a face service task with metadata."""
 
-    This class encapsulates all information about a task including:
-    - The unique task name used for routing
-    - The handler function that processes the task
-    - Human-readable description
-    - Supported input/output MIME types
-    - Additional metadata for capability reporting
-    """
     name: str
-    handler: Callable
+    handler: Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]] # def handler(payload, payload_mime, meta) -> (result, result_mime, meta)
     description: str
-    input_mimes: List[str]
-    output_mime: str
-    metadata: Dict[str, str]
+    input_mimes: List[str] = field(default_factory=list)
+    output_mime: str = "application/json"
+    metadata: dict[str, str] = field(default_factory=dict)
 
-    def to_protobuf(self) -> pb.IOTask:
-        """Convert this task definition to protobuf IOTask.
-
-        Returns:
-            pb.IOTask: Protobuf representation of this task for capability reporting
-        """
+    def to_io_task(self) -> pb.IOTask:
+        """Convert to protobuf IOTask for capability reporting."""
         return pb.IOTask(
             name=self.name,
-            description=self.description,
             input_mimes=self.input_mimes,
-            output_mime=self.output_mime,
-            limits=self.metadata
+            output_mimes=[self.output_mime],
+            limits={
+                "max_payload_size": str(50 * 1024 * 1024),  # 50MB
+                "max_concurrency": "1",
+                **{k: str(v) for k, v in self.metadata.items()}
+            },
         )
 
 
 class TaskRegistry:
-    """Single source of truth for all IOTasks provided by this node.
-
-    This registry centralizes task definitions and provides:
-    - Task discovery and capability reporting
-    - Dynamic request routing based on task names
-    - Automatic generation of IOTask protobufs
-    - Extensible task registration system
-
-    Usage:
-        registry = TaskRegistry()
-        registry.register_task("detect", handler_func, ...)
-
-        # Get all tasks for capability reporting
-        tasks = registry.get_all_tasks()
-
-        # Route a request
-        handler = registry.get_handler("lumen_face_detect")
-        result = handler(payload, meta)
-    """
+    """Centralized registry for face service tasks."""
 
     def __init__(self):
-        """Initialize an empty task registry."""
+        # [{name, definition}, ...]
         self._tasks: Dict[str, TaskDefinition] = {}
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._service_name: str = "unknown"
 
     def register_task(
         self,
-        task_id: str,
         name: str,
-        handler: Callable,
+        handler: Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]],
         description: str,
-        input_mimes: List[str],
-        output_mime: str,
-        **metadata
+        input_mimes: List[str] | None = None,
+        output_mime: str = "application/json",
+        metadata: Dict[str, str] | None = None,
     ) -> None:
-        """Register a new task in the registry.
-
-        Args:
-            task_id: Internal identifier for the task (e.g., "detect")
-            name: External task name used for routing (e.g., "lumen_face_detect")
-            handler: Function that handles the task execution
-            description: Human-readable description of the task
-            input_mimes: List of supported input MIME types
-            output_mime: Output MIME type
-            **metadata: Additional task metadata
-
-        Raises:
-            ValueError: If task_id or name is already registered
-        """
-        if task_id in self._tasks:
-            raise ValueError(f"Task ID '{task_id}' already registered")
-
-        # Check for duplicate task names
-        for existing_task in self._tasks.values():
-            if existing_task.name == name:
-                raise ValueError(f"Task name '{name}' already registered for task '{task_id}'")
+        """Register a task with the registry."""
+        if name in self._tasks:
+            logger.warning(f"Task '{name}' already registered, overwriting")
 
         task_def = TaskDefinition(
             name=name,
             handler=handler,
             description=description,
-            input_mimes=input_mimes,
+            input_mimes=input_mimes or [],
             output_mime=output_mime,
-            metadata=metadata
+            metadata=metadata or {},
         )
 
-        self._tasks[task_id] = task_def
-        self._logger.info(f"Registered task '{task_id}' with name '{name}'")
+        self._tasks[name] = task_def
+        logger.debug(f"Registered task: {name} - {description}")
 
-    def get_handler(self, task_name: str) -> Callable:
-        """Get the handler function for a given task name.
+    def set_service_name(self, service_name: str) -> None:
+        """Set the service name for capability reporting."""
+        self._service_name = service_name
 
-        Args:
-            task_name: The external task name (e.g., "lumen_face_detect")
+    def get_handler(self, task_name: str) -> Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]]:
+        """Get the handler for a task."""
+        if task_name not in self._tasks:
+            available_tasks = list(self._tasks.keys())
+            raise ValueError(f"Task '{task_name}' not found. Available tasks: {available_tasks}")
+        return self._tasks[task_name].handler
 
-        Returns:
-            Callable: The handler function for this task
-
-        Raises:
-            ValueError: If task_name is not found in registry
-        """
-        for task_def in self._tasks.values():
-            if task_def.name == task_name:
-                return task_def.handler
-
-        available_names = [task.name for task in self._tasks.values()]
-        raise ValueError(
-            f"Task '{task_name}' not found. Available tasks: {available_names}"
-        )
-
-    def get_all_tasks(self) -> List[pb.IOTask]:
-        """Get all tasks as protobuf IOTask objects.
-
-        This method is used to generate the capability information that
-        gets reported to the Lumen Hub during node discovery.
-
-        Returns:
-            List[pb.IOTask]: All registered tasks as protobuf objects
-        """
-        return [task.to_protobuf() for task in self._tasks.values()]
-
-    def get_task_info(self) -> Dict[str, Any]:
-        """Get a summary of all registered tasks.
-
-        Returns:
-            Dict containing task information for debugging and monitoring
-        """
-        return {
-            task_id: {
-                "name": task.name,
-                "description": task.description,
-                "input_mimes": task.input_mimes,
-                "output_mime": task.output_mime,
-                "metadata": task.metadata
-            }
-            for task_id, task in self._tasks.items()
-        }
+    def get_task_definition(self, task_name: str) -> TaskDefinition:
+        """Get the complete task definition."""
+        if task_name not in self._tasks:
+            available_tasks = list(self._tasks.keys())
+            raise ValueError(f"Task '{task_name}' not found. Available tasks: {available_tasks}")
+        return self._tasks[task_name]
 
     def list_task_names(self) -> List[str]:
-        """Get a list of all registered task names.
+        """Get list of all registered task names."""
+        return list(self._tasks.keys())
 
-        Returns:
-            List[str]: All external task names
-        """
-        return [task.name for task in self._tasks.values()]
+    def list_task_definitions(self) -> List[TaskDefinition]:
+        """Get list of all task definitions."""
+        return list(self._tasks.values())
 
-    def task_exists(self, task_name: str) -> bool:
-        """Check if a task name exists in the registry.
+    def get_all_tasks(self) -> List[pb.IOTask]:
+        """Get all tasks as protobuf IOTask objects for capabilities."""
+        return [task.to_io_task() for task in self._tasks.values()]
 
-        Args:
-            task_name: The task name to check
+    def build_capability(
+        self,
+        service_name: str,
+        model_id: str,
+        runtime: str,
+        precisions: List[str],
+        extra_metadata: Dict[str, str] | None = None,
+    ) -> pb.Capability:
+        """Build capability protobuf using registered tasks."""
+        # Ensure all extra_metadata values are strings and handle None values
+        safe_extra = {}
+        if extra_metadata:
+            for key, value in extra_metadata.items():
+                safe_extra[key] = str(value) if value is not None else ""
 
-        Returns:
-            bool: True if task exists, False otherwise
-        """
-        return any(task.name == task_name for task in self._tasks.values())
+        return pb.Capability(
+            service_name=service_name,
+            model_ids=[model_id],
+            runtime=runtime,
+            max_concurrency=1,
+            precisions=precisions,
+            extra=safe_extra,
+            tasks=self.get_all_tasks(),
+            protocol_version="1.0",
+        )

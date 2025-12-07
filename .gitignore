@@ -8,3 +8,8 @@ __pycache__
 .vscode
 build
 *.log
+
+
+examples/**/*.yaml
+!examples/**/*.example.yaml
+lumen-face/examples/config/face_cn.yaml

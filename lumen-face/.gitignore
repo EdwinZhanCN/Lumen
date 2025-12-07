@@ -26,6 +26,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.claude
+.ruff_cache
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -158,3 +160,7 @@ Desktop.ini
 # Face model cache
 face_cache/
 model_cache/
+
+# Ignore generated configs but keep *.example.yaml
+examples/**/*.yaml
+!examples/**/*.example.yaml

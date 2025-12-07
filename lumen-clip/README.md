@@ -1,220 +1,136 @@
-# Lumen CLIP
+# Lumen Clip
 
-A Python Machine Learning (PML) module for Lumilio Photos, providing CLIP-based image understanding capabilities through gRPC services.
+`lumen-clip` provides text and image embedding services using CLIP (Contrastive Language-Image Pre-training) inside the Lumen AI inference server family. It follows the shared monorepo conventions (task registry, protobuf APIs, configuration-driven runtime) so it can be routed and orchestrated alongside other services.
 
 ## Overview
 
-Lumen CLIP is a modular machine learning service that provides:
+- **Service name:** `clip-general` (or `bioclip`, `smartclip` depending on config)
+- **Package entry point:** `lumen_clip.general_clip.clip_service.GeneralCLIPService`
+- **gRPC interface:** `lumen_clip.proto.ml_service_pb2_grpc.InferenceServicer`
+- **Task routing:** All requests are routed by keyword via the task registry—clients set `task` in `InferRequest` to select behavior.
 
-- **General CLIP** - Standard image-text understanding
-- **BioCLIP** - Specialized for biological and scientific imagery
-- **Unified SmartCLIP** - Multi-modal intelligent image analysis
+## Backends
 
-## Features
+| Backend | Runtime | Notes |
+|---------|---------|-------|
+| `TorchBackend` | `torch` (CPU, MPS, CUDA) | Native PyTorch implementation. Supports dynamic batching and device selection (`cpu`, `mps`, `cuda`). |
+| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML) | Optimized inference using ONNX Runtime. Provider priority is detected automatically, or you can pass `device` in config to bias selection. |
 
-- 🚀 High-performance inference with multiple backend support (CPU, CUDA, MPS, OpenVINO)
-- 🔧 Modular architecture with specialized model managers
-- 📡 gRPC-based service interface for easy integration
-- 🎯 Type-safe configuration with Pydantic models
-- 📦 Automatic model downloading and management
-- 🔍 mDNS service discovery for distributed deployments
+## Keyword-Based Tasks
 
-## Installation
+Tasks are registered in `TaskRegistry` and exposed through gRPC streaming inference. The available tasks depend on which service mode (`general`, `bioclip`, or `unified`) is active.
 
-### Prerequisites
+### General CLIP Tasks
+Available when running `GeneralCLIPService`.
 
-- Python 3.10+
-- PyTorch 2.1.0+
-- ONNX Runtime 1.16.0+
+| Task keyword | Description | Input MIME | Output MIME |
+|--------------|-------------|------------|-------------|
+| `clip_text_embed` | Creates a vector embedding from a text string. | `application/json`, `text/plain` | `application/json;schema=embedding_v1` |
+| `clip_image_embed` | Creates a vector embedding from an input image. | `image/jpeg`, `image/png`, `image/webp` | `application/json;schema=embedding_v1` |
+| `clip_classify` | Zero-shot classification against the ImageNet dataset (requires dataset). | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
+| `clip_scene_classify` | Performs high-level scene analysis on an image. | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
 
-### Basic Installation
+### BioCLIP Tasks
+Available when running `BioCLIPService`.
 
-```bash
-pip install lumen-clip
-```
+| Task keyword | Description | Input MIME | Output MIME |
+|--------------|-------------|------------|-------------|
+| `bioclip_text_embed` | Creates a text embedding using the BioCLIP model. | `application/json`, `text/plain` | `application/json;schema=embedding_v1` |
+| `bioclip_image_embed` | Creates an image embedding using the BioCLIP model. | `image/jpeg`, `image/png`, `image/webp` | `application/json;schema=embedding_v1` |
+| `bioclip_classify` | Classifies an image using the TreeOfLife dataset (requires dataset). | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
 
-### Platform-Specific Installation
+### Unified SmartCLIP Tasks
+Available when running `SmartCLIPService` (loads both General and BioCLIP models).
 
-Choose the appropriate installation for your hardware:
+| Task keyword | Description | Input MIME | Output MIME |
+|--------------|-------------|------------|-------------|
+| `smartclip_text_embed` | Creates text embedding using intelligent model selection. | `application/json`, `text/plain` | `application/json;schema=embedding_v1` |
+| `smartclip_image_embed` | Creates image embedding using intelligent model selection. | `image/jpeg`, `image/png`, `image/webp` | `application/json;schema=embedding_v1` |
+| `smartclip_classify` | Intelligent classification using best available model. | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
+| `smartclip_scene_classify` | Scene analysis using the general CLIP model. | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
+| `smartclip_bioclassify` | Biological classification using the BioCLIP model. | `image/jpeg`, `image/png` | `application/json;schema=labels_v1` |
 
-```bash
-# CPU-only
-pip install lumen-clip[cpu]
+Each task returns a protobuf-defined schema serialized as JSON and includes per-request metadata such as processing time, embedding dimension, or model version.
 
-# CUDA (NVIDIA GPU)
-pip install lumen-clip[cuda]
+## Configuration & Models
 
-# MPS (Apple Silicon)
-pip install lumen-clip[mps]
-
-# OpenVINO (Intel)
-pip install lumen-clip[openvino2404]
-```
-
-## Quick Start
-
-### Starting the Service
-
-```python
-from lumen_clip.server import serve
-
-# Start the gRPC server
-serve(port=50051, host="0.0.0.0")
-```
-
-Or from command line:
-
-```bash
-python -m lumen_clip.server
-```
-
-### Client Usage
-
-```python
-import grpc
-import lumen_clip.proto.ml_service_pb2 as pb
-import lumen_clip.proto.ml_service_pb2_grpc as pb_grpc
-
-# Connect to the service
-channel = grpc.insecure_channel('localhost:50051')
-stub = pb_grpc.InferenceStub(channel)
-
-# Create inference request
-request = pb.InferRequest(
-    correlation_id="test-001",
-    task="embed",
-    payload=image_bytes,
-    payload_mime="image/jpeg"
-)
-
-# Stream inference
-for response in stub.Infer(iter([request])):
-    print(f"Result: {response.result}")
-```
-
-## Configuration
-
-Lumen CLIP uses `lumen-resources` for configuration management. Create a configuration file:
+Service configuration is provided through the shared Lumen YAML schema (see `examples/config/clip_cn.yaml`):
 
 ```yaml
-# Lumen Services Configuration - Single Service Mode
-# yaml-language-server: $schema=https://doc.lumilio.org/schema/config-schema.yaml
-
 metadata:
-    version: "1.0.0"
-    region: "cn" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "~/Lumen-Resources"
+  region: "cn"
+  cache_dir: "~/.lumen"
 
 deployment:
-    mode: "single"
-    service: "clip"
+  mode: "single"
+  service: "clip"
 
 server:
-    port: 50051
-    host: "0.0.0.0"
-    mdns:
-        enabled: true
-        service_name: "lumen-clip"
+  port: 50051
+  mdns:
+    enabled: true
+    service_name: "lumen-clip"
 
 services:
-    # CLIP Service
-    clip:
-        enabled: true
-        package: "lumen_clip"
-        import:
-            registry_class: "lumen_clip.service_registry.CLIPService"
-            add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
-        backend_settings:
-            device: "mps"
-            onnx_providers:
-                - "CoreMLExecutionProvider"
-            batch_size: 8
-        models:
-            general:
-                model: "MobileCLIP2-S2"
-                runtime: onnx
-                dataset: ImageNet_1k
+  clip:
+    enabled: true
+    package: lumen_clip
+    import:
+      registry_class: "lumen_clip.general_clip.clip_service.GeneralCLIPService"
+      add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+    backend_settings:
+      device: "mps"         # or cpu/cuda
+      batch_size: 8
+    models:
+      # Define 'general' for GeneralCLIPService
+      general:
+        model: "CN-CLIP_ViT-B-16" 
+        runtime: torch
+        dataset: ImageNet_1k # Optional, enables classification tasks
+      
+      # Define 'bioclip' for BioCLIPService
+      # Define BOTH for SmartCLIPService
+      # bioclip:
+      #   model: "bioclip-2"
+      #   runtime: torch
+      #   dataset: TreeOfLife-200M
 ```
 
-## Service Architecture
+Key points:
 
-### Core Components
+1. **Model caching** is handled by `lumen-resources`: it downloads model weights, tokenizers, and optional datasets (like `ImageNet_1k.npz` or `TreeOfLife`).
+2. **Service Selection**: The server automatically instantiates `GeneralCLIPService`, `BioCLIPService`, or `SmartCLIPService` based on which models (`general` and/or `bioclip`) are defined in the config.
+3. **Backend settings** allow you to bias provider selection (`device`) and tweak batch sizes for high-throughput scenarios.
 
-- **GeneralCLIPService** - Standard CLIP embeddings and similarity
-- **BioCLIPService** - Biological image analysis and classification
-- **UnifiedCLIPService** - Multi-modal intelligent analysis
-- **ResourceLoader** - Model loading and management
-- **gRPC Server** - High-performance inference API
+## Supported Models
 
-### Backend Support
+| Model ID | Type | Embedding Dim | Notes |
+|----------|------|---------------|-------|
+| `CN-CLIP_ViT-B-16` | General | 512 | Chinese-English bilingual CLIP, ViT-B/16 backbone. |
+| `CN-CLIP_ViT-L-14` | General | 768 | Larger bilingual model, higher accuracy. |
+| `MobileCLIP2-S2` | General | 512 | Efficient mobile-optimized CLIP model. |
+| `MobileCLIP2-S4` | General | 768 | Robust mobile-optimized CLIP model. |
+| `bioclip-2` | Expert | 512 | Specialized for biology/nature (requires `bioclip` config). |
 
-- **PyTorch** - Primary inference engine
-- **ONNX Runtime** - Optimized execution
-- **Multiple Hardware** - CPU, CUDA, MPS, OpenVINO
+All models support both text and image inputs. The `dataset` configuration option enables zero-shot classification tasks if the corresponding dataset artifacts are present.
 
-## API Reference
-
-### Inference Service
-
-The service provides a bidirectional gRPC stream for inference:
-
-```protobuf
-service Inference {
-  rpc Infer(stream InferRequest) returns (stream InferResponse);
-  rpc GetCapabilities(Empty) returns (Capability);
-  rpc StreamCapabilities(Empty) returns (stream Capability);
-  rpc Health(Empty) returns (Empty);
-}
-```
-
-### Supported Tasks
-
-- `embed` - Generate image/text embeddings
-- `classify` - Image classification
-- `similarity` - Text-image similarity scoring
-- Custom expert tasks for specialized domains
-
-## Development
-
-### Project Structure
-
-```
-src/lumen_clip/
-├── general_clip/      # Standard CLIP implementation
-├── expert_bioclip/    # Biological CLIP specialization
-├── unified_smartclip/ # Multi-modal analysis
-├── resources/         # Model loading utilities
-├── proto/            # gRPC service definitions
-└── backends/         # Hardware backend implementations
-```
-
-### Building from Source
+## Running the Server
 
 ```bash
-git clone https://github.com/EdwinZhanCN/Lumen.git
-cd Lumen/lumen-clip
-pip install -e .
+uv run python -m lumen_clip.server \
+  --config lumen-clip/examples/config/clip_cn.yaml \
+  --log-level INFO
 ```
 
-### Running Tests
+The runner will:
 
-```bash
-python -m pytest test/
-```
+1. Validate and download resources via `lumen-resources`.
+2. Instantiate the appropriate service (`GeneralCLIPService`, `BioCLIPService`, or `SmartCLIPService`) based on config.
+3. Initialize the backend (`TorchBackend` or `ONNXRTBackend`).
+4. Start the gRPC server (and optional mDNS advertisement).
 
-## Contributing
+You can override the port with `--port` and dynamically scale logging via `--log-level`.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+---
 
-## License
-
-This project is part of the Lumilio ecosystem. See the main repository for license information.
-
-## Support
-
-- 📖 Documentation: [Lumilio Docs](https://docs.lumilio.org)
-- 🐛 Issues: [GitHub Issues](https://github.com/EdwinZhanCN/Lumen/issues)
+For shared contributor guidelines, lint rules, and deployment workflows, refer to the root `README.md` and `docs/` in the Lumen monorepo.

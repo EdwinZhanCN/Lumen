@@ -97,6 +97,49 @@ class ModelResources:
 
         return None
 
+    def get_normalization_stats(self) -> dict[str, list[float]]:
+        """
+        Get image normalization statistics from config or fall back to defaults based on model type.
+
+        Returns:
+            Dictionary with 'mean' and 'std' keys, each containing lists of 3 float values.
+        """
+        # Try to get from OpenCLIP preprocess_cfg first
+        preprocess_cfg = self.config.get("preprocess_cfg", None)
+
+        if isinstance(preprocess_cfg, dict):
+            mean = preprocess_cfg.get("mean", [0.48145466, 0.4578275, 0.40821073])
+            std = preprocess_cfg.get("std", [0.26862954, 0.26130258, 0.27577711])
+
+            # Ensure they're lists of 3 floats
+            if isinstance(mean, (list, tuple)) and len(mean) == 3:
+                mean = [float(x) for x in mean]
+            else:
+                mean = [0.48145466, 0.4578275, 0.40821073]
+
+            if isinstance(std, (list, tuple)) and len(std) == 3:
+                std = [float(x) for x in std]
+            else:
+                std = [0.26862954, 0.26130258, 0.27577711]
+
+            return {"mean": mean, "std": std}
+
+        # Fall back to defaults based on model type/source
+        model_name = self.model_name.lower()
+
+        # ImageNet-based models use different stats
+        if any(x in model_name for x in ["imagenet", "resnet", "vgg", "efficientnet"]):
+            return {
+                "mean": [0.485, 0.456, 0.406],
+                "std": [0.229, 0.224, 0.225]
+            }
+
+        # Default to OpenAI CLIP stats for most CLIP variants
+        return {
+            "mean": [0.48145466, 0.4578275, 0.40821073],
+            "std": [0.26862954, 0.26130258, 0.27577711]
+        }
+
 
 class ResourceLoader:
     """

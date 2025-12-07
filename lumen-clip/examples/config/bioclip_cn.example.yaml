@@ -4,30 +4,32 @@
 metadata:
     version: "1.0.0"
     region: "cn" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "~/Lumen-Resources" # ~/.lumen by default
+    cache_dir: "~/.lumen" # ~/.lumen by default
 
 deployment:
     mode: "single"
-    service: "face"
+    service: "clip"
 
 server:
     port: 50051
     host: "0.0.0.0"
     mdns:
         enabled: true
-        service_name: "lumen-face"
+        service_name: "lumen-clip"
 
 services:
-    face:
+    # CLIP Service
+    clip:
         enabled: true
-        package: lumen_face
+        package: "lumen_clip"
         import:
-            registry_class: "lumen_face.general_face.GeneralFaceService"
-            add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+            registry_class: "lumen_clip.service_registry.CLIPService"
+            add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:
-            device: null # auto-detect
+            device: "mps"
             batch_size: 8
         models:
-            general:
-                model: "buffalo_l" # antelopev2, buffalo_l
+            bioclip:
+                model: "bioclip-2"
                 runtime: onnx
+                dataset: TreeOfLife-200M # TreeOfLife-200M

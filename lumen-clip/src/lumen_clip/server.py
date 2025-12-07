@@ -26,17 +26,19 @@ import sys
 import uuid
 from concurrent import futures
 from pathlib import Path
-from lumen_resources import load_and_validate_config, Downloader
+from typing import cast
+
 import colorlog
+import grpc
+from lumen_resources import Downloader, load_and_validate_config
+from lumen_resources.downloader import DownloadResult
+from lumen_resources.lumen_config import Mdns
 from zeroconf import ServiceInfo, Zeroconf
 
-import grpc
-from lumen_resources.lumen_config import Mdns
 import lumen_clip.proto.ml_service_pb2_grpc as pb_rpc
-from lumen_clip.general_clip.clip_service import GeneralCLIPService
 from lumen_clip.expert_bioclip.bioclip_service import BioCLIPService
-from lumen_clip.unified_smartclip.smartclip_service import UnifiedCLIPService
-from lumen_resources.downloader import DownloadResult
+from lumen_clip.general_clip.clip_service import GeneralCLIPService
+from lumen_clip.unified_smartclip.smartclip_service import SmartCLIPService
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,16 @@ class ConfigError(Exception):
     """Raised when configuration is invalid."""
 
     pass
+
+
+class _StartupServicerContext:
+    """Minimal ServicerContext stub for startup-time capability probing."""
+
+    def abort(self, code, details):
+        raise RuntimeError(f"Capability probe aborted ({code}): {details}")
+
+    def abort_with_status(self, status):
+        raise RuntimeError(f"Capability probe aborted: {status}")
 
 
 def setup_logging(log_level: str = "INFO"):
@@ -224,9 +236,9 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
         general_model_config = service_config.models.get("general")
         bioclip_model_config = service_config.models.get("bioclip")
-        if not general_model_config or not bioclip_model_config:
+        if not (general_model_config or bioclip_model_config):
             logger.error(
-                "Configuration error: 'services.clip.models.general' or 'services.clip.bioclip' is not defined."
+                "Configuration error: at least one of `services.clip.models.general` or `services.clip.models.bioclip` must be defined."
             )
             sys.exit(1)
 
@@ -241,9 +253,9 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             logger.info(
                 f"Configuration for '{service_display_name}' service identified."
             )
-            service_instance = UnifiedCLIPService.from_config(
-                general_model_config=general_model_config,
-                bioclip_model_config=bioclip_model_config,
+            service_instance = SmartCLIPService.from_config(
+                clip_config=general_model_config,
+                bioclip_config=bioclip_model_config,
                 cache_dir=cache_dir,
                 backend_settings=backend_settings,
             )
@@ -283,15 +295,38 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         service_instance.initialize()
 
         # Step 4: Set up and start the gRPC server.
-        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=10),
+            options=[("grpc.so_reuseport", 0)],
+        )
 
         # All our services implement the same gRPC interface.
         pb_rpc.add_InferenceServicer_to_server(service_instance, server)
 
         # Determine port: CLI override > config file > default.
-        port = port_override or config.server.port or 50051
+        preferred_port = port_override or config.server.port or 50051
+        requested_addr = f"[::]:{preferred_port}"
+        try:
+            bound_port = server.add_insecure_port(requested_addr)
+        except RuntimeError as exc:
+            logger.warning(
+                f"Port {preferred_port} bind raised {exc}; requesting OS-assigned port."
+            )
+            bound_port = 0
+
+        if bound_port == 0:
+            try:
+                bound_port = server.add_insecure_port("[::]:0")
+            except RuntimeError as exc:
+                logger.error(f"Unable to bind gRPC server to any port: {exc}")
+                sys.exit(1)
+
+        if bound_port == 0:
+            logger.error("Unable to bind gRPC server to any port.")
+            sys.exit(1)
+
+        port = bound_port
         listen_addr = f"[::]:{port}"
-        server.add_insecure_port(listen_addr)
         server.start()
         logger.info(f"🚀 {service_display_name} service listening on {listen_addr}")
 
@@ -299,7 +334,10 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         try:
             from google.protobuf import empty_pb2
 
-            capabilities = service_instance.GetCapabilities(empty_pb2.Empty(), None)
+            startup_context = _StartupServicerContext()
+            capabilities = service_instance.GetCapabilities(
+                empty_pb2.Empty(), cast(grpc.ServicerContext, startup_context)
+            )
             supported_tasks = [cap.name for cap in capabilities.tasks]
             logger.info(f"✓ Supported tasks: {', '.join(supported_tasks)}")
         except Exception as e:

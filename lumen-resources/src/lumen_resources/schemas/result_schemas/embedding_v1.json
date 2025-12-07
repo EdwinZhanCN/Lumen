@@ -7,57 +7,29 @@
     "vector": {
       "type": "array",
       "items": {
-        "type": "number",
-        "minimum": -1.0,
-        "maximum": 1.0
+        "type": "number"
       },
       "minItems": 1,
-      "maxItems": 2048,
-      "description": "Normalized embedding vector (typically [-1, 1] range for L2-normalized embeddings)"
+      "description": "Embedding vector"
     },
     "dim": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 2048,
       "description": "Embedding dimension"
     },
     "model_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 100,
       "description": "Model identifier that generated the embedding"
-    },
-    "service_name": {
-      "type": "string",
-      "pattern": "^lumen-[a-z]+$",
-      "description": "Service name (e.g., 'lumen-face', 'lumen-clip', 'lumen-ocr')"
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp of response generation"
     }
   },
-  "required": ["vector", "dim"],
-  "additionalProperties": true,
+  "required": ["vector", "dim", "model_id"],
+  "additionalProperties": false,
   "examples": [
     {
-      "vector": [0.1234, -0.5678, 0.9012],
+      "vector": [0.1, 0.2, 0.3],
       "dim": 3,
-      "model_id": "buffalo_l_onnx",
-      "service_name": "lumen-face"
-    },
-    {
-      "vector": [0.2345, -0.6789, 0.8901, 0.3456],
-      "dim": 4,
-      "model_id": "ViT-B-32_onnx",
-      "service_name": "lumen-clip"
-    },
-    {
-      "vector": [0.3456, -0.7890, 0.9012, 0.4567, 0.5678],
-      "dim": 5,
-      "model_id": "ocr_model_onnx",
-      "service_name": "lumen-ocr"
+      "model_id": "embedding_model_1"
     }
   ]
 }

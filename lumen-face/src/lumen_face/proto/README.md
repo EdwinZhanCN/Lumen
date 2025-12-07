@@ -1,6 +1,6 @@
 ## Proto Code Gen
 
-Before run the command, please make sure you're right in `Lumen/lumen-clip/` directory.
+Before run the command, please make sure you're right in `Lumen/lumen-*/` directory.
 
 ```bash
 python -m grpc_tools.protoc \

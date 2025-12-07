@@ -25,14 +25,15 @@ jobs:
 
             - name: Build all packages
               run: |
-                  # Get version for consistent builds
-                  VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())" 2>/dev/null || echo "0.0.0")
-                  echo "Building packages with version: $VERSION"
+                  # Force version to 0.2.0 to satisfy local dependency constraints (>=0.2.0)
+                  # This ensures that when we build/install, the version matches what pyproject.toml expects
+                  export SETUPTOOLS_SCM_PRETEND_VERSION="0.2.0"
+                  echo "Building packages with version: $SETUPTOOLS_SCM_PRETEND_VERSION"
 
-                  for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
+                  # Build lumen-resources first, then others
+                  for pkg in lumen-resources lumen-clip lumen-face lumen-ocr; do
                     echo "Building $pkg..."
                     cd $pkg
-                    export SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
                     python -m build --outdir ../dist
                     cd ..
                   done
@@ -44,6 +45,11 @@ jobs:
 
     test:
         runs-on: ubuntu-latest
+        env:
+            # Critical: Pretend to be version 0.2.0 so that pip install -e .
+            # registers the package as 0.2.0. This satisfies the "lumen-resources>=0.2.0"
+            # requirement in other packages, preventing pip from trying to download it from PyPI.
+            SETUPTOOLS_SCM_PRETEND_VERSION: "0.2.0"
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -55,8 +61,17 @@ jobs:
 
             - name: Install dependencies
               run: |
-                  # Install each package in development mode for testing
-                  for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
+                  # 1. Install the base package first (lumen-resources)
+                  # This registers it in the environment with the PRETEND_VERSION (0.2.0)
+                  echo "Installing lumen-resources..."
+                  cd lumen-resources
+                  pip install -e .
+                  cd ..
+
+                  # 2. Install dependent packages
+                  # pip will detect that lumen-resources==0.2.0 is already installed
+                  # and skip attempting to download it from PyPI.
+                  for pkg in lumen-clip lumen-face lumen-ocr; do
                     echo "Installing $pkg..."
                     cd $pkg
                     pip install -e .
