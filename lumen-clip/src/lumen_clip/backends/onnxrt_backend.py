@@ -20,30 +20,28 @@ Notes:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import io
 import logging
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Callable, cast
-from typing_extensions import override
 
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, Image as PILImage
-from pathlib import Path
+from PIL import Image
+from PIL import Image as PILImage
+from tokenizers import Tokenizer as HFTokenizer
+from typing_extensions import override
 
 from lumen_clip.resources import ModelResources
-from tokenizers import Tokenizer as HFTokenizer
 
 try:
     import onnxruntime as ort
 except ImportError:
-    raise ImportError(
-        "onnxruntime is required for ONNXRTBackend. "
-        + "Install with: pip install onnxruntime"
-    )
+    ort = None
 
 from .backend_exceptions import *
-from .base import BaseClipBackend, BackendInfo
+from .base import BackendInfo, BaseClipBackend
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +91,12 @@ class ONNXRTBackend(BaseClipBackend):
         max_batch_size: int | None = None,
         prefer_fp16: bool = True,
     ) -> None:
+        if ort is None:
+            raise ImportError(
+                "onnxruntime is required for ONNXRTBackend. "
+                + "Install with: pip install onnxruntime"
+            )
+
         super().__init__(
             resources=resources,
             device_preference=device_preference,
@@ -316,20 +320,26 @@ class ONNXRTBackend(BaseClipBackend):
             vision_input = self._sess_vision.get_inputs()[0]  # type: ignore
             input_shape = vision_input.shape
             # Find height and width dimensions (skip batch and channels)
-            spatial_dims = [dim for dim in input_shape if isinstance(dim, int) and dim > 3]
+            spatial_dims = [
+                dim for dim in input_shape if isinstance(dim, int) and dim > 3
+            ]
             if len(spatial_dims) >= 2:
                 height, width = spatial_dims[-2], spatial_dims[-1]
                 image_size = (height, width)
             else:
                 # Fallback if we can't determine shape
                 image_size = (224, 224)
-                logger.warning(f"Could not determine image size from input shape {input_shape}, using fallback {image_size}")
+                logger.warning(
+                    f"Could not determine image size from input shape {input_shape}, using fallback {image_size}"
+                )
 
         # Get normalization stats from resources
         norm_stats = self.resources.get_normalization_stats()
         target_dtype = self._vision_input_dtype
 
-        logger.info(f"Using normalization stats - mean: {norm_stats['mean']}, std: {norm_stats['std']}")
+        logger.info(
+            f"Using normalization stats - mean: {norm_stats['mean']}, std: {norm_stats['std']}"
+        )
 
         # Configurable preprocessing
         def preprocess(image: Image.Image) -> np.ndarray:
@@ -341,8 +351,8 @@ class ONNXRTBackend(BaseClipBackend):
             img_array = np.array(image).astype(np.float32) / 255.0
 
             # Normalize with configured stats
-            mean = np.array(norm_stats['mean'], dtype=np.float32)
-            std = np.array(norm_stats['std'], dtype=np.float32)
+            mean = np.array(norm_stats["mean"], dtype=np.float32)
+            std = np.array(norm_stats["std"], dtype=np.float32)
 
             img_array = (img_array - mean) / std
 
@@ -548,7 +558,7 @@ class ONNXRTBackend(BaseClipBackend):
             "DmlExecutionProvider",
             "OpenVINOExecutionProvider",
             "TensorrtExecutionProvider",
-            "CPUExecutionProvider"
+            "CPUExecutionProvider",
         ]
 
         selected = [p for p in priority if p in available]
@@ -559,7 +569,7 @@ class ONNXRTBackend(BaseClipBackend):
                 "cuda": "CUDAExecutionProvider",
                 "coreml": "CoreMLExecutionProvider",
                 "directml": "DmlExecutionProvider",
-                "openvino": "OpenVINOExecutionProvider"
+                "openvino": "OpenVINOExecutionProvider",
             }.get(device_pref.lower())
             if pref_provider and pref_provider in available:
                 selected.insert(0, selected.pop(selected.index(pref_provider)))

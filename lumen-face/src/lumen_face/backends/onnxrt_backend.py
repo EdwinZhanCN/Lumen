@@ -37,10 +37,8 @@ from .insightface_specs import PACK_SPECS
 # onnxruntime is an external dependency; we import lazily to surface a clear error
 try:
     import onnxruntime as ort
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "onnxruntime is required for ONNXRTBackend. Install with `pip install onnxruntime`."
-    ) from exc
+except ImportError:  # pragma: no cover
+    ort = None
 
 
 logger = __import__("logging").getLogger(__name__)
@@ -490,6 +488,10 @@ class ONNXRTBackend(FaceRecognitionBackend):
         max_batch_size: int | None = None,
         prefer_fp16: bool = True,  # kept for signature compatibility
     ) -> None:
+        if ort is None:
+            raise ImportError(
+                "onnxruntime is required for ONNXRTBackend. Install with `pip install onnxruntime`."
+            )
         super().__init__()
         self.resources = resources
         self.spec = _load_spec(resources)
