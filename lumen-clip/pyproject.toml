@@ -33,7 +33,7 @@ Homepage = "https://github.com/EdwinZhanCN/Lumen"
 Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.scripts]
-lumen-face = "lumen_clip:main"
+lumen-clip = "lumen_clip:main"
 
 [project.optional-dependencies]
 cpu = [
