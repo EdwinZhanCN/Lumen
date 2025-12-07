@@ -8,13 +8,16 @@ authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
+
 requires-python = ">=3.10"
 dependencies = [
     "grpcio",
     "grpcio-tools",
     "protobuf",
-    "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources",
-    # "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources",
+    "lumen-resources>=0.2.0"
     "opencv-python",
     "numpy",
     "pillow>=12.0.0",
