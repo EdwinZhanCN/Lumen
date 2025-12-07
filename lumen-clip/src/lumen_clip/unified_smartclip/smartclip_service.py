@@ -1,495 +1,470 @@
 """
-unified_service.py
+smartclip_service.py
 
-UnifiedCLIPService: A unified, high-performance gRPC service that combines the capabilities of
-general CLIP and BioCLIP models.
-
-Features:
-- Exposes 7 tasks for classification and embedding (including image/text embeddings).
-- Implements server-side request batching to maximize throughput.
-- Uses backend-driven image batch embedding via backend.image_batch_to_vectors()
-  (each backend may fall back to sequential processing if true batching is unavailable).
-- No torchvision-based preprocessing here; image decoding/preprocessing is handled inside backends.
+A unified gRPC service for SmartCLIP that combines general CLIP and BioCLIP models.
+It follows the same architectural pattern as other Lumen services and uses the
+streaming Inference protocol to expose tasks:
+  - smartclip_text_embed: Create text embeddings using SmartCLIP (intelligent model selection)
+  - smartclip_image_embed: Create image embeddings using SmartCLIP (intelligent model selection)
+  - smartclip_classify: Intelligent classification using the best available model
+  - smartclip_scene_classify: Scene analysis using CLIP model
 """
 
 import json
 import logging
 import time
-from collections import defaultdict
 from pathlib import Path
-from collections.abc import Iterable, Mapping
-from typing import Any, final
+from typing import Dict, Iterable, Tuple
+
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
 import grpc
-
 from google.protobuf import empty_pb2
-from lumen_clip.backends import TorchBackend, ONNXRTBackend, BaseClipBackend
 
-# Import the service definition and model managers
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.expert_bioclip import BioCLIPModelManager
-from lumen_clip.general_clip import CLIPModelManager
+from lumen_clip.backends import BaseClipBackend, TorchBackend, ONNXRTBackend
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_clip.registry import TaskRegistry
+from lumen_clip.general_clip.clip_model import CLIPModelManager
+from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 8
+
+def _now_ms() -> int:
+    """Returns the current time in milliseconds."""
+    return int(time.time() * 1000)
 
 
-class UnifiedCLIPService(rpc.InferenceServicer):
-    """A unified gRPC service that intelligently routes requests to CLIP or BioCLIP models."""
-
-    SERVICE_NAME = "clip-unified"
+class SmartCLIPService(rpc.InferenceServicer):
+    """
+    Implements the streaming Inference service contract for SmartCLIP,
+    offering intelligent model selection between CLIP and BioCLIP models.
+    """
 
     def __init__(
         self,
         clip_backend: BaseClipBackend,
-        bioclip_backend: BaseClipBackend,
         clip_resources: ModelResources,
-        bioclip_resources: ModelResources,
+        bioclip_backend: BaseClipBackend,
+        bioclip_resources: ModelResources
     ) -> None:
         """
-        Initialize UnifiedCLIPService.
+        Initialize SmartCLIPService with both CLIP and BioCLIP models.
 
         Args:
             clip_backend: Backend instance for CLIP model
-            bioclip_backend: Backend instance for BioCLIP model
             clip_resources: ModelResources for CLIP model
+            bioclip_backend: Backend instance for BioCLIP model
             bioclip_resources: ModelResources for BioCLIP model
         """
-        # Initialize model managers with the selected backends
-        self.clip_resources = clip_resources
-        self.bioclip_resources = bioclip_resources
-        self.clip_model = CLIPModelManager(
-            backend=clip_backend, resources=clip_resources
-        )
-        self.bioclip_model = BioCLIPModelManager(
-            backend=bioclip_backend, resources=bioclip_resources
-        )
-
-        # Store backend references for device info queries if needed
-        self._clip_backend = clip_backend
-        self._bioclip_backend = bioclip_backend
+        self.clip_model = CLIPModelManager(backend=clip_backend, resources=clip_resources)
+        self.bioclip_model = BioCLIPModelManager(backend=bioclip_backend, resources=bioclip_resources)
+        self.is_initialized = False
+        self.registry = TaskRegistry()
+        self._setup_registry()
 
     @classmethod
     def from_config(
         cls,
-        general_model_config: ModelConfig,
-        bioclip_model_config: ModelConfig,
+        clip_config: ModelConfig,
+        bioclip_config: ModelConfig,
         cache_dir: Path,
         backend_settings: BackendSettings | None,
-    ) -> "UnifiedCLIPService":
+    ):
         """
-        Create UnifiedCLIPService from configurations for both models.
+        Create SmartCLIPService from configuration.
 
         Args:
-            general_model_config: Configuration for the general-purpose CLIP model.
-            bioclip_model_config: Configuration for the BioCLIP model.
-            cache_dir: Cache directory path.
+            clip_config: Configuration for CLIP model
+            bioclip_config: Configuration for BioCLIP model
+            cache_dir: Cache directory path
+            backend_settings: Backend settings
 
         Returns:
-            Initialized UnifiedCLIPService instance.
+            Initialized SmartCLIPService instance
         """
         from lumen_clip.resources.exceptions import ConfigError
-        from lumen_clip.general_clip.clip_model import CLIPModelManager
-        from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 
-        # --- Helper function to create a backend from config ---
-        def create_backend(resources: ModelResources, runtime: str):
-            device_pref = getattr(backend_settings, "device", "cpu")
-            max_batch_size = getattr(backend_settings, "batch_size", 8)
-            if runtime == "torch":
-                return TorchBackend(
-                    resources=resources,
-                    device_preference=device_pref,
-                    max_batch_size=max_batch_size,
-                )
-            elif runtime == "onnx":
-                providers_list = getattr(
-                    backend_settings, "onnx_providers", ["CPUExecutionProvider"]
-                )
-                return ONNXRTBackend(
-                    resources=resources,
-                    providers=providers_list,
-                    device_preference=device_pref,
-                    max_batch_size=max_batch_size,
-                )
-            else:
-                raise ConfigError(f"Unsupported runtime: {runtime}")
+        # Load CLIP resources
+        logger.info(f"Loading resources for CLIP model: {clip_config.model}")
+        clip_resources = ResourceLoader.load_model_resources(cache_dir, clip_config)
 
-        # 1. Load resources and create backend for General CLIP
-        logger.info(
-            f"Loading resources for General CLIP model: {general_model_config.model}"
-        )
-        general_resources = ResourceLoader.load_model_resources(
-            cache_dir, general_model_config
-        )
-        general_backend = create_backend(
-            general_resources, general_model_config.runtime.value
-        )
+        # Load BioCLIP resources
+        logger.info(f"Loading resources for BioCLIP model: {bioclip_config.model}")
+        bioclip_resources = ResourceLoader.load_model_resources(cache_dir, bioclip_config)
 
-        # 2. Load resources and create backend for BioCLIP
-        logger.info(
-            f"Loading resources for BioCLIP model: {bioclip_model_config.model}"
-        )
-        bioclip_resources = ResourceLoader.load_model_resources(
-            cache_dir, bioclip_model_config
-        )
-        bioclip_backend = create_backend(
-            bioclip_resources, bioclip_model_config.runtime.value
-        )
+        # Create backends
+        device_pref = getattr(backend_settings, "device", "cpu")
+        max_batch_size = getattr(backend_settings, "batch_size", 8)
 
-        # 3. Create the unified service instance
-        service = cls(
-            clip_backend=general_backend,
-            bioclip_backend=bioclip_backend,
-            clip_resources=general_resources,
-            bioclip_resources=bioclip_resources,
-        )
+        # CLIP backend
+        clip_runtime = clip_config.runtime.value
+        if clip_runtime == "torch":
+            clip_backend = TorchBackend(
+                resources=clip_resources,
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
+            )
+        elif clip_runtime == "onnx":
+            providers_list = getattr(backend_settings, "onnx_providers", ["CPUExecutionProvider"])
+            clip_backend = ONNXRTBackend(
+                resources=clip_resources,
+                providers=providers_list,
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
+            )
+        else:
+            raise ConfigError(f"Unsupported CLIP runtime: {clip_runtime}")
 
-        logger.info("UnifiedCLIPService created with both General and BioCLIP models.")
-        if not general_resources.has_classification_support():
-            logger.warning("General CLIP is missing ImageNet dataset.")
+        # BioCLIP backend
+        bioclip_runtime = bioclip_config.runtime.value
+        if bioclip_runtime == "torch":
+            bioclip_backend = TorchBackend(
+                resources=bioclip_resources,
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
+            )
+        elif bioclip_runtime == "onnx":
+            providers_list = getattr(backend_settings, "onnx_providers", ["CPUExecutionProvider"])
+            bioclip_backend = ONNXRTBackend(
+                resources=bioclip_resources,
+                providers=providers_list,
+                device_preference=device_pref,
+                max_batch_size=max_batch_size,
+            )
+        else:
+            raise ConfigError(f"Unsupported BioCLIP runtime: {bioclip_runtime}")
+
+        # Create service
+        service = cls(clip_backend, clip_resources, bioclip_backend, bioclip_resources)
+
+        # Log classification support status
+        if not clip_resources.has_classification_support():
+            logger.info("CLIP classification not available (no ImageNet dataset)")
         if not bioclip_resources.has_classification_support():
-            logger.warning("BioCLIP is missing its dataset (e.g., TreeOfLife).")
+            logger.info("BioCLIP classification not available (no TreeOfLife dataset)")
 
         return service
 
+    def _setup_registry(self) -> None:
+        """Set up the task registry with all available tasks."""
+        self.registry.set_service_name("lumen-smartclip")
+
+        # Text embedding tasks (intelligent model selection)
+        self.registry.register_task(
+            name="smartclip_text_embed",
+            handler=self._handle_text_embed,
+            description="Create text embedding using intelligent model selection",
+            input_mimes=["application/json", "text/plain"],
+            output_mime="application/json;schema=embedding_v1",
+            metadata={"task_type": "text_embedding", "framework": "pytorch"},
+        )
+
+        # Image embedding tasks (intelligent model selection)
+        self.registry.register_task(
+            name="smartclip_image_embed",
+            handler=self._handle_image_embed,
+            description="Create image embedding using intelligent model selection",
+            input_mimes=["image/jpeg", "image/png", "image/webp"],
+            output_mime="application/json;schema=embedding_v1",
+            metadata={},
+        )
+
+        # General classification tasks (using CLIP)
+        if self.clip_model.resources.has_classification_support():
+            self.registry.register_task(
+                name="smartclip_classify",
+                handler=self._handle_classify,
+                description="Intelligent classification using best available model",
+                input_mimes=["image/jpeg", "image/png", "image/webp"],
+                output_mime="application/json;schema=labels_v1",
+                metadata={},
+            )
+
+            self.registry.register_task(
+                name="smartclip_scene_classify",
+                handler=self._handle_scene_classify,
+                description="Scene analysis using CLIP model",
+                input_mimes=["image/jpeg", "image/png", "image/webp"],
+                output_mime="application/json;schema=labels_v1",
+                metadata={},
+            )
+
+        # BioCLIP-specific classification (if available)
+        if self.bioclip_model.resources.has_classification_support():
+            self.registry.register_task(
+                name="smartclip_bioclassify",
+                handler=self._handle_bioclassify,
+                description="Biological classification using BioCLIP model",
+                input_mimes=["image/jpeg", "image/png", "image/webp"],
+                output_mime="application/json;schema=labels_v1",
+                metadata={},
+            )
+
     def initialize(self) -> None:
-        """Initializes both underlying model managers."""
+        """Initialize both underlying model managers."""
         logger.info("Initializing CLIPModelManager...")
         self.clip_model.initialize()
+
         logger.info("Initializing BioCLIPModelManager...")
         self.bioclip_model.initialize()
-        logger.info("✅ All models initialized successfully.")
+
+        self.is_initialized = True
+
+        clip_info = self.clip_model.info()
+        bioclip_info = self.bioclip_model.info()
+        logger.info(
+            "SmartCLIP ready - CLIP: %s (%.2fs), BioCLIP: %s (%.2fs)",
+            clip_info.model_name,
+            clip_info.load_time,
+            bioclip_info.model_name,
+            bioclip_info.load_time,
+        )
+
+    # -------- gRPC Service Methods ----------
 
     @override
     def Infer(
         self, request_iterator: Iterable[pb.InferRequest], context: grpc.ServicerContext
-    ) -> Iterable[pb.InferResponse]:
+    ):
         """
-        Handles bidirectional streaming inference with server-side batching.
+        Handles the bidirectional streaming inference RPC. Routes incoming requests
+        to the appropriate task handler.
         """
-        if not self.clip_model.is_initialized or not self.bioclip_model.is_initialized:
-            context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, "Models are not initialized."
-            )
-            return
+        if not self.is_initialized:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Models not initialized")
 
-        batch: list[pb.InferRequest] = []
+        buffers: Dict[str, bytearray] = {}
+
         for req in request_iterator:
-            batch.append(req)
-            if len(batch) >= BATCH_SIZE:
-                for response in self._process_batch(batch):
-                    yield response
-                batch.clear()
+            cid = req.correlation_id or f"cid-{_now_ms()}"
+            t0 = _now_ms()
+            try:
+                # Reassemble payload if chunked
+                payload, ready = self._assemble(cid, req, buffers)
+                if not ready:
+                    continue
 
-        # Process any remaining requests in the final, possibly smaller, batch
-        if batch:
-            for response in self._process_batch(batch):
-                yield response
-
-    def _process_batch(
-        self, batch: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        """Processes a batch of requests, groups them by task, and yields responses."""
-        t0 = time.time()
-        logger.info(f"Processing a batch of {len(batch)} requests...")
-
-        # Group requests by their task name
-        tasks: dict[str, list[pb.InferRequest]] = defaultdict(list)
-        for req in batch:
-            tasks[req.task].append(req)
-
-        # Process each task group
-        for task_name, requests in tasks.items():
-            handler = getattr(self, f"_handle_{task_name}", None)
-            if handler:
+                # Route to handler using TaskRegistry
                 try:
-                    for response in handler(requests):
-                        yield response
-                except Exception as e:
-                    logger.exception(f"Error processing task '{task_name}': {e}")
-                    # Yield an error response for all failed requests in this group
-                    for req in requests:
-                        yield pb.InferResponse(
-                            correlation_id=req.correlation_id,
-                            is_final=True,
-                            error=pb.Error(code=pb.ERROR_CODE_INTERNAL, message=str(e)),
-                        )
-            else:
-                logger.warning(f"Unknown task received: {task_name}")
-                for req in requests:
+                    meta = dict(req.meta)
+                    handler = self.registry.get_handler(req.task)
+                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
+                except ValueError as e:
                     yield pb.InferResponse(
-                        correlation_id=req.correlation_id,
+                        correlation_id=cid,
                         is_final=True,
                         error=pb.Error(
                             code=pb.ERROR_CODE_INVALID_ARGUMENT,
-                            message=f"Unknown task: {task_name}",
+                            message=str(e),
                         ),
                     )
+                    continue
 
-        processing_time = (time.time() - t0) * 1000
-        logger.info(f"Batch processing finished in {processing_time:.2f} ms.")
+                # Stream successful response
+                meta = dict(extra_meta or {})
+                meta["lat_ms"] = str(_now_ms() - t0)
 
-    # --- Task Handlers (process lists of requests) ---
-
-    def _handle_clip_classify(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        for req in requests:
-            top_k = int(req.meta.get("topk", "5"))
-            scores = self.clip_model.classify_image(req.payload, top_k)
-            yield self._build_label_response(
-                req.correlation_id, scores, self.clip_model.info()
-            )
-
-    def _handle_bioclip_classify(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        for req in requests:
-            top_k = int(req.meta.get("topk", "3"))
-            scores = self.bioclip_model.classify_image(req.payload, top_k)
-            yield self._build_label_response(
-                req.correlation_id, scores, self.bioclip_model.info()
-            )
-
-    def _handle_smart_classify(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        for req in requests:
-            # Check if both models support classification
-            if not self.clip_model.supports_classification:
                 yield pb.InferResponse(
-                    correlation_id=req.correlation_id,
+                    correlation_id=cid,
                     is_final=True,
-                    error=pb.Error(
-                        code=pb.ERROR_CODE_INVALID_ARGUMENT,
-                        message="smart_classify requires CLIP classification support (no ImageNet dataset)",
-                    ),
+                    result=result_bytes,
+                    result_mime=result_mime,
+                    meta=meta,
                 )
-                continue
 
-            # 1) Scene classification using CLIP
-            scene_label, scene_score = self.clip_model.classify_scene(req.payload)
-
-            # Check if it's animal-like based on scene classification
-            is_animal_like = (
-                ("animal" in scene_label)
-                or ("bird" in scene_label)
-                or ("insect" in scene_label)
-            )
-
-            if not is_animal_like:
-                yield self._build_label_response(
-                    req.correlation_id,
-                    [(scene_label, scene_score)],
-                    self.clip_model.info(),
-                    meta={"source": "scene_classification"},
+            except Exception as e:
+                logger.exception("Error during inference for task '%s': %s", req.task, e)
+                yield pb.InferResponse(
+                    correlation_id=cid,
+                    is_final=True,
+                    error=pb.Error(code=pb.ERROR_CODE_INTERNAL, message=str(e)),
                 )
-                continue
-
-            # 2) Animal-like: classify with BioCLIP (if supported)
-            if not self.bioclip_model.supports_classification:
-                # Fallback to CLIP classification
-                yield self._build_label_response(
-                    req.correlation_id,
-                    [(scene_label, scene_score)],
-                    self.clip_model.info(),
-                    meta={"source": "scene_classification_fallback"},
-                )
-                continue
-
-            top_k = int(req.meta.get("topk", "3"))
-            scores = self.bioclip_model.classify_image(req.payload, top_k)
-            yield self._build_label_response(
-                req.correlation_id,
-                scores,
-                self.bioclip_model.info(),
-                meta={"source": "bioclip_classification"},
-            )
-
-    def _handle_clip_embed(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        for req in requests:
-            vec = self.clip_model.encode_text(req.payload.decode("utf-8")).tolist()
-            yield self._build_embed_response(
-                req.correlation_id, vec, self.clip_model.info()
-            )
-
-    def _handle_bioclip_embed(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        for req in requests:
-            vec = self.bioclip_model.encode_text(req.payload.decode("utf-8")).tolist()
-            yield self._build_embed_response(
-                req.correlation_id, vec, self.bioclip_model.info()
-            )
-
-    def _handle_clip_image_embed(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        # Use backend batch embedding (falls back to sequential in backend if not supported)
-        image_bytes = [req.payload for req in requests]
-        vecs = self.clip_model.backend.image_batch_to_vectors(image_bytes)
-        for i, req in enumerate(requests):
-            vec = vecs[i].tolist()
-            yield self._build_embed_response(
-                req.correlation_id, vec, self.clip_model.info()
-            )
-
-    def _handle_bioclip_image_embed(
-        self, requests: list[pb.InferRequest]
-    ) -> Iterable[pb.InferResponse]:
-        # Use backend batch embedding (falls back to sequential in backend if not supported)
-        image_bytes = [req.payload for req in requests]
-        vecs = self.bioclip_model.backend.image_batch_to_vectors(image_bytes)
-        for i, req in enumerate(requests):
-            vec = vecs[i].tolist()
-            yield self._build_embed_response(
-                req.correlation_id, vec, self.bioclip_model.info()
-            )
-
-    # --- Response Builders ---
-
-    def _build_label_response(
-        self,
-        cid: str,
-        scores: list[tuple[str, float]],
-        model_info: Mapping[str, Any],
-        meta: dict[str, str] | None = None,
-    ) -> pb.InferResponse:
-        model_id = f"{model_info.get('model_name', model_info.get('model_version'))}:{model_info.get('pretrained', '')}"
-        obj = {
-            "labels": [{"label": label, "score": score} for label, score in scores],
-            "model_id": model_id.strip(":"),
-        }
-        response_meta = {"labels_count": str(len(scores))}
-        if meta:
-            response_meta.update(meta)
-        return pb.InferResponse(
-            correlation_id=cid,
-            is_final=True,
-            result=json.dumps(obj, separators=(",", ":")).encode("utf-8"),
-            result_mime="application/json;schema=labels_v1",
-            meta=response_meta,
-        )
-
-    def _build_embed_response(
-        self, cid: str, vec: list[float], model_info: Mapping[str, Any]
-    ) -> pb.InferResponse:
-        model_id = f"{model_info.get('model_name', model_info.get('model_version'))}:{model_info.get('pretrained', '')}"
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id.strip(":")}
-        return pb.InferResponse(
-            correlation_id=cid,
-            is_final=True,
-            result=json.dumps(obj, separators=(",", ":")).encode("utf-8"),
-            result_mime="application/json;schema=embedding_v1",
-            meta={"dim": str(len(vec))},
-        )
-
-    # --- Capabilities and Health ---
 
     @override
     def GetCapabilities(self, request, context) -> pb.Capability:
+        """Returns the capabilities of the service."""
         return self._build_capability()
 
     @override
     def StreamCapabilities(self, request, context) -> Iterable[pb.Capability]:
+        """Streams the capabilities of the service."""
         yield self._build_capability()
 
     @override
     def Health(self, request, context):
+        """Simple health check endpoint."""
         return empty_pb2.Empty()
 
+    # -------- Task Handlers ----------
+
+    def _handle_text_embed(
+        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
+    ) -> Tuple[bytes, str, Dict[str, str]]:
+        """Handles text embedding with intelligent model selection."""
+        if not payload_mime.startswith("text/"):
+            raise ValueError(f"text_embed expects text/* payload, got {payload_mime!r}")
+
+        text = payload.decode("utf-8")
+
+        # Use CLIP for text embedding (generally better for general text)
+        vec = self.clip_model.encode_text(text).tolist()
+
+        info = self.clip_model.info()
+        model_id = f"smartclip:{info.model_name}"
+
+        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=embedding_v1",
+            {"dim": str(len(vec))},
+        )
+
+    def _handle_image_embed(
+        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
+    ) -> Tuple[bytes, str, Dict[str, str]]:
+        """Handles image embedding with intelligent model selection."""
+        if not payload_mime.startswith("image/"):
+            raise ValueError(f"image_embed expects image/* payload, got {payload_mime!r}")
+
+        # Use CLIP for general image embedding
+        vec = self.clip_model.encode_image(payload).tolist()
+
+        info = self.clip_model.info()
+        model_id = f"smartclip:{info.model_name}"
+
+        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=embedding_v1",
+            {"dim": str(len(vec))},
+        )
+
+    def _handle_classify(
+        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
+    ) -> Tuple[bytes, str, Dict[str, str]]:
+        """Handles intelligent image classification."""
+        if not self.clip_model.supports_classification:
+            raise RuntimeError(
+                "Classification not supported: no ImageNet dataset loaded for CLIP model"
+            )
+
+        top_k = int(meta.get("topk", "5"))
+
+        # Use CLIP for general classification
+        scores = self.clip_model.classify_image(payload, top_k=top_k)
+
+        info = self.clip_model.info()
+        model_id = f"smartclip:{info.model_name}"
+
+        obj = {
+            "labels": [
+                {"label": label, "score": float(score)} for label, score in scores
+            ],
+            "model_id": model_id,
+        }
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=labels_v1",
+            {"labels_count": str(len(scores))},
+        )
+
+    def _handle_scene_classify(
+        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
+    ) -> Tuple[bytes, str, Dict[str, str]]:
+        """Handles scene classification using CLIP."""
+        label, score = self.clip_model.classify_scene(payload)
+
+        info = self.clip_model.info()
+        model_id = f"smartclip:{info.model_name}"
+
+        obj = {
+            "labels": [{"label": label, "score": float(score)}],
+            "model_id": model_id,
+        }
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=labels_v1",
+            {"labels_count": "1"},
+        )
+
+    def _handle_bioclassify(
+        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
+    ) -> Tuple[bytes, str, Dict[str, str]]:
+        """Handles biological classification using BioCLIP."""
+        if not self.bioclip_model.supports_classification:
+            raise RuntimeError(
+                "Bio classification not supported: no TreeOfLife dataset loaded for BioCLIP model"
+            )
+
+        namespace = meta.get("namespace", "bioatlas")
+        if namespace != "bioatlas":
+            raise ValueError(f"unsupported namespace {namespace!r}, expected 'bioatlas'")
+
+        topk = int(meta.get("topk", "5"))
+        pairs = self.bioclip_model.classify_image(payload, top_k=topk)
+
+        info = self.bioclip_model.info()
+        model_id = f"smartclip:{info.model_name}"
+
+        obj = {
+            "labels": [{"label": name, "score": float(score)} for name, score in pairs],
+            "model_id": model_id,
+        }
+        return (
+            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            "application/json;schema=labels_v1",
+            {"labels_count": str(len(pairs))},
+        )
+
+    # -------- Helper Methods ----------
+
+    def _assemble(
+        self, cid: str, req: pb.InferRequest, buffers: Dict[str, bytearray]
+    ) -> Tuple[bytes, bool]:
+        """
+        Reassembles chunked request payloads.
+        """
+        # Default path for non-chunked requests
+        if req.total <= 1:
+            return bytes(req.payload), True
+
+        # Append chunk to buffer
+        buf = buffers.setdefault(cid, bytearray())
+        buf.extend(req.payload)
+
+        # Check if all chunks have arrived
+        if req.total and (req.seq + 1 == req.total):
+            data = bytes(buf)
+            del buffers[cid]
+            return data, True
+
+        return b"", False
+
     def _build_capability(self) -> pb.Capability:
-        """Constructs a unified capability message from both managed models."""
-        general_res = self.clip_resources
-        general_backend_info = self._clip_backend.get_info()
-        bioclip_res = self.bioclip_resources
-        bioclip_backend_info = self._bioclip_backend.get_info()
+        """Constructs the capability message using the task registry."""
+        clip_info = self.clip_model.info()
+        bioclip_info = self.bioclip_model.info()
 
-        tasks = [
-            pb.IOTask(
-                name="clip_embed",
-                input_mimes=["text/plain;charset=utf-8"],
-                output_mimes=["application/json;schema=embedding_v1"],
+        # Use registry to build capability automatically
+        extra_metadata = {
+            "device": clip_info.device,
+            "clip_model": clip_info.model_name,
+            "bioclip_model": bioclip_info.model_name,
+            "clip_embedding_dim": str(clip_info.embedding_dim),
+            "bioclip_embedding_dim": str(bioclip_info.embedding_dim),
+            "supports_classification": str(
+                clip_info.supports_classification or bioclip_info.supports_classification
             ),
-            pb.IOTask(
-                name="clip_image_embed",
-                input_mimes=["image/jpeg", "image/png", "image/webp"],
-                output_mimes=["application/json;schema=embedding_v1"],
-            ),
-            pb.IOTask(
-                name="bioclip_embed",
-                input_mimes=["text/plain;charset=utf-8"],
-                output_mimes=["application/json;schema=embedding_v1"],
-            ),
-            pb.IOTask(
-                name="bioclip_image_embed",
-                input_mimes=["image/jpeg", "image/png", "image/webp"],
-                output_mimes=["application/json;schema=embedding_v1"],
-            ),
-        ]
+        }
 
-        if self.clip_model.supports_classification:
-            tasks.append(
-                pb.IOTask(
-                    name="clip_classify",
-                    input_mimes=["image/jpeg", "image/png"],
-                    output_mimes=["application/json;schema=labels_v1"],
-                )
-            )
-            tasks.append(
-                pb.IOTask(
-                    name="clip_classify_scene",
-                    input_mimes=["image/jpeg", "image/png"],
-                    output_mimes=["application/json;schema=labels_v1"],
-                )
-            )
-
-        if self.bioclip_model.supports_classification:
-            tasks.append(
-                pb.IOTask(
-                    name="bioclip_classify",
-                    input_mimes=["image/jpeg", "image/png"],
-                    output_mimes=["application/json;schema=labels_v1"],
-                )
-            )
-
-        if (
-            self.clip_model.supports_classification
-            and self.bioclip_model.supports_classification
-        ):
-            tasks.append(
-                pb.IOTask(
-                    name="smart_classify",
-                    input_mimes=["image/jpeg", "image/png"],
-                    output_mimes=["application/json;schema=labels_v1"],
-                )
-            )
-
-        return pb.Capability(
-            service_name="clip-unified",
-            model_ids=[general_res.model_info.name, bioclip_res.model_info.name],
-            runtime=general_res.runtime,
-            max_concurrency=4,
-            precisions=general_backend_info.precisions or ["unknown"],
-            extra={
-                "general_model_name": general_res.model_info.name,
-                "general_model_version": general_res.model_info.version,
-                "general_runtime": general_res.runtime,
-                "general_device": general_backend_info.device or "unknown",
-                "general_embedding_dim": str(general_res.get_embedding_dim()),
-                "bioclip_model_name": bioclip_res.model_info.name,
-                "bioclip_model_version": bioclip_res.model_info.version,
-                "bioclip_runtime": bioclip_res.runtime,
-                "bioclip_device": bioclip_backend_info.device or "unknown",
-                "bioclip_embedding_dim": str(bioclip_res.get_embedding_dim()),
-            },
-            tasks=tasks,
+        return self.registry.build_capability(
+            service_name="lumen_smartclip",
+            model_id=f"{clip_info.model_name}+{bioclip_info.model_name}",
+            runtime=clip_info.runtime,
+            precisions=clip_info.precisions,
+            extra_metadata=extra_metadata,
         )

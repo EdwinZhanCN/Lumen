@@ -112,10 +112,3 @@
 2. Data types: lower layers use more generic types; higher layers use more business-oriented types
 3. Error handling: each layer should handle errors at its level and propagate lower-level errors upward
 4. Extensibility: adding a new ML service only requires implementing a new Base Backend + Model Manager
-
-This contract-style design ensures each module is:
-- Single-responsibility: each module does one thing
-- Stable-interface: once the contract is defined it should not change frequently
-- Testable: contracts make it straightforward to write comprehensive tests
-- Replaceable: as long as an implementation satisfies the contract it can be swapped freely
-

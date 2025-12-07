@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LabelsV1",
+  "description": "Classification response schema for Lumen services. Returns ranked labels with confidence scores.",
+  "type": "object",
+  "properties": {
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The classification label or class name"
+          },
+          "score": {
+            "type": "number",
+            "description": "Confidence score for this label"
+          }
+        },
+        "required": ["label", "score"],
+        "additionalProperties": false
+      },
+      "description": "Array of classification results"
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the model that generated the classification"
+    }
+  },
+  "required": ["labels", "model_id"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "labels": [
+        {
+          "label": "cat",
+          "score": 0.9
+        },
+        {
+          "label": "dog",
+          "score": 0.1
+        }
+      ],
+      "model_id": "embedding_model_1"
+    }
+  ]
+}

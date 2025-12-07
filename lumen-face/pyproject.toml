@@ -1,22 +1,33 @@
 [project]
 name = "lumen-face"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Face Recognition Module Built For Lumen AI"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
-
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "grpcio",
+    "grpcio-tools",
+    "protobuf",
+    "lumen-resources>=0.2.0",
+    "opencv-python",
+    "numpy",
+    "pillow>=12.0.0",
+    "colorlog>=6.10.1",
+    "zeroconf>=0.148.0",
+]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.optional-dependencies]
 cpu = [
     "onnxruntime>=1.16.0",
 ]
-
 
 # Python Dependency For Nvidia GPU Platform
 # Cuda Version should be 12.6 fixed.
@@ -34,7 +45,7 @@ mps = [
 ]
 
 # Python Dependency For Intel OpenVINO Platform.
-# Python Version Should be 3.10 fixed.
+# Python Version Should be 3.11 fixed.
 openvino253 = [
     "onnxruntime-openvino==1.21.0",
 ]
@@ -46,6 +57,11 @@ jp61cu126 = [
     "onnxruntime-gpu",
 ]
 
+# Python Dependency For Rockchip NPU Platform.
+rknn = [
+    "rknn-toolkit-lite2",
+]
+
 [project.scripts]
 lumen-face = "lumen_face:main"
 
@@ -55,6 +71,40 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
+search_parent_directories = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long, handled by black
+    "B008",   # do not perform function calls in argument defaults
+    "C901",   # too complex
+]
+
+[tool.ruff.lint.per-file-ignores]
+"proto/*" = [
+    "E402",   # module level import not at top of file
+    "F401",   # unused imports (generated files)
+    "F403",   # star imports (generated files)
+    "F405",   # undefined names from star imports (generated files)
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.2",
+]

@@ -1,3 +1,3 @@
-from .smartclip_service import UnifiedCLIPService
+from .smartclip_service import SmartCLIPService
 
-__all__ = ["UnifiedCLIPService"]
+__all__ = ["SmartCLIPService"]

@@ -1,147 +1,109 @@
 # Lumen Resources
 
-## Short Description
+Lightweight tooling for shipping Lumen ML services. This package centralizes how models are described, validated, downloaded, and cached so every service (CLIP, face, etc.) follows the same playbook—whether weights live on Hugging Face, ModelScope, or a private registry.
 
-Lumen Resources is a unified model resource management tool for Lumen ML services. It provides configuration-driven downloading and validation of ML model resources from platforms like Hugging Face and ModelScope, with support for multiple runtimes and deployment modes. The tool ensures production-grade reliability through YAML configuration, JSON Schema validation, and Pydantic models.
+## Why use it?
+
+- **Single source of truth** – YAML configs describing deployments, devices, runtimes, and model aliases.
+- **Schema-backed validation** – JSON Schema plus Pydantic to catch errors before runtime.
+- **Cross-platform downloads** – Intelligent routing between Hugging Face and ModelScope with caching/resume support.
+- **CLI + Python API** – Automate in CI or embed in service bootstraps.
+- **Result schemas** – Typed response validators (`EmbeddingV1`, `FaceV1`, `LabelsV1`) for downstream services.
 
 ## Installation
 
-Install the package using pip:
-
 ```bash
-pip install lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources
-```
+# project install
+pip install "lumen-resources @ git+https://github.com/EdwinZhanCN/Lumen.git@main#subdirectory=lumen-resources"
 
-For development, clone the repository and install with optional dependencies:
-
-```bash
+# dev install
 git clone https://github.com/EdwinZhanCN/Lumen.git
-cd lumen-resources
+cd Lumen/lumen-resources
 pip install -e ".[dev,config]"
 ```
 
-## How to Use CLI
-
-The CLI provides commands for downloading, validating, and listing model resources. The entry point is `lumen-resources`.
-
-### Download Model Resources
-
-Download models based on a YAML configuration file:
+Optional extras depending on your targets:
 
 ```bash
-lumen-resources download path/to/config.yaml [--force]
+pip install huggingface_hub
+pip install modelscope
+pip install torch torchvision
+pip install onnxruntime
 ```
 
-- `--force`: Force re-download even if models are already cached.
+## Usage
 
-This command loads the configuration, validates it, and downloads enabled models to the specified cache directory.
-
-### Validate Configuration
-
-Validate a YAML configuration file:
+### CLI
 
 ```bash
-lumen-resources validate path/to/config.yaml [--strict]
+# download everything defined in config.yaml
+lumen-resources download config.yaml
+
+# strict config validation
+lumen-resources validate config.yaml
+
+# validate a model_info.json
+lumen-resources validate-model-info path/to/model_info.json
+
+# inspect cache contents (defaults to ~/.lumen/)
+lumen-resources list ~/.lumen/
 ```
 
-- `--strict`: Use strict Pydantic validation (default: True). Use `--schema-only` for JSON Schema validation only.
-
-Outputs validation results and configuration details if valid.
-
-### Validate Model Info
-
-Validate a `model_info.json` file:
-
-```bash
-lumen-resources validate-model-info path/to/model_info.json [--strict]
-```
-
-- `--strict`: Use strict Pydantic validation (default: True). Use `--schema-only` for JSON Schema validation only.
-
-Outputs validation results and model details if valid.
-
-### List Cached Models
-
-List models in the cache directory:
-
-```bash
-lumen-resources list [cache_dir]
-```
-
-- `cache_dir`: Path to cache directory (default: `~/.lumen/`).
-
-Displays available models, versions, runtimes, and contents.
-
-## How to Use as a Python Package
-
-Import and use the package programmatically for configuration loading, validation, and downloading.
-
-### Basic Usage
+### Python API
 
 ```python
-from lumen_resources import load_and_validate_config, Downloader
-
-# Load and validate configuration
-config = load_and_validate_config("path/to/config.yaml")
-
-# Initialize downloader
-downloader = Downloader(config, verbose=True)
-
-# Download all enabled models
-results = downloader.download_all(force=False)
-
-# Check results
-for model_type, result in results.items():
-    if result.success:
-        print(f"Downloaded: {model_type} to {result.model_path}")
-    else:
-        print(f"Failed: {model_type} - {result.error}")
-```
-
-### Key Classes and Functions
-
-- `LumenServicesConfiguration`: Pydantic model for the full configuration.
-- `load_and_validate_config(path)`: Load and validate a YAML config file.
-- `load_and_validate_model_info(path)`: Load and validate a `model_info.json` file.
-- `Downloader`: Class for downloading models.
-- `DownloadResult`: Result object from downloads.
-- Exceptions: `ConfigError`, `DownloadError`, `ValidationError`, etc.
-
-### Advanced Example
-
-```python
-from lumen_resources import LumenServicesConfiguration, Runtime, Region
-
-# Build config programmatically
-config = LumenServicesConfiguration(
-    metadata={
-        "region": Region.US_WEST,
-        "cache_dir": "/path/to/cache"
-    },
-    services={
-        "my_service": {
-            "enabled": True,
-            "package": "my_package",
-            "models": {
-                "model_alias": {
-                    "model": "org/model-name",
-                    "runtime": Runtime.ONNX
-                }
-            }
-        }
-    }
+from lumen_resources import (
+    load_and_validate_config,
+    Downloader,
+    load_and_validate_model_info,
+    EmbeddingV1,
 )
 
-downloader = Downloader(config)
-results = downloader.download_all()
+config = load_and_validate_config("config.yaml")
+downloader = Downloader(config, verbose=True)
+results = downloader.download_all(force=False)
+
+model_info = load_and_validate_model_info("model_info.json")
 ```
 
-## Configuration Format
+## Configuration essentials
 
-The YAML configuration includes metadata (region, cache dir), deployment settings (mode, services), server config (port, host, mDNS), and service definitions with models and runtimes.
+```yaml
+metadata:
+  region: "other"      # or "cn" to prefer ModelScope
+  cache_dir: "~/.lumen/models"
 
-See `docs/examples` for detailed schemas and examples.
+deployment:
+  mode: "single"       # or "hub"
+  service: "clip"
 
-## License
+services:
+  clip:
+    enabled: true
+    package: "lumen_clip"
+    backend_settings:
+      device: "cuda"
+      batch_size: 16
+      onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    models:
+      default:
+        model: "ViT-B-32"
+        runtime: "torch"
+      fp16:
+        model: "ViT-B-32"
+        runtime: "onnx"
+```
 
-MIT License
+- `metadata.region` decides whether downloads prefer ModelScope or Hugging Face.
+- `backend_settings` lets you declare execution providers, batch sizes, devices, etc.
+- Each entry in `models` becomes a cache namespace (`clip/default`, `clip/fp16`, …).
+
+## Reference
+
+- Source: `src/lumen_resources/`
+  - `lumen_config.py` – Typed config models
+  - `downloader.py` – Platform abstraction + caching
+  - `cli.py` – Command entrypoint
+  - `result_schemas/` – Response validators
+- Docs: https://doc.lumilio.org
+- Issues & support: open a ticket in the main Lumen monorepo.
