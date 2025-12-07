@@ -7,17 +7,12 @@ license = { text = "MIT" }
 authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
-
-[project.urls]
-Homepage = "https://github.com/EdwinZhanCN/Lumen"
-Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
-
 requires-python = ">=3.10"
 dependencies = [
     "grpcio",
     "grpcio-tools",
     "protobuf",
-    "lumen-resources>=0.2.0"
+    "lumen-resources>=0.2.0",
     "opencv-python",
     "numpy",
     "pillow>=12.0.0",
@@ -25,13 +20,14 @@ dependencies = [
     "zeroconf>=0.148.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.optional-dependencies]
 cpu = [
     "onnxruntime>=1.16.0",
 ]
-
-
 
 # Python Dependency For Nvidia GPU Platform
 # Cuda Version should be 12.6 fixed.

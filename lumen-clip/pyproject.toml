@@ -4,12 +4,10 @@ dynamic = ["version"]
 description = "Lumen, Python Machine Learning (PML) module for Lumilio Photos"
 readme = "README.md"
 requires-python = ">=3.10"
-
-[project.urls]
-Homepage = "https://github.com/EdwinZhanCN/Lumen"
-Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
-
-# "lumen-resources @ git+https://xget.xi-xu.me/gh/EdwinZhanCN/Lumen.git@v0.1.2#subdirectory=lumen-resources"
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
 
 dependencies = [
     "open-clip-torch",
@@ -29,11 +27,10 @@ dependencies = [
     "transformers",
     "lumen-resources>=0.2.0"
 ]
-license = { text = "MIT" }
-authors = [
-    { name = "EdwinZhanCN", email = "support@lumilio.org" }
-]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.scripts]
 lumen-face = "lumen_clip:main"
