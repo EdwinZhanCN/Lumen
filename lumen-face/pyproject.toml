@@ -1,7 +1,7 @@
 [project]
 name = "lumen-face"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Face Recognition Module Built For Lumen AI"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -56,6 +56,11 @@ openvino253 = [
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
 jp61cu126 = [
     "onnxruntime-gpu",
+]
+
+# Python Dependency For Rockchip NPU Platform.
+rknn = [
+    "rknn-toolkit-lite2",
 ]
 
 [project.scripts]

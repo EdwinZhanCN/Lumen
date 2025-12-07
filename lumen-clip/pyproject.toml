@@ -80,6 +80,11 @@ jp61cu126 = [
     "onnxruntime-gpu",
 ]
 
+# Python Dependency For Rockchip NPU Platform.
+rknn = [
+    "rknn-toolkit-lite2",
+]
+
 
 [build-system]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]

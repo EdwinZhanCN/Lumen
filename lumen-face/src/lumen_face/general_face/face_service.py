@@ -16,15 +16,16 @@ from pathlib import Path
 
 import grpc
 from google.protobuf import empty_pb2
+from lumen_resources import EmbeddingV1, FaceV1
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_resources.result_schemas.face_v1 import BboxItem, Face
 from typing_extensions import override
 
 import lumen_face.proto.ml_service_pb2 as pb
 import lumen_face.proto.ml_service_pb2_grpc as rpc
 from lumen_face.backends import FaceRecognitionBackend, ONNXRTBackend
-from lumen_face.resources.loader import ModelResources, ResourceLoader
 from lumen_face.registry import TaskRegistry
-from lumen_resources import validate_response
+from lumen_face.resources.loader import ModelResources, ResourceLoader
 
 from .face_model import FaceModelManager
 
@@ -196,7 +197,7 @@ class GeneralFaceService(rpc.InferenceServicer):
             description="Face detection with bounding boxes and landmarks",
             input_mimes=["image/jpeg", "image/png"],
             output_mime="application/json;schema=face_v1",
-            metadata={"task_type": "face_detection", "framework": "onnx"},
+            metadata={},
         )
 
         # Register face embedding task
@@ -206,7 +207,7 @@ class GeneralFaceService(rpc.InferenceServicer):
             description="Face embedding extraction with optional alignment",
             input_mimes=["image/jpeg", "image/png"],
             output_mime="application/json;schema=embedding_v1",
-            metadata={"task_type": "face_embedding", "framework": "onnx"},
+            metadata={},
         )
 
         # Register combined detect and embed task
@@ -216,10 +217,12 @@ class GeneralFaceService(rpc.InferenceServicer):
             description="Combined face detection and embedding extraction",
             input_mimes=["image/jpeg", "image/png"],
             output_mime="application/json;schema=face_v1",
-            metadata={"task_type": "face_detection_embedding", "framework": "onnx"},
+            metadata={},
         )
 
-        logger.info(f"Task registry initialized with {len(self.registry.list_task_names())} tasks")
+        logger.info(
+            f"Task registry initialized with {len(self.registry.list_task_names())} tasks"
+        )
 
     def initialize(self) -> None:
         """Loads the model and prepares it for inference."""
@@ -255,20 +258,31 @@ class GeneralFaceService(rpc.InferenceServicer):
             try:
                 # 1. Reassemble payload if it was sent in chunks
                 payload, ready = self._assemble(cid, req, buffers)
-                assert payload is not None
 
                 if not ready:
                     continue  # Wait for more chunks
+
+                if payload is None:
+                    logger.error(
+                        "Payload assembly returned None for %s despite ready flag; skipping request",
+                        cid,
+                    )
+                    buffers.pop(cid, None)
+                    continue
 
                 # 2. Route to the correct handler using TaskRegistry
                 try:
                     meta = dict(req.meta)
 
                     handler = self.registry.get_handler(req.task)
-                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
+                    result_bytes, result_mime, extra_meta = handler(
+                        payload, req.payload_mime, meta
+                    )
                 except ValueError as e:
                     # Task not found in registry
-                    raise ValueError(f"Unsupported task: {req.task}. Available tasks: {self.registry.list_task_names()}") from e
+                    raise ValueError(
+                        f"Unsupported task: {req.task}. Available tasks: {self.registry.list_task_names()}"
+                    ) from e
 
                 # 3. Stream response back
                 yield pb.InferResponse(
@@ -329,6 +343,42 @@ class GeneralFaceService(rpc.InferenceServicer):
             extra_metadata=extra_metadata,
         )
 
+    @override
+    def StreamCapabilities(self, request, context) -> Iterable[pb.Capability]:
+        """Streams the capabilities of the service."""
+        """
+        Returns the service capabilities including supported tasks and model info.
+        """
+        if not self.is_initialized:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Model not initialized")
+
+        # Get model info
+        model_info = self.model.get_info()
+        backend_info = model_info.backend_info
+
+        # Use registry to build capability automatically
+        extra_metadata = {
+            "model_name": model_info.model_name,
+            "model_id": model_info.model_id,
+            "face_embedding_dim": str(backend_info.get("face_embedding_dim", 512)),
+            "supports_landmarks": str(
+                backend_info.get("supports_landmarks", False)
+            ).lower(),
+        }
+
+        yield self.registry.build_capability(
+            service_name=self.SERVICE_NAME,
+            model_id=model_info.model_id,
+            runtime=backend_info.get("runtime", "unknown"),
+            precisions=backend_info.get("precisions", ["fp32"]),
+            extra_metadata=extra_metadata,
+        )
+
+    @override
+    def Health(self, request, context):
+        """Simple health check endpoint."""
+        return empty_pb2.Empty()
+
     # -------- Task Handlers ----------
 
     def _handle_detect(
@@ -352,26 +402,24 @@ class GeneralFaceService(rpc.InferenceServicer):
             face_size_max=face_size_max,
         )
 
-        # Convert to JSON-serializable format
-        result = {
-            "faces": [
-                {
-                    "bbox": list(face.bbox),
-                    "confidence": face.confidence,
-                    "landmarks": list(face.landmarks) if face.landmarks else None,
-                }
+        result = FaceV1(
+            faces=[
+                Face(
+                    bbox=[BboxItem(root=coord) for coord in face.bbox],
+                    confidence=face.confidence,
+                    landmarks=(
+                        [coord for point in face.landmarks for coord in point]
+                        if face.landmarks
+                        else None
+                    ),
+                )
                 for face in faces
             ],
-            "count": len(faces),
-            "model_id": self.model.get_info().model_id,
-        }
+            count=len(faces),
+            model_id=self.model.get_info().model_id,
+        ).model_dump()
 
         result_bytes = json.dumps(result).encode("utf-8")
-
-        # Validate response against schema
-        is_valid, error = validate_response(result_bytes, "face_v1")
-        if not is_valid:
-            logger.error(f"Response validation failed: {error}")
 
         return (
             result_bytes,
@@ -402,18 +450,13 @@ class GeneralFaceService(rpc.InferenceServicer):
         info = self.model.get_info()
         model_id = info.model_id
 
-        result = {
-            "vector": embedding.tolist(),
-            "dim": len(embedding),
-            "model_id": model_id,
-        }
+        result = EmbeddingV1(
+            vector=embedding.tolist(),
+            dim=len(embedding),
+            model_id=model_id,
+        )
 
         result_bytes = json.dumps(result).encode("utf-8")
-
-        # Validate response against schema
-        is_valid, error = validate_response(result_bytes, "embedding_v1")
-        if not is_valid:
-            logger.error(f"Response validation failed: {error}")
 
         return (
             result_bytes,
@@ -425,14 +468,24 @@ class GeneralFaceService(rpc.InferenceServicer):
         self, payload: bytes, payload_mime: str, meta: dict[str, str]
     ) -> tuple[bytes, str, dict[str, str]]:
         """Handle detect and embed task."""
-        # Extract parameters from meta
+        # Extract parameters from meta with robust parsing that tolerates float-like strings
         detection_confidence_threshold = float(
             meta.get("detection_confidence_threshold", "0.7")
         )
         nms_threshold = float(meta.get("nms_threshold", "0.4"))
-        face_size_min = int(meta.get("face_size_min", "50"))
-        face_size_max = int(meta.get("face_size_max", "1000"))
-        max_faces = int(meta.get("max_faces", "-1"))  # -1 means no limit
+
+        def _parse_int_like(value: str, default: int) -> int:
+            try:
+                # Allow values like "50", "50.0", or numeric types
+                return int(float(value))
+            except (ValueError, TypeError):
+                return default
+
+        face_size_min = _parse_int_like(meta.get("face_size_min", "50"), 50)
+        face_size_max = _parse_int_like(meta.get("face_size_max", "1000"), 1000)
+        max_faces = _parse_int_like(
+            meta.get("max_faces", "-1"), -1
+        )  # -1 means no limit
 
         # Detect faces
         faces = self.model.detect_faces(
@@ -448,7 +501,7 @@ class GeneralFaceService(rpc.InferenceServicer):
             faces = faces[:max_faces]
 
         # Extract embeddings for each face
-        results = []
+        result_faces: list[Face] = []
         for face in faces:
             # Crop face from original image using bounding box
             face_crop = self.model.crop_face_from_image(payload, face.bbox)
@@ -458,32 +511,31 @@ class GeneralFaceService(rpc.InferenceServicer):
                 cropped_face_array=face_crop, landmarks=face.landmarks
             )
 
-            results.append(
-                {
-                    "bbox": list(face.bbox),
-                    "confidence": face.confidence,
-                    "landmarks": list(face.landmarks) if face.landmarks else None,
-                    "embedding": embedding.tolist(),
-                }
+            result_faces.append(
+                Face(
+                    bbox=[BboxItem(root=coord) for coord in face.bbox],
+                    confidence=face.confidence,
+                    landmarks=(
+                        [coord for point in face.landmarks for coord in point]
+                        if face.landmarks
+                        else None
+                    ),
+                    embedding=embedding.tolist(),
+                )
             )
 
-        result = {
-            "faces": results,
-            "count": len(results),
-            "model_id": self.model.get_info().model_id,
-        }
+        result = FaceV1(
+            faces=result_faces,
+            count=len(result_faces),
+            model_id=self.model.get_info().model_id,
+        ).model_dump()
 
         result_bytes = json.dumps(result).encode("utf-8")
-
-        # Validate response against schema
-        is_valid, error = validate_response(result_bytes, "face_v1")
-        if not is_valid:
-            logger.error(f"Response validation failed: {error}")
 
         return (
             result_bytes,
             "application/json;schema=face_v1",
-            {"face_count": str(len(results))},
+            {"face_count": str(len(result_faces))},
         )
 
     # -------- Helper Methods ----------
@@ -498,8 +550,11 @@ class GeneralFaceService(rpc.InferenceServicer):
         Reassembles chunked request payloads. Returns (payload, ready) where ready indicates
         if all chunks for this correlation_id have been received.
         """
-        if request.seq == 0 and request.total == 1:
-            # Single-chunk request
+        total_chunks = request.total if request.total and request.total > 0 else 1
+        seq_index = request.seq if request.seq >= 0 else 0
+
+        if total_chunks == 1:
+            # Treat missing chunk metadata as single-chunk payloads
             return request.payload, True
 
         # Multi-chunk request
@@ -510,7 +565,7 @@ class GeneralFaceService(rpc.InferenceServicer):
         buffer.extend(request.payload)
 
         # Check if all chunks received
-        if request.seq == request.total - 1:
+        if seq_index >= total_chunks - 1:
             payload = bytes(buffer)
             return payload, True
 

@@ -32,9 +32,7 @@ from lumen_clip.resources.loader import ModelResources
 import torch
 import open_clip
 from transformers import (
-    CLIPProcessor,
-    ChineseCLIPProcessor, CLIPTextModel, ChineseCLIPTextModel, CLIPVisionModel, ChineseCLIPVisionModel, AutoTokenizer,
-    ChineseCLIPImageProcessor, CLIPImageProcessor
+    AutoTokenizer, AutoModel, AutoProcessor, CLIPProcessor, ChineseCLIPProcessor
 )
 
 from .backend_exceptions import *
@@ -102,12 +100,10 @@ class TorchBackend(BaseClipBackend):
         self._openclip_model: torch.nn.Module | None = None
         self._openclip_preprocess: Callable[[Image.Image], torch.Tensor] | None = None
         self._openclip_tokenizer: Callable[[list[str]], torch.Tensor] | None = None
-        # HuggingFace model and processor
-        self._hf_text_model: CLIPTextModel | ChineseCLIPTextModel | None = None
-        self._hf_vision_model: CLIPVisionModel | ChineseCLIPVisionModel | None = None
-        self._hf_processor: CLIPProcessor | ChineseCLIPProcessor | None = None
-        self._hf_image_processor: CLIPImageProcessor | ChineseCLIPImageProcessor | None = None
-        # self._hf_tokenizer: AutoTokenizer | None Not explicitly used; use self._hf_tokenizer directly
+        # HuggingFace model and processor (Auto classes)
+        self._hf_model: AutoModel | None = None
+        self._hf_processor: AutoProcessor | None = None
+        self._hf_tokenizer: AutoTokenizer | None = None
 
         self._load_time_seconds: float | None = None
 
@@ -184,42 +180,33 @@ class TorchBackend(BaseClipBackend):
 
         # 2. Create model architecture without pretrained weights
         logger.info(f"Creating OpenCLIP model architecture: {model_name}")
+
         try:
             model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                model_name,
+                'local-dir:' + str(model_runtime_files_path),
                 pretrained=None,  # No automatic download
+            )
+            logger.info(
+                f"Successfully created OpenCLIP model architecture using local path'{model_runtime_files_path}'"
             )
         except Exception as e:
             logger.warning(
                 f"Failed to create OpenCLIP model architecture with name '{model_name}': {e}. "
-                "Attempting to create from local directory"
+                "Attempting to create from remote repo fallback"
             )
             try:
                 model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                    'local-dir:' + str(model_runtime_files_path),
+                    'hf-hub:' + model_remote_repo,
                     pretrained=None,  # No automatic download
                 )
                 logger.info(
-                    f"Successfully created OpenCLIP model architecture using local path'{model_runtime_files_path}'"
+                    f"Successfully created OpenCLIP model architecture using remote repo'{model_remote_repo}'"
                 )
             except Exception as e2:
-                logger.warning(
-                    f"Failed to create OpenCLIP model architecture with name '{model_name}': {e}. "
-                    "Attempting to create from remote repo fallback"
-                )
-                try:
-                    model_obj, _, preprocess = open_clip.create_model_and_transforms(
-                        'hf-hub:' + model_remote_repo,
-                        pretrained=None,  # No automatic download
-                    )
-                    logger.info(
-                        f"Successfully created OpenCLIP model architecture using remote repo'{model_remote_repo}'"
-                    )
-                except Exception as e3:
-                    raise TorchModelLoadingError(
-                        f"Failed to create OpenCLIP model architecture with both "
-                        f"'{model_name}' and fallback '{model_remote_repo}': {e3}"
-                    ) from e2
+                raise TorchModelLoadingError(
+                    f"Failed to create OpenCLIP model architecture with both "
+                    f"'{model_name}' and fallback '{model_remote_repo}': {e2}"
+                ) from e
 
         # 3. Load local openclip weights
         model_file = self.resources.get_model_file("open_clip_pytorch_model.bin")
@@ -247,9 +234,9 @@ class TorchBackend(BaseClipBackend):
 
     def _initialize_huggingface(self) -> None:
         """
-        Initialize a HuggingFace Transformers model from local files or remote repo.
+        Initialize a HuggingFace AutoModel from local files or remote repo.
 
-        Loads tokenizer, text model, vision model, and image processor, with fallbacks.
+        Uses AutoModel, AutoProcessor, and AutoTokenizer for universal compatibility.
 
         Raises:
             TorchModelLoadingError: If model loading fails.
@@ -257,65 +244,130 @@ class TorchBackend(BaseClipBackend):
         model_runtime_files_path = self.resources.runtime_files_path
         model_remote_repo = self.resources.source_repo
         logger.info(
-            f"Loading HuggingFace model from local disk: {model_runtime_files_path}"
+            f"Loading HuggingFace AutoModel from local disk: {model_runtime_files_path}"
         )
 
-        if self.resources.config["model_type"] == "chinese_clip":
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(model_runtime_files_path)
-                text_model = ChineseCLIPTextModel.from_pretrained(model_runtime_files_path)
-                vision_model = ChineseCLIPVisionModel.from_pretrained(model_runtime_files_path)
-                image_processor = ChineseCLIPImageProcessor.from_pretrained(model_runtime_files_path)
-                logger.info(
-                    "Using ChineseCLIPModel and ChineseCLIPProcessor for HuggingFace model"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to load ChineseCLIP model or tokenizer from local disk: {e}. "
-                               + "Attempting to load from remote repo fallback")
-                try:
-                    tokenizer = AutoTokenizer.from_pretrained(model_remote_repo)
-                    text_model = ChineseCLIPTextModel.from_pretrained(model_remote_repo)
-                    vision_model = ChineseCLIPVisionModel.from_pretrained(model_remote_repo)
-                    image_processor = ChineseCLIPImageProcessor.from_pretrained(model_runtime_files_path)
-                    logger.info(
-                        "Using ChineseCLIPModel and ChineseCLIPProcessor for HuggingFace model from remote repo"
-                    )
-                except Exception as e2:
-                    raise TorchModelLoadingError(
-                        f"Failed to load ChineseCLIP model or tokenizer from both "
-                        f"local path '{model_runtime_files_path}' and remote repo '{model_remote_repo}': {e2}"
-                    ) from e
-        else:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(model_runtime_files_path)
-                text_model = CLIPTextModel.from_pretrained(model_runtime_files_path)
-                vision_model = CLIPVisionModel.from_pretrained(model_runtime_files_path)
-                image_processor = CLIPImageProcessor.from_pretrained(model_runtime_files_path)
+        try:
+            # Try AutoModel first to detect the model type
+            temp_model = AutoModel.from_pretrained(model_runtime_files_path)
+            logger.info(f"AutoModel detected: {type(temp_model).__name__}")
 
-                logger.info(
-                    "Using CLIPModel and CLIPProcessor for HuggingFace model"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to load CLIP model or tokenizer from local disk: {e}. "
-                               + "Attempting to load from remote repo fallback")
-                try:
-                    tokenizer = AutoTokenizer.from_pretrained(model_remote_repo)
-                    text_model = CLIPTextModel.from_pretrained(model_remote_repo)
-                    vision_model = CLIPVisionModel.from_pretrained(model_remote_repo)
-                    image_processor = CLIPImageProcessor.from_pretrained(model_runtime_files_path)
-                    logger.info(
-                        "Using CLIPModel and CLIPProcessor for HuggingFace model from remote repo"
-                    )
-                except Exception as e2:
-                    raise TorchModelLoadingError(
-                        f"Failed to load CLIP model or tokenizer from both "
-                        f"local path '{model_runtime_files_path}' and remote repo '{model_remote_repo}': {e2}"
-                    ) from e
+            # Check if it's a CLIP model or needs special handling
+            if "CLIP" in type(temp_model).__name__ or "clip" in type(temp_model).__name__.lower():
+                # For CLIP models, use the specific classes for better control
+                del temp_model
+                if self.resources.config["model_type"] == "chinese_clip":
+                    from transformers import ChineseCLIPModel
+                    model = ChineseCLIPModel.from_pretrained(model_runtime_files_path)
+                    processor = ChineseCLIPProcessor.from_pretrained(model_runtime_files_path)
+                    tokenizer = AutoTokenizer.from_pretrained(model_runtime_files_path)
+                    logger.info("Using ChineseCLIPModel and ChineseCLIPProcessor")
+                else:
+                    from transformers import CLIPModel
+                    model = CLIPModel.from_pretrained(model_runtime_files_path)
+                    processor = CLIPProcessor.from_pretrained(model_runtime_files_path)
+                    tokenizer = AutoTokenizer.from_pretrained(model_runtime_files_path)
+                    logger.info("Using CLIPModel and CLIPProcessor")
+            else:
+                # For non-CLIP models, use the AutoModel
+                model = temp_model
+                processor = AutoProcessor.from_pretrained(model_runtime_files_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_runtime_files_path)
+                logger.info(f"Using AutoModel ({type(model).__name__}) and AutoProcessor")
 
+        except Exception as e:
+            logger.warning(f"Failed to load model from local disk: {e}. "
+                           + "Attempting to load from remote repo fallback")
+            # Fallback logic similar to above...
+            if self.resources.config["model_type"] == "chinese_clip":
+                from transformers import ChineseCLIPModel
+                model = ChineseCLIPModel.from_pretrained(model_remote_repo)
+                processor = ChineseCLIPProcessor.from_pretrained(model_runtime_files_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_remote_repo)
+                logger.info("Using ChineseCLIPModel and ChineseCLIPProcessor from remote repo")
+            else:
+                from transformers import CLIPModel
+                model = CLIPModel.from_pretrained(model_remote_repo)
+                processor = CLIPProcessor.from_pretrained(model_runtime_files_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_remote_repo)
+                logger.info("Using CLIPModel and CLIPProcessor from remote repo")
+
+        self._hf_model = model.eval().to(self._device)
+        self._hf_processor = processor
         self._hf_tokenizer = tokenizer
-        self._hf_text_model = text_model.eval().to(self._device)
-        self._hf_vision_model = vision_model.eval().to(self._device)
-        self._hf_image_processor = image_processor
+
+        logger.info(f"Model type: {type(model).__name__}")
+        logger.info(f"Processor type: {type(processor).__name__}")
+        logger.info(f"Tokenizer type: {type(tokenizer).__name__}")
+        logger.info(f"Model has text_embeds: {hasattr(model, 'text_embeds')}")
+        logger.info(f"Model has image_embeds: {hasattr(model, 'image_embeds')}")
+
+    def _get_text_features_from_auto_model(self, text: str) -> torch.Tensor:
+        """
+        Get text features from CLIP model using the correct methods.
+
+        ChineseCLIP models have get_text_features() method that handles everything correctly.
+        """
+        assert self._hf_model is not None
+        assert self._hf_tokenizer is not None
+
+        # Use tokenizer for text-only processing
+        if hasattr(self._hf_tokenizer, '__call__'):
+            inputs = self._hf_tokenizer(text, return_tensors="pt", padding=True)
+        else:
+            # Fallback to processor for tokenization
+            inputs = self._hf_processor(text=text, return_tensors="pt", padding=True)
+        inputs = {key: value.to(self._device) for key, value in inputs.items()}
+
+        # For ChineseCLIP models, get_text_features() has a bug where pooled_output is None
+        # Always use manual processing which works correctly
+        if hasattr(self._hf_model, 'text_model') and hasattr(self._hf_model, 'text_projection'):
+            # Manual processing (works reliably for ChineseCLIP)
+            outputs = self._hf_model.text_model(**inputs)
+
+            # Try to get pooler output, fallback to CLS token from last_hidden_state
+            pooled_output = getattr(outputs, 'pooler_output', None)
+            if pooled_output is None and hasattr(outputs, 'last_hidden_state'):
+                pooled_output = outputs.last_hidden_state[:, 0, :]
+
+            if pooled_output is None:
+                raise RuntimeError("Text model did not provide pooler output or CLS token.")
+
+            # Apply manual projection to match CLIP standard dimensions
+            features = self._hf_model.text_projection(pooled_output)
+        elif hasattr(self._hf_model, 'get_text_features'):
+            # Fallback to get_text_features for non-ChineseCLIP models
+            try:
+                features = self._hf_model.get_text_features(**inputs)
+
+            except Exception as e:
+                logger.error(f"get_text_features failed: {e}")
+                raise TorchBackendError(f"Cannot extract text features from model: {type(self._hf_model)}")
+        else:
+            raise TorchBackendError(f"Cannot extract text features from model: {type(self._hf_model)}")
+
+        return features
+
+    def _get_image_features_from_auto_model(self, image: Image.Image) -> torch.Tensor:
+        """
+        Get image features from CLIP model using the correct methods.
+
+        ChineseCLIP models have get_image_features() method that handles everything correctly.
+        """
+        assert self._hf_model is not None
+        assert self._hf_processor is not None
+
+        # Use processor to process image
+        inputs = self._hf_processor(images=image, return_tensors="pt", padding=True)
+        inputs = {key: value.to(self._device) for key, value in inputs.items()}
+
+        # Use the specific get_image_features method if available
+        if hasattr(self._hf_model, 'get_image_features'):
+            features = self._hf_model.get_image_features(**inputs)
+        else:
+            raise TorchBackendError(f"Cannot extract image features from model: {type(self._hf_model)}")
+
+        return features
 
     def _load_tokenizer_openclip(
         self, model_name: str
@@ -407,15 +459,9 @@ class TorchBackend(BaseClipBackend):
             if self.resources.source_format == "openclip":
                 assert self._openclip_tokenizer is not None
                 tokens = self._openclip_tokenizer([text]).to(self._device)
-                assert self._openclip_model.tokenizer is not None
                 features = self._openclip_model.encode_text(tokens)
             elif self.resources.source_format == "huggingface":
-                assert self._hf_text_model is not None
-                assert self._hf_tokenizer is not None
-                inputs = self._hf_tokenizer(text, truncation=True, padding=True, return_length=False,
-                                            return_overflowing_tokens=False, return_tensors="pt").to(self._device)
-                outputs = self._hf_text_model(**inputs)
-                features = outputs["pooler_output"]  # torch.Tensor
+                features = self._get_text_features_from_auto_model(text)
             else:
                 raise TorchModelLoadingError(
                     f"Unsupported source_format: {self.resources.source_format}"
@@ -471,16 +517,11 @@ class TorchBackend(BaseClipBackend):
                 image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
                 assert self._openclip_preprocess is not None
                 image_tensor = self._openclip_preprocess(image).unsqueeze(0).to(self._device)
-                assert self._openclip_model.tokenizer is not None
                 features = self._openclip_model.encode_image(image_tensor)
             elif self.resources.source_format == "huggingface":
-                if self._hf_image_processor or self._hf_vision_model is None:
-                    raise TorchBackendError("HuggingFace vision model not initialized")
-                assert self._hf_vision_model is not None
-                assert self._hf_image_processor is not None
-                inputs = self._hf_image_processor(images=[image_bytes], return_tensors="pt", padding=True).to(self._device)
-                outputs = self._hf_vision_model(**inputs)
-                features = outputs["pooler_output"]  # torch.Tensor
+                # Convert bytes to PIL Image before passing to AutoModel
+                image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                features = self._get_image_features_from_auto_model(image)
             else:
                 raise TorchModelLoadingError(
                     f"Unsupported source_format: {self.resources.source_format}"
@@ -529,7 +570,7 @@ class TorchBackend(BaseClipBackend):
             InferenceError: If encoding fails.
         """
         if not images:
-            return np.empty((0, self.get_info().text_embedding_dim), dtype=np.float32)
+            return np.empty((0, self.get_info().image_embedding_dim), dtype=np.float32)
 
         self._ensure_initialized()
 
@@ -539,22 +580,33 @@ class TorchBackend(BaseClipBackend):
             logger.debug("Image Batch To Vectors: Encoding images")
 
             if self.resources.source_format == "huggingface":
-                if self._hf_image_processor is None:
-                    raise TorchBackendError("HuggingFace processor not initialized")
-                inputs = self._hf_image_processor(
+                assert self._hf_model is not None
+                assert self._hf_processor is not None
+
+                # Process all images with AutoModel processor
+                inputs = self._hf_processor(
                     images=pil_images, return_tensors="pt", padding=True
                 ).to(self._device)
+
                 if self._use_amp:
                     with torch.autocast(
                         device_type=self._device.type, dtype=self._amp_dtype
                     ):
-                        assert self._hf_vision_model is not None
-                        outputs = self._hf_vision_model(**inputs)
-                        feats = outputs["pooler_output"]  # type: ignore
+                        outputs = self._hf_model(**inputs)
+                        if hasattr(outputs, 'image_embeds'):
+                            feats = outputs.image_embeds
+                        elif hasattr(outputs, 'pooler_output'):
+                            feats = outputs.pooler_output
+                        else:
+                            feats = outputs.last_hidden_state[:, 0]  # CLS token
                 else:
-                    assert self._hf_vision_model is not None
-                    outputs = self._hf_vision_model(**inputs)
-                    feats = outputs["pooler_output"]  # type: ignore
+                    outputs = self._hf_model(**inputs)
+                    if hasattr(outputs, 'image_embeds'):
+                        feats = outputs.image_embeds
+                    elif hasattr(outputs, 'pooler_output'):
+                        feats = outputs.pooler_output
+                    else:
+                        feats = outputs.last_hidden_state[:, 0]  # CLS token
             else:  # openclip
                 assert self._openclip_preprocess is not None
                 batch = torch.stack([self._openclip_preprocess(img) for img in pil_images]).to(
@@ -601,7 +653,7 @@ class TorchBackend(BaseClipBackend):
         """
         self._ensure_initialized()
         if not texts:
-            return np.empty((0, 0), dtype=np.float32)
+            return np.empty((0, self.get_info().text_embedding_dim), dtype=np.float32)
 
         try:
             # Validate inputs
@@ -612,21 +664,29 @@ class TorchBackend(BaseClipBackend):
                     raise InvalidInputError("text too long (max 10000 characters)")
 
             if self.resources.source_format == "huggingface":
-                if self._hf_tokenizer is None:
-                    raise TorchBackendError("HuggingFace processor not initialized")
-                inputs = self._hf_tokenizer(texts, return_tensors="pt", padding=True).to(self._device)
+                assert self._hf_model is not None
+                assert self._hf_tokenizer is not None
+
+                # Process all texts using get_text_features method
+                if hasattr(self._hf_tokenizer, '__call__'):
+                    inputs = self._hf_tokenizer(texts, return_tensors="pt", padding=True)
+                else:
+                    inputs = self._hf_processor(text=texts, return_tensors="pt", padding=True)
+                inputs = {key: value.to(self._device) for key, value in inputs.items()}
 
                 if self._use_amp:
                     with torch.autocast(
                             device_type=self._device.type, dtype=self._amp_dtype
                     ):
-                        assert self._hf_text_model is not None
-                        outputs = self._hf_text_model(**inputs)
-                        feats = outputs["pooler_output"]  # type: ignore
+                        if hasattr(self._hf_model, 'get_text_features'):
+                            feats = self._hf_model.get_text_features(**inputs)
+                        else:
+                            raise TorchBackendError(f"Model does not have get_text_features method")
                 else:
-                    assert self._hf_text_model is not None
-                    outputs = self._hf_text_model(**inputs)
-                    feats = outputs["pooler_output"]  # type: ignore
+                    if hasattr(self._hf_model, 'get_text_features'):
+                        feats = self._hf_model.get_text_features(**inputs)
+                    else:
+                        raise TorchBackendError(f"Model does not have get_text_features method")
             else:
                 # OpenCLIP path
                 assert self._openclip_tokenizer is not None
@@ -718,9 +778,7 @@ class TorchBackend(BaseClipBackend):
         return torch.device("cpu")
 
     def _ensure_initialized(self) -> None:
-        if (
-            self._initialized is None
-        ):
+        if not self._initialized:
             raise RuntimeError(
                 "TorchBackend is not initialized. Call initialize() first."
             )

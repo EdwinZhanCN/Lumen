@@ -246,9 +246,6 @@ class CLIPModelManager:
         Raises:
             RuntimeError: If model is not initialized or classification not supported
         """
-        # Temporarily enable debug logging for this method
-        logging.getLogger("lumen_clip.backends.onnxrt_backend").setLevel(logging.DEBUG)
-        logging.getLogger("lumen_clip.general_clip.clip_model").setLevel(logging.DEBUG)
 
         self._ensure_initialized()
 
@@ -277,8 +274,6 @@ class CLIPModelManager:
 
         img_embedding = img_embedding / img_norm  # Ensure unit norm
 
-        logger.debug(f"Image embedding norm after normalization: {np.linalg.norm(img_embedding)}")
-
         # Check text embeddings for invalid values
         if np.any(np.isnan(self.text_embeddings)) or np.any(np.isinf(self.text_embeddings)):
             logger.error(f"Invalid values in text embeddings: NaN={np.any(np.isnan(self.text_embeddings))}, Inf={np.any(np.isinf(self.text_embeddings))}")
@@ -298,20 +293,12 @@ class CLIPModelManager:
         # Compute cosine similarities
         similarities = np.dot(img_embedding, text_embeddings_norm.T)
 
-        logger.debug(f"Image embedding norm: {np.linalg.norm(img_embedding)}")
-        logger.debug(f"Text embeddings shape: {text_embeddings_norm.shape}")
-        logger.debug(f"Similarities stats: min={np.min(similarities):.4f}, max={np.max(similarities):.4f}, mean={np.mean(similarities):.4f}")
-        logger.debug(f"Any NaN in similarities: {np.any(np.isnan(similarities))}")
-
         # Convert to probabilities (softmax)
         similarities_scaled = similarities * 100.0  # Temperature scaling
         exp_sims = np.exp(
             similarities_scaled - np.max(similarities_scaled)
         )  # Numerical stability
         probabilities = exp_sims / np.sum(exp_sims)
-
-        logger.debug(f"Probabilities stats: min={np.min(probabilities):.4f}, max={np.max(probabilities):.4f}, sum={np.sum(probabilities):.4f}")
-        logger.debug(f"Any NaN in probabilities: {np.any(np.isnan(probabilities))}")
 
         # Get top-k results
         top_indices = np.argsort(probabilities)[::-1][:top_k]

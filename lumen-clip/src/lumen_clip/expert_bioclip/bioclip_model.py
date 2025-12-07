@@ -187,27 +187,30 @@ class BioCLIPModelManager:
         return self.backend.text_to_vector(prompt)
 
     @staticmethod
-    def extract_scientific_name(label_data: str | list[Any]) -> str:
+    def extract_name(label_data: str | list[Any]) -> str:
         """
-        Extract the scientific name from the complex TreeOfLife label structure.
+        Extract the preferred name from TreeOfLife label structure.
+        Format: [[... 'Genus', 'species'], 'Common Name']
+        FallBack:
+        - Common Name
+        - Scientific Name (Genus species)
+        - Full label as string
 
         Args:
-            label_data: The label data from TreeOfLife-10M
+            label_data: The label data from TreeOfLife
 
         Returns:
-            The scientific name as a string
+            Preferred name string
         """
         if (
-            isinstance(label_data, list)
-            and len(label_data) == 2
-            and isinstance(label_data[0], list)
+                isinstance(label_data, list)
+                and len(label_data) == 2
         ):
-            # Format: [['Animalia', ..., 'Genus', 'species'], 'Common Name']
-            taxonomy = label_data[0]
-            if len(taxonomy) >= 2:
-                # Scientific name is genus + species (last two elements)
+            taxonomy, common_name = label_data
+            if isinstance(common_name, str) and common_name.strip() and common_name != "":
+                return common_name
+            if isinstance(taxonomy, list) and len(taxonomy) >= 2:
                 return f"{taxonomy[-2]} {taxonomy[-1]}"
-        # Fallback to string representation if we can't extract properly
         return str(label_data)
 
     def classify_image(
@@ -237,32 +240,78 @@ class BioCLIPModelManager:
         if self.text_embeddings is None:
             raise RuntimeError("Text embeddings are not available")
 
-        # Get image embedding via backend
+        # Get image embedding via backend (already unit-normalized from backend)
         img_embedding = self.encode_image(image_bytes)
 
-        # Compute similarities using numpy (standard operations)
-        img_embedding = img_embedding / np.linalg.norm(
-            img_embedding
-        )  # Ensure unit norm
-        text_embeddings_norm = self.text_embeddings / np.linalg.norm(
-            self.text_embeddings, axis=1, keepdims=True
-        )
+        # Normalize text embeddings if not already normalized
+        # Check if text embeddings are unit-normalized
+        text_norms = np.linalg.norm(self.text_embeddings, axis=1, keepdims=True)
+        if not np.allclose(text_norms.flatten(), 1.0, atol=1e-6):
+            logger.info("Normalizing text embeddings to unit vectors")
+            text_embeddings_norm = self.text_embeddings / text_norms
+        else:
+            text_embeddings_norm = self.text_embeddings
 
-        # Compute cosine similarities
-        similarities = np.dot(img_embedding, text_embeddings_norm.T)
+        # Get temperature scaling from model if available (for better calibration)
+        temperature = 1.0
+        try:
+            # Try to get logit scale from OpenCLIP model (TorchBackend specific)
+            if hasattr(self.backend, '_openclip_model') and self.backend._openclip_model is not None:
+                raw_temp = self.backend._openclip_model.logit_scale.exp().item()
+                # Clamp temperature to reasonable range (CLIP models typically use 1-10)
+                temperature = max(0.1, min(10.0, raw_temp))
+                if raw_temp != temperature:
+                    logger.warning(f"Clamped model temperature from {raw_temp:.4f} to {temperature:.4f}")
+                else:
+                    logger.debug(f"Using model temperature: {temperature:.4f}")
+            elif hasattr(self.backend, '_hf_model') and hasattr(self.backend._hf_model, 'logit_scale'):
+                raw_temp = self.backend._hf_model.logit_scale.exp().item()
+                temperature = max(0.1, min(10.0, raw_temp))
+                if raw_temp != temperature:
+                    logger.warning(f"Clamped HF model temperature from {raw_temp:.4f} to {temperature:.4f}")
+                else:
+                    logger.debug(f"Using HF model temperature: {temperature:.4f}")
+        except Exception as e:
+            logger.debug(f"Could not get model temperature, using 1.0: {e}")
 
-        # Convert to probabilities (softmax)
-        exp_sims = np.exp(similarities - np.max(similarities))  # Numerical stability
-        probabilities = exp_sims / np.sum(exp_sims)
+        # Log embedding dimensions for debugging
+        logger.debug(f"Image embedding dim: {img_embedding.shape}")
+        logger.debug(f"Text embeddings shape: {text_embeddings_norm.shape}")
+        logger.debug(f"Image embedding norm: {np.linalg.norm(img_embedding):.6f}")
+        logger.debug(f"Text embeddings avg norm: {np.mean(np.linalg.norm(text_embeddings_norm, axis=1)):.6f}")
 
-        # Get top-k results
-        top_indices = np.argsort(probabilities)[::-1][:top_k]
+        # Auto-detect and fix text embedding axis order for robust compatibility
+        # Text embeddings should be (num_classes, embedding_dim)
+        if self.text_embeddings.shape[0] == len(self.labels) and self.text_embeddings.shape[1] == img_embedding.shape[0]:
+            # Correct orientation: (num_classes, embedding_dim)
+            text_embeddings_correct = self.text_embeddings
+        elif self.text_embeddings.shape[1] == len(self.labels) and self.text_embeddings.shape[0] == img_embedding.shape[0]:
+            # Wrong orientation: (embedding_dim, num_classes) - transpose it
+            logger.warning(f"Text embeddings have wrong axis order {self.text_embeddings.shape}, transposing to ({self.text_embeddings.shape[1]}, {self.text_embeddings.shape[0]})")
+            text_embeddings_correct = self.text_embeddings.T
+        else:
+            logger.error(f"Unexpected text embeddings shape: {self.text_embeddings.shape}, expected ({len(self.labels)}, {img_embedding.shape[0]})")
+            raise RuntimeError(f"Text embeddings shape incompatible: {self.text_embeddings.shape}")
+
+        # Use cosine similarities directly (no softmax for large datasets)
+        # Compute cosine similarities (already unit-normalized)
+        similarities = np.dot(img_embedding, text_embeddings_correct.T)
+
+        # Get top-k results using raw cosine similarities
+        top_indices = np.argsort(similarities)[::-1][:top_k]
 
         # Extract scientific names from the label data
         results = [
-            (self.extract_scientific_name(self.labels[idx]), float(probabilities[idx]))
+            (self.extract_name(self.labels[idx]), float(similarities[idx]))
             for idx in top_indices
         ]
+
+        # Log similarity statistics for debugging
+        logger.debug(f"Similarity stats - max: {np.max(similarities):.6f}, min: {np.min(similarities):.6f}")
+
+        # Log top confidence for debugging
+        if results:
+            logger.debug(f"Top result: {results[0][0]} with similarity {results[0][1]:.4f}")
 
         return results
 
@@ -281,7 +330,8 @@ class BioCLIPModelManager:
                 model_id=info.model_id,
                 model_name=info.model_name,
                 version=info.version,
-                embedding_dim=info.image_embedding_dim,
+                text_embedding_dim=self.text_embeddings,
+                image_embedding_dim=info.image_embedding_dim,
                 device=getattr(info, 'device', None),
                 precisions=getattr(info, 'precisions', None),
             )

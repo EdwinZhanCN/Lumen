@@ -17,7 +17,7 @@
             },
             "minItems": 4,
             "maxItems": 4,
-            "description": "Bounding box coordinates [x1, y1, x2, y2]"
+            "description": "Bounding box coordinates [x1, y1, x2, y2] where (x1, y1) is top-left corner and (x2, y2) is bottom-right corner"
           },
           "confidence": {
             "type": "number",
@@ -26,26 +26,22 @@
             "description": "Detection confidence score"
           },
           "landmarks": {
-            "anyOf": [
-              {"type": "null"},
-              {
-                "type": "array",
-                "items": {
-                  "type": "array",
-                  "items": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "minItems": 2,
-                  "maxItems": 2
-                }
-              }
-            ],
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
             "description": "Facial landmark points (optional)"
+          },
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Face embedding vector for recognition/comparison (optional)"
           }
         },
         "required": ["bbox", "confidence"],
-        "additionalProperties": true
+        "additionalProperties": false
       },
       "description": "Detected faces with bounding boxes and metadata"
     },
@@ -57,64 +53,9 @@
     "model_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 100,
       "description": "Model identifier"
-    },
-    "embeddings": {
-      "type": "array",
-      "items": {
-        "type": "array",
-        "items": {
-          "type": "number",
-          "minimum": -1.0,
-          "maximum": 1.0
-        },
-        "minItems": 1,
-        "maxItems": 2048,
-        "description": "Face embedding vector"
-      },
-      "description": "Face embeddings corresponding to detected faces (optional)"
-    },
-    "embedding_dim": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 2048,
-      "description": "Embedding dimension (required if embeddings provided)"
     }
   },
   "required": ["faces", "count", "model_id"],
-  "additionalProperties": true,
-  "examples": [
-    {
-      "faces": [
-        {
-          "bbox": [100, 50, 200, 150],
-          "confidence": 0.95,
-          "landmarks": [[120, 80], [180, 80], [150, 120]]
-        }
-      ],
-      "count": 1,
-      "model_id": "buffalo_l_onnx"
-    },
-    {
-      "faces": [
-        {
-          "bbox": [100, 50, 200, 150],
-          "confidence": 0.95,
-          "landmarks": [[120, 80], [180, 80], [150, 120]]
-        },
-        {
-          "bbox": [300, 100, 400, 200],
-          "confidence": 0.87
-        }
-      ],
-      "count": 2,
-      "model_id": "buffalo_l_onnx",
-      "embeddings": [
-        [0.1234, -0.5678, 0.9012],
-        [0.2345, -0.6789, 0.8901]
-      ],
-      "embedding_dim": 3
-    }
-  ]
+  "additionalProperties": false
 }

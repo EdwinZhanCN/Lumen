@@ -308,11 +308,30 @@ class ONNXRTBackend(BaseClipBackend):
 
     def _create_image_preprocessor(self) -> Callable[[Image.Image], np.ndarray]:
         """Create image preprocessing function based on model config and input dtype."""
-        # Get image size from config
-        image_size = self.resources.get_image_size() or (224, 224)
+        # Get image size from config first, then from model input shape
+        image_size = self.resources.get_image_size()
+        if image_size is None:
+            # Extract image size from vision model input shape
+            # Input shape is typically [batch, channels, height, width] or [batch, height, width, channels]
+            vision_input = self._sess_vision.get_inputs()[0]  # type: ignore
+            input_shape = vision_input.shape
+            # Find height and width dimensions (skip batch and channels)
+            spatial_dims = [dim for dim in input_shape if isinstance(dim, int) and dim > 3]
+            if len(spatial_dims) >= 2:
+                height, width = spatial_dims[-2], spatial_dims[-1]
+                image_size = (height, width)
+            else:
+                # Fallback if we can't determine shape
+                image_size = (224, 224)
+                logger.warning(f"Could not determine image size from input shape {input_shape}, using fallback {image_size}")
+
+        # Get normalization stats from resources
+        norm_stats = self.resources.get_normalization_stats()
         target_dtype = self._vision_input_dtype
 
-        # Standard CLIP preprocessing
+        logger.info(f"Using normalization stats - mean: {norm_stats['mean']}, std: {norm_stats['std']}")
+
+        # Configurable preprocessing
         def preprocess(image: Image.Image) -> np.ndarray:
             # Resize and center crop
             image = image.convert("RGB")
@@ -321,9 +340,9 @@ class ONNXRTBackend(BaseClipBackend):
             # Convert to numpy array with target dtype
             img_array = np.array(image).astype(np.float32) / 255.0
 
-            # Normalize with ImageNet stats
-            mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
-            std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32)
+            # Normalize with configured stats
+            mean = np.array(norm_stats['mean'], dtype=np.float32)
+            std = np.array(norm_stats['std'], dtype=np.float32)
 
             img_array = (img_array - mean) / std
 

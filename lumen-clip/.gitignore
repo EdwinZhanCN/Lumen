@@ -158,3 +158,6 @@ Desktop.ini
 # Face model cache
 face_cache/
 model_cache/
+
+examples/**/*.yaml
+!examples/**/*.example.yaml
