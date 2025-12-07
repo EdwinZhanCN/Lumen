@@ -45,11 +45,11 @@ jobs:
 
     test:
         runs-on: ubuntu-latest
-        env:
-            # Critical: Pretend to be version 0.2.0 so that pip install -e .
-            # registers the package as 0.2.0. This satisfies the "lumen-resources>=0.2.0"
-            # requirement in other packages, preventing pip from trying to download it from PyPI.
-            SETUPTOOLS_SCM_PRETEND_VERSION: "0.2.0"
+        # env:
+        # Critical: Pretend to be version 0.2.0 so that pip install -e .
+        # registers the package as 0.2.0. This satisfies the "lumen-resources>=0.2.0"
+        # requirement in other packages, preventing pip from trying to download it from PyPI.
+        # SETUPTOOLS_SCM_PRETEND_VERSION: "0.2.0"
         steps:
             - name: Checkout
               uses: actions/checkout@v4
