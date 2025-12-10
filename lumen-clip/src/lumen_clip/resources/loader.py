@@ -12,18 +12,16 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import lumen_resources
 import numpy as np
-from numpy.typing import NDArray
-from pydantic import ValidationError
 
 # Assuming these pydantic models are provided by the lumen_resources package
 from lumen_resources.lumen_config import ModelConfig
 from lumen_resources.model_info import Datasets, ModelInfo
-
-from typing import cast
+from numpy.typing import NDArray
+from pydantic import ValidationError
 
 from .exceptions import (
     ModelInfoError,
@@ -129,15 +127,12 @@ class ModelResources:
 
         # ImageNet-based models use different stats
         if any(x in model_name for x in ["imagenet", "resnet", "vgg", "efficientnet"]):
-            return {
-                "mean": [0.485, 0.456, 0.406],
-                "std": [0.229, 0.224, 0.225]
-            }
+            return {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
 
         # Default to OpenAI CLIP stats for most CLIP variants
         return {
             "mean": [0.48145466, 0.4578275, 0.40821073],
-            "std": [0.26862954, 0.26130258, 0.27577711]
+            "std": [0.26862954, 0.26130258, 0.27577711],
         }
 
 
@@ -352,11 +347,6 @@ class ResourceLoader:
 
         # 4. get the dataset file relative paths
         dataset_info: Datasets = model_info.datasets.get(dataset_name)
-        if not dataset_info:
-            logger.warning(
-                f"Dataset info for '{dataset_name}' is missing. Disabling classification."
-            )
-            return None, None
         labels_path = model_root_path / dataset_info.labels
         embeddings_path = model_root_path / dataset_info.embeddings
 
@@ -379,31 +369,6 @@ class ResourceLoader:
                 # FIX: Cast the result of np.load to the specific type we expect.
                 raw_embeddings = np.load(embeddings_path, mmap_mode="r")
                 embeddings = cast(NDArray[np.float32], raw_embeddings)
-
-            elif isinstance(dataset_info, str):
-                logger.warning(
-                    "Using legacy single-file dataset format. Memory mapping is not guaranteed."
-                )
-                dataset_path = model_root_path / dataset_info
-                if not dataset_path.exists():
-                    raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
-
-                data = np.load(dataset_path, allow_pickle=True)
-                if isinstance(data, np.lib.npyio.NpzFile):
-                    # FIX: Cast the arrays from the NpzFile.
-                    labels = cast(NDArray[np.object_], data["labels"])
-                    if "embeddings" in data.files:
-                        embeddings = cast(NDArray[np.float32], data["embeddings"])
-                    data.close()
-                else:
-                    data_dict = data.item()
-                    labels = np.array(data_dict["labels"], dtype=object)
-                    if "embeddings" in data_dict:
-                        embeddings = cast(NDArray[np.float32], data_dict["embeddings"])
-            else:
-                raise TypeError(
-                    f"Unsupported format for dataset info: {type(dataset_info)}"
-                )
 
             if labels is not None:
                 logger.info(f"Loaded dataset '{dataset_name}': {len(labels)} classes")

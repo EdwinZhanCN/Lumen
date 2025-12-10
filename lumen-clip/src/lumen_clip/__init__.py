@@ -38,3 +38,7 @@ License: Part of Lumilio ecosystem
 __version__ = "0.1.0"
 __author__ = "Lumilio Team"
 __email__ = "support@lumilio.org"
+
+from .server import main
+
+__all__ = ["main"]

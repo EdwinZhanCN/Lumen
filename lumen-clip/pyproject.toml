@@ -10,9 +10,8 @@ authors = [
 ]
 
 dependencies = [
-    "open-clip-torch",
     "tokenizers",
-    "timm",
+    "onnx",
     "pillow",
     "grpcio",
     "grpcio-tools",
@@ -36,9 +35,15 @@ Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 lumen-clip = "lumen_clip:main"
 
 [project.optional-dependencies]
-cpu = [
+
+torch = [
     "torch>=2.6.0",
     "torchvision>=0.21.0",
+    "open-clip-torch",
+    "timm",
+]
+
+cpu = [
     "onnxruntime>=1.16.0",
 ]
 
@@ -47,8 +52,6 @@ cpu = [
 # Cuda Version should be 12.6 fixed.
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://download.pytorch.org/whl/cu126
 cu126 = [
-    "torch",
-    "torchvision",
     "onnxruntime-gpu",
 ]
 
@@ -58,17 +61,13 @@ cu126 = [
 # Torch: Metal Performance Shaders (MPS) backend.
 # ONNX Runtime: CoreMLEP backend.
 mps = [
-    "torch>=2.6.0",
-    "torchvision>=0.21.0",
     "onnxruntime>=1.16.0",
 ]
 
 # Python Dependency For Intel OpenVINO Platform.
-# Python Version Should be 3.10 fixed.
+# Python Version Should be 3.11 fixed.
 # Torch is Not Officially Supported on OpenVINO, to use OpenVINO, please choose onnxruntime-openvino as backend.
 openvino253 = [
-    "torch>=2.6.0",
-    "torchvision>=0.21.0",
     "onnxruntime-openvino==1.21.0",
 ]
 
@@ -76,8 +75,6 @@ openvino253 = [
 # Cuda Version should be 12.6 fixed.
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
 jp61cu126 = [
-    "torch",
-    "torchvision",
     "onnxruntime-gpu",
 ]
 

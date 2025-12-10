@@ -200,9 +200,26 @@ class Downloader:
                 ]
             )
         elif runtime == Runtime.onnx:
-            patterns.extend(["*.onnx", "*.ort"])
+            patterns.extend(
+                [
+                    "*.onnx",
+                    "*.ort",
+                    "*vocab*",
+                    "*tokenizer*",
+                    "special_tokens_map.json",
+                    "preprocessor_config.json",
+                ]
+            )
         elif runtime == Runtime.rknn:
-            patterns.extend(["*.rknn"])
+            patterns.extend(
+                [
+                    "*.rknn",
+                    "*vocab*",
+                    "*tokenizer*",
+                    "special_tokens_map.json",
+                    "preprocessor_config.json",
+                ]
+            )
 
         return patterns
 

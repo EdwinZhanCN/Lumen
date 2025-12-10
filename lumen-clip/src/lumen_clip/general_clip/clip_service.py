@@ -16,18 +16,18 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
+import grpc
 from fontTools.misc.filesystem._errors import ResourceNotFound
+from google.protobuf import empty_pb2
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
-import grpc
-from google.protobuf import empty_pb2
-
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import TorchBackend, ONNXRTBackend
-from lumen_clip.resources.loader import ModelResources, ResourceLoader
+from lumen_clip.backends import ONNXRTBackend, TorchBackend
 from lumen_clip.registry import TaskRegistry
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
+
 from .clip_model import CLIPModelManager
 
 logger = logging.getLogger(__name__)
@@ -84,12 +84,23 @@ class GeneralCLIPService(rpc.InferenceServicer):
             resources = ResourceLoader.load_model_resources(cache_dir, model_config)
         except Exception as e:
             logger.error(f"Failed to load resources for General CLIP model: {e}")
-            raise ResourceNotFound(f"Failed to load resources for General CLIP model: {e}") from e
+            raise ResourceNotFound(
+                f"Failed to load resources for General CLIP model: {e}"
+            ) from e
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = backend_settings.device or "cpu"
-        max_batch_size = backend_settings.batch_size or "1"
+
+        # Handle optional backend_settings
+        device_pref = "cpu"
+        max_batch_size = 1
+        providers_list = None
+
+        if backend_settings:
+            device_pref = backend_settings.device or "cpu"
+            max_batch_size = backend_settings.batch_size or 1
+            providers_list = backend_settings.onnx_providers
+
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
@@ -97,7 +108,6 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 max_batch_size=max_batch_size,
             )
         elif runtime == "onnx":
-            providers_list = backend_settings.onnx_providers or ["CPUExecutionProvider"]
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
@@ -206,7 +216,9 @@ class GeneralCLIPService(rpc.InferenceServicer):
                     meta = dict(req.meta)
 
                     handler = self.registry.get_handler(req.task)
-                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
+                    result_bytes, result_mime, extra_meta = handler(
+                        payload, req.payload_mime, meta
+                    )
                 except ValueError as e:
                     # Task not found in registry
                     yield pb.InferResponse(

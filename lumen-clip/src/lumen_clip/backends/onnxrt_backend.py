@@ -120,6 +120,10 @@ class ONNXRTBackend(BaseClipBackend):
         self._vision_input_dtype: np.dtype = np.dtype(np.float32)
         self._text_input_dtype: np.dtype = np.dtype(np.int64)
 
+        # Batching capability flags
+        self._vision_batch_dynamic: bool = False
+        self._text_batch_dynamic: bool = False
+
     @override
     def initialize(self) -> None:
         """Load ONNX models and prepare preprocessing."""
@@ -144,8 +148,11 @@ class ONNXRTBackend(BaseClipBackend):
                 f"Loading vision encoder from {vision_path} ({vision_precision})"
             )
 
+            # Smart loading: Patch to static shape if using CoreML
+            vision_model_payload = self._load_and_patch_model(vision_path)
+
             self._sess_vision = ort.InferenceSession(
-                str(vision_path),
+                vision_model_payload,
                 sess_options,
                 providers=self._providers,
             )
@@ -155,12 +162,23 @@ class ONNXRTBackend(BaseClipBackend):
             vision_input = self._sess_vision.get_inputs()[0]
             self._vision_input_dtype = self._onnx_type_to_numpy(vision_input.type)
 
+            # Detect if vision model supports dynamic batching
+            v_shape = vision_input.shape
+            self._vision_batch_dynamic = len(v_shape) > 0 and not isinstance(
+                v_shape[0], int
+            )
+            if not self._vision_batch_dynamic:
+                logger.info(f"   Vision model has static batch size: {v_shape[0]}")
+
             # 2. Load text encoder with precision selection
             text_path, text_precision = self._select_model_file("text")
             logger.info(f"Loading text encoder from {text_path} ({text_precision})")
 
+            # Smart loading: Patch to static shape if using CoreML
+            text_model_payload = self._load_and_patch_model(text_path)
+
             self._sess_text = ort.InferenceSession(
-                str(text_path),
+                text_model_payload,
                 sess_options,
                 providers=self._providers,
             )
@@ -169,6 +187,22 @@ class ONNXRTBackend(BaseClipBackend):
             # Detect text input dtype
             text_input = self._sess_text.get_inputs()[0]
             self._text_input_dtype = self._onnx_type_to_numpy(text_input.type)
+
+            # Detect if text model supports dynamic batching
+            t_shape = text_input.shape
+            self._text_batch_dynamic = len(t_shape) > 0 and not isinstance(
+                t_shape[0], int
+            )
+            if not self._text_batch_dynamic:
+                logger.info(f"   Text model has static batch size: {t_shape[0]}")
+
+            # Detect context length from model input shape
+            self._context_length = 77  # Default CLIP context length
+            if len(text_input.shape) == 2 and isinstance(text_input.shape[1], int):
+                self._context_length = text_input.shape[1]
+                logger.info(
+                    f"Detected context length from ONNX model: {self._context_length}"
+                )
 
             # 3. Setup tokenizer
             # Cast to the declared callable signature to satisfy static type checkers.
@@ -262,37 +296,72 @@ class ONNXRTBackend(BaseClipBackend):
         return any(p in gpu_providers for p in providers)
 
     def _load_tokenizer(self) -> Callable[[Sequence[str]], np.ndarray]:
-        """Load tokenizer from tokenizer.json or fallback to SimpleTokenizer."""
+        """Load tokenizer from tokenizer.json, transformers, or fallback to SimpleTokenizer."""
+        context_length = getattr(self, "_context_length", 77)
+
+        # 1. Try loading from tokenizer.json using tokenizers library (fastest)
         if self.resources.tokenizer_config:
             try:
                 tokenizer_path = self.resources.model_root_path / "tokenizer.json"
                 hf_tokenizer = HFTokenizer.from_file(str(tokenizer_path))
 
-                logger.info("Using custom tokenizer from tokenizer.json")
+                logger.info(
+                    f"Using custom tokenizer from tokenizer.json (context_length={context_length})"
+                )
 
                 def tokenize_fn(texts: Sequence[str]) -> np.ndarray:
                     texts_list = list(texts)
                     encoded = hf_tokenizer.encode_batch(texts_list)
                     tokens = [enc.ids for enc in encoded]
-                    CLIP_MAX_LEN = 77
                     padded = [
-                        t[:CLIP_MAX_LEN] + [0] * max(0, CLIP_MAX_LEN - len(t))
+                        t[:context_length] + [0] * max(0, context_length - len(t))
                         for t in tokens
                     ]
+                    # Truncate if longer than context_length
+                    padded = [t[:context_length] for t in padded]
                     return np.array(padded, dtype=np.int64)
 
                 return tokenize_fn
 
             except ImportError:
                 logger.warning(
-                    "tokenizers library not available, falling back to SimpleTokenizer"
+                    "tokenizers library not available, falling back to transformers"
                 )
             except Exception as e:
                 logger.warning(
-                    f"Failed to load custom tokenizer: {e}, falling back to SimpleTokenizer"
+                    f"Failed to load custom tokenizer: {e}, falling back to transformers"
                 )
 
-        # Fallback to SimpleTokenizer
+        # 2. Try loading using transformers AutoTokenizer
+        try:
+            from transformers import AutoTokenizer
+
+            logger.info(
+                f"Attempting to load tokenizer via transformers.AutoTokenizer from {self.resources.model_root_path}"
+            )
+            # Use local_files_only to ensure we use the downloaded resources
+            transformers_tokenizer = AutoTokenizer.from_pretrained(
+                str(self.resources.model_root_path), local_files_only=True
+            )
+
+            def tokenize_fn_transformers(texts: Sequence[str]) -> np.ndarray:
+                res = transformers_tokenizer(
+                    list(texts),
+                    padding="max_length",
+                    truncation=True,
+                    max_length=context_length,
+                    return_tensors="np",
+                )
+                return res["input_ids"].astype(np.int64)
+
+            return tokenize_fn_transformers
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load tokenizer via transformers: {e}. Falling back to SimpleTokenizer."
+            )
+
+        # 3. Fallback to SimpleTokenizer (requires open_clip_torch)
         try:
             from open_clip.tokenizer import SimpleTokenizer
 
@@ -300,14 +369,16 @@ class ONNXRTBackend(BaseClipBackend):
 
             simple_tokenizer = SimpleTokenizer()
 
-            def tokenize_fn(texts: Sequence[str]) -> np.ndarray:
-                tokens = simple_tokenizer(list(texts))
+            def tokenize_fn_simple(texts: Sequence[str]) -> np.ndarray:
+                # SimpleTokenizer usually handles 77 context length internally
+                tokens = simple_tokenizer(list(texts), context_length=context_length)
                 return tokens.numpy().astype(np.int64)
 
-            return tokenize_fn
+            return tokenize_fn_simple
         except ImportError:
             raise ONNXRTModelLoadingError(
-                "Neither tokenizers nor open_clip is available for tokenization"
+                "Tokenization failed: 'tokenizer.json' not found/valid, 'transformers' failed, and 'open_clip' not installed. "
+                "Install with `pip install lumen-clip[cpu]` (or other extras) to include open-clip-torch."
             )
 
     def _create_image_preprocessor(self) -> Callable[[Image.Image], np.ndarray]:
@@ -455,8 +526,26 @@ class ONNXRTBackend(BaseClipBackend):
             input_name = self._sess_vision.get_inputs()[0].name
             output_name = self._sess_vision.get_outputs()[0].name
 
-            outputs = self._sess_vision.run([output_name], {input_name: batch})
-            embeddings = np.asarray(outputs[0]).astype(np.float32)
+            # Handle static batch size model (e.g. exported for CoreML/NPU)
+            # If model is static (batch=1) but we have N images, we must loop.
+            if not self._vision_batch_dynamic and batch.shape[0] > 1:
+                # Fallback to sequential execution for static models
+                embeddings_list = []
+                for i in range(batch.shape[0]):
+                    # Slice to keep dims: (1, C, H, W)
+                    single_input = batch[i : i + 1]
+                    out = self._sess_vision.run(
+                        [output_name], {input_name: single_input}
+                    )
+                    embeddings_list.append(out[0])
+
+                # Stack results: (N, D)
+                raw_embeddings = np.concatenate(embeddings_list, axis=0)
+                embeddings = np.asarray(raw_embeddings).astype(np.float32)
+            else:
+                # Standard batched execution
+                outputs = self._sess_vision.run([output_name], {input_name: batch})
+                embeddings = np.asarray(outputs[0]).astype(np.float32)
 
             # Normalize each vector
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -490,8 +579,19 @@ class ONNXRTBackend(BaseClipBackend):
             input_name = self._sess_text.get_inputs()[0].name
             output_name = self._sess_text.get_outputs()[0].name
 
-            outputs = self._sess_text.run([output_name], {input_name: tokens})
-            embeddings = np.asarray(outputs[0]).astype(np.float32)
+            # Handle static batch size model
+            if not self._text_batch_dynamic and tokens.shape[0] > 1:
+                embeddings_list = []
+                for i in range(tokens.shape[0]):
+                    single_input = tokens[i : i + 1]
+                    out = self._sess_text.run([output_name], {input_name: single_input})
+                    embeddings_list.append(out[0])
+
+                raw_embeddings = np.concatenate(embeddings_list, axis=0)
+                embeddings = np.asarray(raw_embeddings).astype(np.float32)
+            else:
+                outputs = self._sess_text.run([output_name], {input_name: tokens})
+                embeddings = np.asarray(outputs[0]).astype(np.float32)
 
             # Normalize each vector
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -561,20 +661,19 @@ class ONNXRTBackend(BaseClipBackend):
             "CPUExecutionProvider",
         ]
 
-        selected = [p for p in priority if p in available]
+        selected = [prov for prov in priority if prov in available]
 
-        # If device_pref specified, prioritize it if available
-        if device_pref:
-            pref_provider = {
-                "cuda": "CUDAExecutionProvider",
-                "coreml": "CoreMLExecutionProvider",
-                "directml": "DmlExecutionProvider",
-                "openvino": "OpenVINOExecutionProvider",
-            }.get(device_pref.lower())
-            if pref_provider and pref_provider in available:
-                selected.insert(0, selected.pop(selected.index(pref_provider)))
+        pref_map = {
+            "cuda": "CUDAExecutionProvider",
+            "coreml": "CoreMLExecutionProvider",
+            "directml": "DmlExecutionProvider",
+            "openvino": "OpenVINOExecutionProvider",
+        }
+        desired = pref_map.get((device_pref or "").lower())
+        if desired and desired in selected:
+            selected.insert(0, selected.pop(selected.index(desired)))
 
-        return selected if selected else ["CPUExecutionProvider"]
+        return selected or ["CPUExecutionProvider"]
 
     @staticmethod
     def _infer_device_from_providers(providers: list[str]) -> str:
@@ -591,6 +690,54 @@ class ONNXRTBackend(BaseClipBackend):
             return "openvino"
 
         return "cpu"
+
+    def _load_and_patch_model(self, model_path: Path) -> str | bytes:
+        """
+        Load model, optionally patching dynamic shapes to static for CoreML.
+        Returns either a file path (str) or model bytes.
+        """
+        # Only patch if using CoreML
+        if "CoreMLExecutionProvider" not in self._providers:
+            return str(model_path)
+
+        try:
+            import onnx
+        except ImportError:
+            logger.warning(
+                "CoreMLExecutionProvider detected but 'onnx' library not found. "
+                "Cannot patch dynamic shapes to static. Install 'onnx' for better CoreML support."
+            )
+            return str(model_path)
+
+        try:
+            logger.info(
+                f"Patching model {model_path.name} to static batch=1 for CoreML..."
+            )
+            model = onnx.load(model_path)
+
+            # Iterate over all inputs and fix dynamic batch dim (index 0) to 1
+            patched = False
+            for input_tensor in model.graph.input:
+                dims = input_tensor.type.tensor_type.shape.dim
+                if len(dims) > 0:
+                    # Check if dim 0 is dynamic (has param string or value <= 0)
+                    dim0 = dims[0]
+                    if dim0.dim_param or dim0.dim_value <= 0:
+                        dim0.dim_value = 1
+                        if dim0.HasField("dim_param"):
+                            dim0.ClearField("dim_param")
+                        patched = True
+
+            if patched:
+                return model.SerializeToString()
+            else:
+                return str(model_path)
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to patch model for CoreML: {e}. Fallback to file path."
+            )
+            return str(model_path)
 
     def _ensure_initialized(self) -> None:
         """Ensure backend is initialized before inference."""

@@ -116,6 +116,11 @@ jobs:
                         --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
                       ```
 
+                      **PyTorch:**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[torch]"
+                      ```
+
                       *Note: Replace `lumen_clip` with `lumen_face` or `lumen_ocr` as needed.*
                   draft: false
                   prerelease: false

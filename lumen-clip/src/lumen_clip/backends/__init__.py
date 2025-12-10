@@ -10,10 +10,14 @@ Exports:
 - RKNNBackend: RKNN backend shim (Linux-only optional; provided via separate module)
 """
 
-from .base import BaseClipBackend, BackendInfo, RuntimeKind
-from .torch_backend import TorchBackend
+from .base import BackendInfo, BaseClipBackend, RuntimeKind
 from .onnxrt_backend import ONNXRTBackend
 from .rknn_backend import RKNNBackend
+
+try:
+    from .torch_backend import TorchBackend
+except ImportError:
+    TorchBackend = None
 
 __all__ = [
     "BaseClipBackend",
