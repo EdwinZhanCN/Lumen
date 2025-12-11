@@ -1,0 +1,33 @@
+# Lumen Services Configuration - Single Service Mode
+# yaml-language-server: $schema=https://doc.lumilio.org/schema/config-schema.yaml
+
+metadata:
+    version: "1.0.0"
+    region: "cn" # "cn" for ModelScope, "other" for HuggingFace
+    cache_dir: "~/.lumen" # ~/.lumen by default
+
+deployment:
+    mode: "single"
+    service: "ocr"
+
+server:
+    port: 50051
+    host: "0.0.0.0"
+    mdns:
+        enabled: true
+        service_name: "lumen-ocr"
+
+services:
+    face:
+        enabled: true
+        package: lumen_ocr
+        import:
+            registry_class: "lumen_ocr.general_ocr.GeneralOcrService"
+            add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        backend_settings:
+            device: null # auto-detect
+            batch_size: 8
+        models:
+            general:
+                model: "PP-OCRv5" # PP-OCRv5
+                runtime: onnx

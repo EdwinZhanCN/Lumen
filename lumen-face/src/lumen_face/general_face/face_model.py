@@ -15,13 +15,12 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from lumen_face.resources.loader import ModelResources
-
 from ..backends.backend_exceptions import (
     InferenceError,
     InvalidInputError,
 )
 from ..backends.base import FaceDetection, FaceRecognitionBackend
+from ..resources.loader import ModelResources
 
 logger = logging.getLogger(__name__)
 

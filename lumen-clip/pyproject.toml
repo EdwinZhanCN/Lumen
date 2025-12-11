@@ -24,7 +24,7 @@ dependencies = [
     "colorlog",
     "zeroconf",
     "transformers",
-    "lumen-resources>=0.2.0"
+    "lumen-resources>=0.3.0"
 ]
 
 [project.urls]
@@ -32,7 +32,7 @@ Homepage = "https://github.com/EdwinZhanCN/Lumen"
 Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.scripts]
-lumen-clip = "lumen_clip:main"
+lumen-clip = "lumen_clip.cli:main"
 
 [project.optional-dependencies]
 

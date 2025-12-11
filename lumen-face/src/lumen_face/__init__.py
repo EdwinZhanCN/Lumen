@@ -13,10 +13,17 @@ Features:
 - mDNS general_face discovery
 """
 
-__version__ = "0.1.0"
-__author__ = "Lumilio Team"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("lumen-face")
+except PackageNotFoundError:
+    # package is not installed
+    __version__ = "0.0.0"
+
+__author__ = "Edwin Zhan"
 __email__ = "support@lumilio.org"
 
-from .server import main
+from .cli import main
 
 __all__ = ["main"]
