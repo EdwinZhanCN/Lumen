@@ -17,22 +17,22 @@ infrastructure integration.
 import json
 import logging
 import time
-from pathlib import Path
 from collections.abc import Iterable
-from typing_extensions import override
+from pathlib import Path
 
 import grpc
 from google.protobuf import empty_pb2
+from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from typing_extensions import override
 
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, TorchBackend, ONNXRTBackend
-from lumen_clip.resources.loader import ModelResources, ResourceLoader
+from lumen_clip.backends import BaseClipBackend, ONNXRTBackend, TorchBackend
 from lumen_clip.registry import TaskRegistry
-from .bioclip_model import BioCLIPModelManager
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
 from ..resources import ResourceNotFoundError
+from .bioclip_model import BioCLIPModelManager
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +110,17 @@ class BioCLIPService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = backend_settings.device or "cpu"
-        max_batch_size = backend_settings.batch_size or 1
+
+        # Handle optional backend_settings
+        device_pref = "cpu"
+        max_batch_size = 1
+        providers_list = None
+
+        if backend_settings:
+            device_pref = backend_settings.device or "cpu"
+            max_batch_size = backend_settings.batch_size or 1
+            providers_list = backend_settings.onnx_providers
+
         if runtime == "torch":
             backend = TorchBackend(
                 resources=resources,
@@ -119,7 +128,6 @@ class BioCLIPService(rpc.InferenceServicer):
                 max_batch_size=max_batch_size,
             )
         elif runtime == "onnx":
-            providers_list = backend_settings.onnx_providers or ["CPUExecutionProvider"]
             backend = ONNXRTBackend(
                 resources=resources,
                 providers=providers_list,
@@ -174,9 +182,10 @@ class BioCLIPService(rpc.InferenceServicer):
                 metadata={},
             )
         else:
-            logger.info("BioCLIP classification task not registered (no dataset available)")
+            logger.info(
+                "BioCLIP classification task not registered (no dataset available)"
+            )
 
-    
     # -------- lifecycle ----------
     def initialize(self) -> None:
         logger.info("Initializing BioCLIP model...")
@@ -218,7 +227,9 @@ class BioCLIPService(rpc.InferenceServicer):
                     meta = dict(req.meta)
 
                     handler = self.registry.get_handler(req.task)
-                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
+                    result_bytes, result_mime, extra_meta = handler(
+                        payload, req.payload_mime, meta
+                    )
                 except ValueError as e:
                     # Task not found in registry
                     yield pb.InferResponse(

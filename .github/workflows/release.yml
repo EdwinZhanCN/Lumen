@@ -2,12 +2,16 @@ name: Release Packages
 
 on:
     push:
-        branches: [dev] # 只在 dev 分支触发自动发布
-        tags: ["v*"] # tag 触发正式发布
+        tags: ["v*"] # Only trigger on version tags
 
 jobs:
-    build-and-release:
+    pypi-publish:
+        name: Build and Publish
         runs-on: ubuntu-latest
+        permissions:
+            contents: write # For creating GitHub Release
+            id-token: write # For PyPI trusted publishing (optional)
+
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -20,53 +24,44 @@ jobs:
                   python-version: "3.10"
 
             - name: Install build tools
-              run: pip install build setuptools_scm
+              run: pip install build twine setuptools_scm
 
-            - name: Get version from root
+            - name: Get version
               id: get_version
               run: |
-                  # Get version from project root
-                  python -c "
-                  import setuptools_scm
-                  try:
-                      version = setuptools_scm.get_version()
-                      print(f'Version found: {version}')
-                      with open('version.txt', 'w') as f:
-                          f.write(version)
-                  except Exception as e:
-                      print(f'Error getting version: {e}')
-                      with open('version.txt', 'w') as f:
-                          f.write('0.0.0')
-                  "
+                  # Get version from tag (e.g., v0.2.0 -> 0.2.0)
+                  VERSION=${GITHUB_REF#refs/tags/v}
+                  echo "Version determined from tag: $VERSION"
+                  echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-                  # Show the version and set environment variable
-                  if [ -f version.txt ]; then
-                    VERSION=$(cat version.txt)
-                    echo "Version determined: $VERSION"
-                    echo "VERSION=$VERSION" >> $GITHUB_ENV
-                    echo "version=$VERSION" >> $GITHUB_OUTPUT
-                  else
-                    echo "Failed to determine version"
-                    echo "VERSION=0.0.0" >> $GITHUB_ENV
-                    echo "version=0.0.0" >> $GITHUB_OUTPUT
-                  fi
-
-            - name: Build all packages
+            # 1. Build and Publish lumen-resources to PyPI
+            - name: Build and Publish lumen-resources
+              env:
+                  TWINE_USERNAME: __token__
+                  TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.VERSION }}
               run: |
-                  for pkg in lumen-clip lumen-resources lumen-face lumen-ocr; do
-                    echo "Building $pkg with version $VERSION..."
+                  echo "📦 Building and Publishing lumen-resources..."
+                  cd lumen-resources
+                  python -m build --outdir ../dist
+                  twine upload ../dist/lumen_resources-*.whl ../dist/lumen_resources-*.tar.gz
+                  cd ..
+
+            # 2. Build other packages (lumen-clip, etc.) ONLY for GitHub Release
+            # We do NOT upload these to PyPI, but we build wheels so users can download them from GitHub.
+            - name: Build other packages
+              env:
+                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.VERSION }}
+              run: |
+                  for pkg in lumen-clip lumen-face lumen-ocr; do
+                    echo "📦 Building $pkg (GitHub Release only)..."
                     cd $pkg
-                    export SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
                     python -m build --outdir ../dist
                     cd ..
                   done
 
-            - name: List built files
-              run: ls -la dist/
-
-            # 正式发布 - 使用更现代的 action
-            - name: Create Release for Tag
-              if: startsWith(github.ref, 'refs/tags/')
+            # 3. Create GitHub Release with ALL artifacts
+            - name: Create GitHub Release
               uses: softprops/action-gh-release@v1
               with:
                   tag_name: ${{ github.ref_name }}
@@ -75,42 +70,60 @@ jobs:
                       ## Release Notes
                       Automated release created from tag ${{ github.ref_name }}
 
-                      **Packages included:**
-                      - lumen-clip
-                      - lumen-resources
-                      - lumen-face
-                      - lumen-ocr
+                      **Published to PyPI:**
+                      - `lumen-resources`
+
+                      **Attached Binaries (Manual Install):**
+                      - `lumen-clip`
+                      - `lumen-face`
+                      - `lumen-ocr`
+
+                      ### Installation Guide
+
+                      #### 1. Base Library
+                      The core resource manager is available on PyPI:
+                      ```bash
+                      pip install lumen-resources==${{ env.VERSION }}
+                      ```
+
+                      #### 2. Service Installation (from .whl)
+                      Download the `.whl` file for the service you need (e.g., `lumen_clip`) from the assets below.
+
+                      **Standard (CPU):**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cpu]"
+                      ```
+
+                      **NVIDIA GPU (CUDA 12.6):**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cu126]" \
+                        --extra-index-url https://download.pytorch.org/whl/cu126
+                      ```
+
+                      **Apple Silicon (Mac M1/M2/M3):**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[mps]"
+                      ```
+
+                      **Intel OpenVINO:**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[openvino253]"
+                      ```
+
+                      **NVIDIA Jetson (JetPack 6):**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[jp61cu126]" \
+                        --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+                      ```
+
+                      **PyTorch:**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[torch]"
+                      ```
+
+                      *Note: Replace `lumen_clip` with `lumen_face` or `lumen_ocr` as needed.*
                   draft: false
                   prerelease: false
                   files: |
                       dist/*.whl
                       dist/*.tar.gz
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-            # 开发版发布
-            - name: Create Dev Release
-              if: github.ref == 'refs/heads/dev'
-              uses: softprops/action-gh-release@v1
-              with:
-                  tag_name: v${{ env.VERSION }}-dev
-                  name: Dev Release ${{ env.VERSION }}
-                  body: |
-                      ## Development Release
-                      Automated development release from dev branch
-
-                      **Version:** ${{ env.VERSION }}
-                      **Commit:** ${{ github.sha }}
-
-                      **Packages included:**
-                      - lumen-clip
-                      - lumen-resources
-                      - lumen-face
-                      - lumen-ocr
-                  draft: false
-                  prerelease: true
-                  files: |
-                      dist/*.whl
-                      dist/*.tar.gz
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

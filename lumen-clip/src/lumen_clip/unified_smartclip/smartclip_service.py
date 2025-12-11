@@ -16,19 +16,18 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
+import grpc
+from google.protobuf import empty_pb2
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
-import grpc
-from google.protobuf import empty_pb2
-
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, TorchBackend, ONNXRTBackend
-from lumen_clip.resources.loader import ModelResources, ResourceLoader
-from lumen_clip.registry import TaskRegistry
-from lumen_clip.general_clip.clip_model import CLIPModelManager
+from lumen_clip.backends import BaseClipBackend, ONNXRTBackend, TorchBackend
 from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
+from lumen_clip.general_clip.clip_model import CLIPModelManager
+from lumen_clip.registry import TaskRegistry
+from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ class SmartCLIPService(rpc.InferenceServicer):
         clip_backend: BaseClipBackend,
         clip_resources: ModelResources,
         bioclip_backend: BaseClipBackend,
-        bioclip_resources: ModelResources
+        bioclip_resources: ModelResources,
     ) -> None:
         """
         Initialize SmartCLIPService with both CLIP and BioCLIP models.
@@ -60,8 +59,12 @@ class SmartCLIPService(rpc.InferenceServicer):
             bioclip_backend: Backend instance for BioCLIP model
             bioclip_resources: ModelResources for BioCLIP model
         """
-        self.clip_model = CLIPModelManager(backend=clip_backend, resources=clip_resources)
-        self.bioclip_model = BioCLIPModelManager(backend=bioclip_backend, resources=bioclip_resources)
+        self.clip_model = CLIPModelManager(
+            backend=clip_backend, resources=clip_resources
+        )
+        self.bioclip_model = BioCLIPModelManager(
+            backend=bioclip_backend, resources=bioclip_resources
+        )
         self.is_initialized = False
         self.registry = TaskRegistry()
         self._setup_registry()
@@ -94,11 +97,19 @@ class SmartCLIPService(rpc.InferenceServicer):
 
         # Load BioCLIP resources
         logger.info(f"Loading resources for BioCLIP model: {bioclip_config.model}")
-        bioclip_resources = ResourceLoader.load_model_resources(cache_dir, bioclip_config)
+        bioclip_resources = ResourceLoader.load_model_resources(
+            cache_dir, bioclip_config
+        )
 
-        # Create backends
-        device_pref = getattr(backend_settings, "device", "cpu")
-        max_batch_size = getattr(backend_settings, "batch_size", 8)
+        # Handle optional backend_settings
+        device_pref = "cpu"
+        max_batch_size = 1
+        providers_list = None
+
+        if backend_settings:
+            device_pref = backend_settings.device or "cpu"
+            max_batch_size = backend_settings.batch_size or 8
+            providers_list = backend_settings.onnx_providers
 
         # CLIP backend
         clip_runtime = clip_config.runtime.value
@@ -109,7 +120,6 @@ class SmartCLIPService(rpc.InferenceServicer):
                 max_batch_size=max_batch_size,
             )
         elif clip_runtime == "onnx":
-            providers_list = getattr(backend_settings, "onnx_providers", ["CPUExecutionProvider"])
             clip_backend = ONNXRTBackend(
                 resources=clip_resources,
                 providers=providers_list,
@@ -128,7 +138,6 @@ class SmartCLIPService(rpc.InferenceServicer):
                 max_batch_size=max_batch_size,
             )
         elif bioclip_runtime == "onnx":
-            providers_list = getattr(backend_settings, "onnx_providers", ["CPUExecutionProvider"])
             bioclip_backend = ONNXRTBackend(
                 resources=bioclip_resources,
                 providers=providers_list,
@@ -252,7 +261,9 @@ class SmartCLIPService(rpc.InferenceServicer):
                 try:
                     meta = dict(req.meta)
                     handler = self.registry.get_handler(req.task)
-                    result_bytes, result_mime, extra_meta = handler(payload, req.payload_mime, meta)
+                    result_bytes, result_mime, extra_meta = handler(
+                        payload, req.payload_mime, meta
+                    )
                 except ValueError as e:
                     yield pb.InferResponse(
                         correlation_id=cid,
@@ -277,7 +288,9 @@ class SmartCLIPService(rpc.InferenceServicer):
                 )
 
             except Exception as e:
-                logger.exception("Error during inference for task '%s': %s", req.task, e)
+                logger.exception(
+                    "Error during inference for task '%s': %s", req.task, e
+                )
                 yield pb.InferResponse(
                     correlation_id=cid,
                     is_final=True,
@@ -328,7 +341,9 @@ class SmartCLIPService(rpc.InferenceServicer):
     ) -> Tuple[bytes, str, Dict[str, str]]:
         """Handles image embedding with intelligent model selection."""
         if not payload_mime.startswith("image/"):
-            raise ValueError(f"image_embed expects image/* payload, got {payload_mime!r}")
+            raise ValueError(
+                f"image_embed expects image/* payload, got {payload_mime!r}"
+            )
 
         # Use CLIP for general image embedding
         vec = self.clip_model.encode_image(payload).tolist()
@@ -402,7 +417,9 @@ class SmartCLIPService(rpc.InferenceServicer):
 
         namespace = meta.get("namespace", "bioatlas")
         if namespace != "bioatlas":
-            raise ValueError(f"unsupported namespace {namespace!r}, expected 'bioatlas'")
+            raise ValueError(
+                f"unsupported namespace {namespace!r}, expected 'bioatlas'"
+            )
 
         topk = int(meta.get("topk", "5"))
         pairs = self.bioclip_model.classify_image(payload, top_k=topk)
@@ -457,7 +474,8 @@ class SmartCLIPService(rpc.InferenceServicer):
             "clip_embedding_dim": str(clip_info.embedding_dim),
             "bioclip_embedding_dim": str(bioclip_info.embedding_dim),
             "supports_classification": str(
-                clip_info.supports_classification or bioclip_info.supports_classification
+                clip_info.supports_classification
+                or bioclip_info.supports_classification
             ),
         }
 

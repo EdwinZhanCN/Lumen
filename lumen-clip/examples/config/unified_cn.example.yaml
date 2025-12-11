@@ -4,7 +4,7 @@
 metadata:
     version: "1.0.0"
     region: "cn" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "~/.lumen" # ~/.lumen by default
+    cache_dir: "/Volumes/CodeBase/Lumen-Resources" # ~/.lumen by default
 
 deployment:
     mode: "single"
