@@ -9,7 +9,6 @@
         "version",
         "description",
         "model_type",
-        "embedding_dim",
         "source",
         "runtimes"
     ],
@@ -134,6 +133,11 @@
                 }
             },
             "additionalProperties": false
+        },
+        "extra_metadata": {
+            "type": "object",
+            "description": "Additional model-specific configuration and metadata",
+            "additionalProperties": true
         },
         "metadata": {
             "type": "object",

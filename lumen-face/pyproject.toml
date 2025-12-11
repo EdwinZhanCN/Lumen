@@ -63,7 +63,7 @@ rknn = [
 ]
 
 [project.scripts]
-lumen-face = "lumen_face:main"
+lumen-face = "lumen_face.cli:main"
 
 [build-system]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]

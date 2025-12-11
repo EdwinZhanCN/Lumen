@@ -183,6 +183,7 @@ class Downloader:
         patterns = [
             "model_info.json",
             "*config*",
+            "*.txt",
         ]  # Always include model_info.json and config files.
 
         if runtime == Runtime.torch:

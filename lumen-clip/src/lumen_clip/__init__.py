@@ -35,6 +35,17 @@ Configuration:
 License: Part of Lumilio ecosystem
 """
 
-__version__ = "0.1.0"
-__author__ = "Lumilio Team"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("lumen-clip")
+except PackageNotFoundError:
+    # package is not installed
+    __version__ = "0.0.0"
+
+__author__ = "Edwin Zhan"
 __email__ = "support@lumilio.org"
+
+from .cli import main
+
+__all__ = ["main"]

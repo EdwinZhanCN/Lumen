@@ -38,25 +38,20 @@ The package follows a layered architecture:
 - CLI layer: User-friendly command-line interface
 """
 
-from .lumen_config import LumenConfig, Runtime, Region
 from .downloader import Downloader, DownloadResult
 from .exceptions import (
-    ResourceError,
     ConfigError,
     DownloadError,
-    PlatformUnavailableError,
-    ValidationError,
     ModelInfoError,
+    PlatformUnavailableError,
+    ResourceError,
+    ValidationError,
 )
+from .lumen_config import LumenConfig, Region, Runtime
 from .lumen_config_validator import load_and_validate_config
-
-from .model_info import ModelInfo, Source, Runtimes, Metadata
+from .model_info import Metadata, ModelInfo, Runtimes, Source
 from .model_info_validator import load_and_validate_model_info
-from .result_schemas import (
-    EmbeddingV1,
-    FaceV1,
-    LabelsV1
-)
+from .result_schemas import OCRV1, EmbeddingV1, FaceV1, LabelsV1
 
 __version__ = "0.1.0"
 
@@ -76,6 +71,7 @@ __all__ = [
     "FaceV1",
     "EmbeddingV1",
     "LabelsV1",
+    "OCRV1",
     # Downloader
     "Downloader",
     "DownloadResult",

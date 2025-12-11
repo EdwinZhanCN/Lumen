@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OCRV1",
+  "description": "Universal schema for OCR text detection and recognition responses across Lumen services",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "box": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Point coordinates [x, y]"
+            },
+            "minItems": 3,
+            "description": "Polygon coordinates defining the text region (usually 4 points for rotated rectangle: TL, TR, BR, BL)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Recognized text content"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Recognition confidence score"
+          }
+        },
+        "required": ["box", "text", "confidence"],
+        "additionalProperties": false
+      },
+      "description": "Detected text regions with content and metadata"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of detected text regions"
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Model identifier (combined detection and recognition models)"
+    }
+  },
+  "required": ["items", "count", "model_id"],
+  "additionalProperties": false
+}
