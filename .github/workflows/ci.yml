@@ -25,9 +25,9 @@ jobs:
 
             - name: Build all packages
               run: |
-                  # Force version to 0.2.0 to satisfy local dependency constraints (>=0.2.0)
+                  # Force version to 0.3.0 to satisfy local dependency constraints (>=0.3.0)
                   # This ensures that when we build/install, the version matches what pyproject.toml expects
-                  export SETUPTOOLS_SCM_PRETEND_VERSION="0.2.0"
+                  export SETUPTOOLS_SCM_PRETEND_VERSION="0.3.0"
                   echo "Building packages with version: $SETUPTOOLS_SCM_PRETEND_VERSION"
 
                   # Build lumen-resources first, then others
@@ -46,10 +46,10 @@ jobs:
     test:
         runs-on: ubuntu-latest
         env:
-            # Critical: Pretend to be version 0.2.0 so that pip install -e .
-            # registers the package as 0.2.0. This satisfies the "lumen-resources>=0.2.0"
+            # Critical: Pretend to be version 0.3.0 so that pip install -e .
+            # registers the package as 0.3.0. This satisfies the "lumen-resources>=0.3.0"
             # requirement in other packages, preventing pip from trying to download it from PyPI.
-            SETUPTOOLS_SCM_PRETEND_VERSION: "0.2.0"
+            SETUPTOOLS_SCM_PRETEND_VERSION: "0.3.0"
         steps:
             - name: Checkout
               uses: actions/checkout@v4
