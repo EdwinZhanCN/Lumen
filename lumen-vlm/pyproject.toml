@@ -1,17 +1,108 @@
 [project]
 name = "lumen-vlm"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "VLM Inference Server For Lumen Ecosystem"
 readme = "README.md"
-authors = [
-    { name = "EdwinZhan", email = "ed_zhan@outlook.com" }
-]
 requires-python = ">=3.10"
-dependencies = []
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
+dependencies = [
+    "jinja2>=3.1.6",
+    "lumen-resources>=0.3.1",
+    "numpy>=2.2.6",
+    "tokenizers>=0.22.1",
+    "colorlog>=6.7.0",
+    "grpcio>=1.59.0",
+    "protobuf>=4.25.0",
+    "zeroconf>=0.131.0",
+    "pillow>=12.0.0",
+]
+
+
+[project.optional-dependencies]
+cpu = [
+    "onnxruntime>=1.16.0",
+]
+
+
+# Python Dependency For Nvidia GPU Platform
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://download.pytorch.org/whl/cu126
+cu126 = [
+    "onnxruntime-gpu",
+]
+
+# Python Dependency For Apple Sillicon (M Series) Platform.
+# Python Version Should be above 3.10.
+# All dependencies will be installed from PyPI. All backends are officially supported on M Series.
+# ONNX Runtime: CoreMLEP backend.
+mps = [
+    "onnxruntime>=1.16.0",
+]
+
+# Python Dependency For Intel OpenVINO Platform.
+# Python Version Should be 3.11 fixed.
+openvino253 = [
+    "onnxruntime-openvino==1.21.0",
+]
+
+# Python Dependency For Jetson Platform.
+# Cuda Version should be 12.6 fixed.
+# Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+jp61cu126 = [
+    "onnxruntime-gpu",
+]
 
 [project.scripts]
-lumen-vlm = "lumen_vlm:main"
+lumen-vlm = "lumen_vlm.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.8.0,<0.9"]
-build-backend = "uv_build"
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+search_parent_directories = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.9",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long, handled by black
+    "B008",   # do not perform function calls in argument defaults
+    "C901",   # too complex
+]
+
+[tool.ruff.lint.per-file-ignores]
+"proto/*" = [
+    "E402",   # module level import not at top of file
+    "F401",   # unused imports (generated files)
+    "F403",   # star imports (generated files)
+    "F405",   # undefined names from star imports (generated files)
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.2",
+]

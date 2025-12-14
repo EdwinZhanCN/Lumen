@@ -1,0 +1,32 @@
+# Lumen Services Configuration - Single Service Mode
+# yaml-language-server: $schema=https://doc.lumilio.org/schema/config-schema.yaml
+
+metadata:
+    version: "1.0.0"
+    region: "cn" # "cn" for ModelScope, "other" for HuggingFace
+    cache_dir: "~/.lumen" # ~/.lumen by default
+
+deployment:
+    mode: "single"
+    service: "vlm"
+
+server:
+    port: 50051
+    host: "0.0.0.0"
+    mdns:
+        enabled: true
+        service_name: "lumen-vlm"
+
+services:
+    vlm:
+        enabled: true
+        package: lumen_vlm
+        import:
+            registry_class: "lumen_vlm.fastvlm.GeneralFastVLMService"
+            add_to_server: "lumen_vlm.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
+        backend_settings:
+            device: null # auto-detect
+        models:
+            general:
+                model: "FastVLM-0.5B" # FastVLM-0.5B
+                runtime: onnx

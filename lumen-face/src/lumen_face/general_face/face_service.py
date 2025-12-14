@@ -167,12 +167,14 @@ class GeneralFaceService(rpc.InferenceServicer):
         runtime = model_config.runtime.value
         device_pref = getattr(backend_settings, "device", "cpu")
         max_batch_size = getattr(backend_settings, "batch_size", 1)
+        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True)
 
         if runtime == "onnx":
             backend = ONNXRTBackend(
                 resources=resources,
                 device_preference=device_pref,
                 max_batch_size=max_batch_size,
+                prefer_fp16=prefer_fp16,
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")

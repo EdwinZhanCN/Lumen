@@ -95,11 +95,13 @@ class GeneralCLIPService(rpc.InferenceServicer):
         device_pref = "cpu"
         max_batch_size = 1
         providers_list = None
+        prefer_fp16 = True
 
         if backend_settings:
             device_pref = backend_settings.device or "cpu"
             max_batch_size = backend_settings.batch_size or 1
             providers_list = backend_settings.onnx_providers
+            prefer_fp16 = getattr(backend_settings, "prefer_fp16", True)
 
         if runtime == "torch":
             backend = TorchBackend(
@@ -113,6 +115,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 providers=providers_list,
                 device_preference=device_pref,
                 max_batch_size=max_batch_size,
+                prefer_fp16=prefer_fp16,
             )
         else:
             raise ConfigError(f"Unsupported runtime: {runtime}")

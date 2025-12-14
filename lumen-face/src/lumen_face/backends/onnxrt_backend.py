@@ -508,6 +508,59 @@ class ONNXRTBackend(FaceRecognitionBackend):
         self._prefer_fp16 = prefer_fp16
 
     # ------------------------------------------------------------------ #
+    # Model file selection
+    # ------------------------------------------------------------------ #
+
+    def _select_model_file(self, base_filename: str) -> Path:
+        """
+        Select model file based on precision preference and availability.
+
+        Args:
+            base_filename: Base filename from spec (e.g., "detection.fp32.onnx")
+
+        Returns:
+            Path to the selected model file
+
+        Raises:
+            ONNXRTModelLoadingError: If no suitable model file is found
+        """
+        runtime_dir = self.resources.runtime_files_path
+
+        # Extract the prefix (e.g., "detection" from "detection.fp32.onnx")
+        parts = base_filename.split(".")
+        if len(parts) >= 3:
+            prefix = parts[0]
+        else:
+            # Fallback: just use the base filename without extension
+            prefix = base_filename.rsplit(".", 1)[0]
+
+        # Build candidate list based on preference
+        fp16_path = runtime_dir / f"{prefix}.fp16.onnx"
+        fp32_path = runtime_dir / f"{prefix}.fp32.onnx"
+        fallback_path = runtime_dir / f"{prefix}.onnx"
+        original_path = runtime_dir / base_filename
+
+        candidates: list[tuple[Path, str]] = []
+        if self._prefer_fp16:
+            candidates.append((fp16_path, "fp16"))
+            candidates.append((fp32_path, "fp32"))
+        else:
+            candidates.append((fp32_path, "fp32"))
+            candidates.append((fp16_path, "fp16"))
+        candidates.append((fallback_path, "default"))
+        candidates.append((original_path, "original"))
+
+        for path, label in candidates:
+            if path.exists():
+                logger.debug("Selected model file %s (%s)", path, label)
+                return path
+
+        raise ONNXRTModelLoadingError(
+            f"No model file found for '{prefix}'. "
+            f"Checked: {[str(c[0]) for c in candidates]}"
+        )
+
+    # ------------------------------------------------------------------ #
     # Provider utilities
     # ------------------------------------------------------------------ #
 
@@ -565,20 +618,13 @@ class ONNXRTBackend(FaceRecognitionBackend):
         )
 
         try:
-            det_path = self.resources.get_model_file(self.spec.detection.filename)
-            if not det_path.exists():
-                raise ONNXRTModelLoadingError(
-                    f"Detection model not found: {det_path.name}"
-                )
+            # Select model files based on precision preference
+            det_path = self._select_model_file(self.spec.detection.filename)
             self._sess_detection = ort.InferenceSession(
                 str(det_path), sess_options, providers=self._providers
             )
 
-            rec_path = self.resources.get_model_file(self.spec.recognition.filename)
-            if not rec_path.exists():
-                raise ONNXRTModelLoadingError(
-                    f"Recognition model not found: {rec_path.name}"
-                )
+            rec_path = self._select_model_file(self.spec.recognition.filename)
             self._sess_recognition = ort.InferenceSession(
                 str(rec_path), sess_options, providers=self._providers
             )

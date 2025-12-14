@@ -39,6 +39,7 @@ message Capability {
   repeated string precisions = 5;            // ["fp32","fp16","int8"]
   map<string, string> extra = 6;             // Resolution limits, ANE/NPU features, etc.
   repeated IOTask tasks = 7;                 // Structured task capabilities (recommended)
+  string protocol_version = 8;               // Version of current porotocal, should be semantic versioning. e.g., 1.0.0
 }
 
 // ---- Inference request (inbound message of bidi stream) ----
@@ -60,7 +61,7 @@ message InferResponse {
   string correlation_id = 1;
   bool   is_final = 2;                       // Streaming partials or final result
   bytes  result = 3;                         // Result bytes; if JSON, specify via result_mime
-  map[string, string] meta = 4;              // e.g., lat_ms, tokens, bboxes_count
+  map<string, string> meta = 4;              // e.g., lat_ms, tokens, bboxes_count
   Error  error = 5;                          // Populated only on failure (fatal errors may also terminate the stream)
 
   // --- Added: output content type and chunking control ---

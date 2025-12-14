@@ -64,6 +64,7 @@ class OcrModelManager:
         cache_dir: str,
         providers: list[str] | None = None,
         device_preference: Optional[str] = None,
+        prefer_fp16: bool = True,
     ):
         """
         Initialize the manager.
@@ -72,14 +73,16 @@ class OcrModelManager:
             config: Model configuration from lumen_config.yaml.
             cache_dir: Directory where model files are stored.
             device_preference: Optional device hint (e.g., "cuda", "cpu").
+            prefer_fp16: Whether to prefer FP16 model files over FP32 when available.
         """
         self.config = config
         self.providers = providers
         self.cache_dir = cache_dir
         self.device_preference = device_preference
+        self._prefer_fp16 = prefer_fp16
 
-        self._backend: Optional[BaseOcrBackend] = None
-        self._resources: Optional[ModelResources] = None
+        self._backend: BaseOcrBackend
+        self._resources: ModelResources
         self._initialized = False
 
     def initialize(self) -> None:
@@ -110,6 +113,7 @@ class OcrModelManager:
                     resources=self._resources,
                     providers=self.providers,
                     device_preference=self.device_preference,
+                    prefer_fp16=self._prefer_fp16,
                 )
             # Future support for other runtimes (e.g., rknn, torch) can be added here
             else:
@@ -165,8 +169,7 @@ class OcrModelManager:
 
     def get_info(self) -> ModelInfo:
         """Get current model information and status."""
-        backend_info = self._backend.get_info() if self._backend else None
-
+        backend_info = self._backend.get_info()
         # Extract extra metadata from resources if available
         extra = None
         if self._resources and self._resources.model_info.extra_metadata:

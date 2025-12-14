@@ -40,6 +40,7 @@ class OnnxOcrBackend(BaseOcrBackend):
         resources: ModelResources,
         providers: list[str] | None = None,
         device_preference: str | None = None,
+        prefer_fp16: bool = True,
     ):
         """
         Initialize the ONNX backend.
@@ -47,11 +48,13 @@ class OnnxOcrBackend(BaseOcrBackend):
         Args:
             resources: ModelResources object to access model files and config.
             device_preference: Optional device preference (e.g., "cuda", "cpu").
+            prefer_fp16: Whether to prefer FP16 model files over FP32 when available.
         """
         super().__init__()
         self.resources = resources
         self.device_preference = device_preference or "cpu"
         self.providers = providers
+        self._prefer_fp16 = prefer_fp16
 
         # Sessions
         self.det_sess = None
@@ -195,17 +198,18 @@ class OnnxOcrBackend(BaseOcrBackend):
 
     def _find_model_file(self, keyword: str) -> Path:
         """
-        Find model file based on keyword (det/rec) and precision.
+        Find model file based on keyword (det/rec) and precision preference.
         Follows naming convention: {keyword}ection.{precision}.onnx
         e.g., detection.fp32.onnx, recognition.fp16.onnx
         """
         # Map short keyword to full filename prefix
         prefix = "detection" if keyword == "det" else "recognition"
 
-        # Determine precision preference
-        # TODO: Check device capabilities or config for fp16 support
-        # For now, prefer fp32 as safe default, fallback logic can be added
-        precisions = ["fp32", "fp16", "int8"]
+        # Determine precision preference based on prefer_fp16 setting
+        if self._prefer_fp16:
+            precisions = ["fp16", "fp32", "int8"]
+        else:
+            precisions = ["fp32", "fp16", "int8"]
 
         for prec in precisions:
             filename = f"{prefix}.{prec}.onnx"

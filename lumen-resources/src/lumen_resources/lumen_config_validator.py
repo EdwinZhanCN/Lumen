@@ -12,8 +12,8 @@ import yaml
 from jsonschema import Draft7Validator
 from pydantic import ValidationError
 
-from .lumen_config import LumenConfig
 from .exceptions import ConfigError
+from .lumen_config import LumenConfig
 
 
 class ConfigValidator:

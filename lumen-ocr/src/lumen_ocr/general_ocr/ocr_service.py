@@ -106,14 +106,17 @@ class GeneralOcrService(ml_service_pb2_grpc.InferenceServicer):
 
         model_config = ocr_config.models[model_key]
         providers = None
+        prefer_fp16 = True
         if ocr_config.backend_settings:
             providers = ocr_config.backend_settings.onnx_providers
+            prefer_fp16 = getattr(ocr_config.backend_settings, "prefer_fp16", True)
 
         manager = OcrModelManager(
             config=model_config,
             cache_dir=cache_dir,
             providers=providers,
             device_preference=device_preference,
+            prefer_fp16=prefer_fp16,
         )
 
         return cls(manager=manager)

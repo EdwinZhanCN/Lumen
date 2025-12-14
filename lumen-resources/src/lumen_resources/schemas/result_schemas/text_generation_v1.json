@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TextGenerationV1",
+  "description": "Universal schema for text generation responses across Lumen VLM services. Returns generated text with metadata about the generation process.",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 0,
+      "description": "Generated text content"
+    },
+    "finish_reason": {
+      "type": "string",
+      "enum": ["stop", "length", "eos_token", "stop_sequence", "error"],
+      "description": "Reason why generation terminated"
+    },
+    "generated_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tokens generated in the response"
+    },
+    "input_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of tokens in the input prompt"
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the model that generated the text"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0.0,
+          "description": "Sampling temperature used for generation"
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Nucleus sampling parameter used for generation"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum tokens allowed for generation"
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Random seed used for generation (if deterministic)"
+        },
+        "generation_time_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Time taken to generate the response in milliseconds"
+        },
+        "streaming_chunks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of chunks in streaming generation (if applicable)"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Optional metadata about the generation process"
+    }
+  },
+  "required": ["text", "finish_reason", "generated_tokens", "model_id"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "text": "The image shows a beautiful sunset over mountains with vibrant colors.",
+      "finish_reason": "stop",
+      "generated_tokens": 15,
+      "input_tokens": 8,
+      "model_id": "fastvlm-2b-onnx",
+      "metadata": {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_tokens": 512,
+        "generation_time_ms": 245.6
+      }
+    },
+    {
+      "text": "A cat is sitting on a windowsill looking outside.",
+      "finish_reason": "eos_token",
+      "generated_tokens": 9,
+      "input_tokens": 12,
+      "model_id": "fastvlm-2b-onnx"
+    }
+  ]
+}

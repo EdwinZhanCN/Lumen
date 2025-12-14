@@ -139,13 +139,18 @@ class Downloader:
 
             for alias, model_config in service_config.models.items():
                 model_type = f"{service_name}:{alias}"
+                prefer_fp16 = False
+                if service_config.backend_settings:
+                    prefer_fp16 = service_config.backend_settings.prefer_fp16 or False
 
                 if self.verbose:
                     print(f"\n📦 Processing {model_type.upper()}")
                     print(f"    Model: {model_config.model}")
                     print(f"    Runtime: {model_config.runtime.value}")
 
-                result = self._download_model(model_type, model_config, force)
+                result = self._download_model(
+                    model_type, model_config, force, prefer_fp16
+                )
                 results[model_type] = result
 
                 # Print result
@@ -163,7 +168,7 @@ class Downloader:
 
         return results
 
-    def _get_runtime_patterns(self, runtime: Runtime) -> list[str]:
+    def _get_runtime_patterns(self, runtime: Runtime, pref_fp16: bool) -> list[str]:
         """Get file patterns to download based on runtime.
 
         Determines which file patterns to include in downloads based on the
@@ -171,12 +176,13 @@ class Downloader:
 
         Args:
             runtime: The model runtime (torch, onnx, rknn).
+            pref_fp16: Whether to prefer FP16 models over FP32.
 
         Returns:
             List of file glob patterns for the download.
 
         Example:
-            >>> patterns = downloader._get_runtime_patterns(Runtime.torch)
+            >>> patterns = downloader._get_runtime_patterns(Runtime.torch, False)
             >>> print("model_info.json" in patterns)
             True
         """
@@ -203,14 +209,17 @@ class Downloader:
         elif runtime == Runtime.onnx:
             patterns.extend(
                 [
-                    "*.onnx",
-                    "*.ort",
                     "*vocab*",
                     "*tokenizer*",
                     "special_tokens_map.json",
                     "preprocessor_config.json",
                 ]
             )
+            # Only add one precision based on preference to save space
+            if pref_fp16:
+                patterns.extend(["*.fp16.onnx"])
+            else:
+                patterns.extend(["*.fp32.onnx"])
         elif runtime == Runtime.rknn:
             patterns.extend(
                 [
@@ -225,18 +234,94 @@ class Downloader:
         return patterns
 
     def _download_model(
-        self, model_type: str, model_config: ModelConfig, force: bool
+        self, model_type: str, model_config: ModelConfig, force: bool, pref_fp16: bool
     ) -> DownloadResult:
-        """Download a single model with its runtime files.
+        """Download a single model with its runtime files using fallback strategy.
 
-        Handles the complete download process for a single model including
-        runtime files, metadata validation, and integrity checks. Performs
-        rollback on failure by cleaning up downloaded files.
+        First attempts to download with the preferred precision (FP16/FP32),
+        and if that fails due to file mismatch, falls back to the other precision.
+        This ensures model availability while minimizing storage usage.
 
         Args:
             model_type: Identifier for the model (e.g., "clip:default").
             model_config: Model configuration from LumenConfig.
             force: Whether to force re-download even if already cached.
+            pref_fp16: Whether to prefer FP16 models over FP32.
+
+        Returns:
+            DownloadResult with success status, file paths, and error details.
+
+        Raises:
+            DownloadError: If platform download fails for both precisions.
+            ModelInfoError: If model_info.json is missing or invalid.
+            ValidationError: If model configuration is not supported.
+        """
+        # First attempt with preferred precision
+        preferred_patterns = self._get_runtime_patterns(model_config.runtime, pref_fp16)
+        fallback_patterns = self._get_runtime_patterns(
+            model_config.runtime, not pref_fp16
+        )
+
+        # Try preferred precision first
+        try:
+            return self._download_model_with_patterns(
+                model_type, model_config, force, preferred_patterns, pref_fp16
+            )
+        except DownloadError as e:
+            # Check if this is a "no matching files" error that warrants fallback
+            if (
+                self._should_fallback_download(str(e))
+                and model_config.runtime == Runtime.onnx
+            ):
+                precision = "FP16" if pref_fp16 else "FP32"
+                fallback_precision = "FP32" if pref_fp16 else "FP16"
+                if self.verbose:
+                    print(
+                        f"   ⚠️ {precision} model not found, trying {fallback_precision}"
+                    )
+
+                try:
+                    return self._download_model_with_patterns(
+                        model_type,
+                        model_config,
+                        force,
+                        fallback_patterns,
+                        not pref_fp16,
+                    )
+                except DownloadError as fallback_error:
+                    # If fallback also fails, report both errors
+                    return DownloadResult(
+                        model_type=model_type,
+                        model_name=model_config.model,
+                        runtime=model_config.runtime.value
+                        if hasattr(model_config.runtime, "value")
+                        else str(model_config.runtime),
+                        success=False,
+                        error=f"Failed to download with {precision}: {e}. "
+                        f"Fallback with {fallback_precision} also failed: {fallback_error}",
+                    )
+
+            # Non-fallbackable error or non-ONNX runtime, just report original error
+            raise
+
+    def _download_model_with_patterns(
+        self,
+        model_type: str,
+        model_config: ModelConfig,
+        force: bool,
+        patterns: list[str],
+        is_fp16: bool | None = None,
+    ) -> DownloadResult:
+        """Download a model with specific file patterns.
+
+        This is the core download method that handles the actual downloading
+        with a given set of file patterns.
+
+        Args:
+            model_type: Identifier for the model (e.g., "clip:default").
+            model_config: Model configuration from LumenConfig.
+            force: Whether to force re-download even if already cached.
+            patterns: File patterns to include in the download.
 
         Returns:
             DownloadResult with success status, file paths, and error details.
@@ -255,8 +340,6 @@ class Downloader:
         )
 
         try:
-            # Phase 1: Prepare and download runtime + JSON only
-            patterns = self._get_runtime_patterns(model_config.runtime)
             cache_dir = Path(self.config.metadata.cache_dir).expanduser()
 
             model_path = self.platform.download_model(
@@ -278,7 +361,10 @@ class Downloader:
             if model_config.dataset and model_info.datasets:
                 dataset_files = model_info.datasets.get(model_config.dataset)
                 if dataset_files:
-                    for file_rel in [dataset_files.labels, dataset_files.embeddings]:
+                    for file_rel in [
+                        dataset_files.labels,
+                        dataset_files.embeddings,
+                    ]:
                         dataset_path = model_path / file_rel
                         if not dataset_path.exists():
                             # Download only the dataset file by its relative path
@@ -295,7 +381,9 @@ class Downloader:
                                 )
 
             # Final: File integrity validation
-            missing = self._validate_files(model_path, model_info, model_config)
+            missing = self._validate_files(
+                model_path, model_info, model_config, is_fp16
+            )
             result.missing_files = missing
 
             if missing:
@@ -318,78 +406,76 @@ class Downloader:
 
         return result
 
+    def _should_fallback_download(self, error_message: str) -> bool:
+        """Determine if a download error should trigger fallback to another precision.
+
+        Args:
+            error_message: The error message from the download attempt.
+
+        Returns:
+            True if the error suggests we should try the other precision, False otherwise.
+        """
+        # Common patterns that indicate file matching issues
+        fallback_indicators = [
+            "No matching files found",
+            "No files matched the pattern",
+            "Cannot find any files matching",
+            "File pattern matched no files",
+            "No such file or directory",  # Sometimes used for remote files
+        ]
+
+        error_lower = error_message.lower()
+        return any(
+            indicator.lower() in error_lower for indicator in fallback_indicators
+        )
+
     def _load_model_info(self, model_path: Path) -> ModelInfo:
         """Load and parse model_info.json using validator.
 
-        Loads the model_info.json file from the model directory and validates
-        it against the ModelInfo schema to ensure metadata integrity.
-
         Args:
-            model_path: Path to the downloaded model directory.
+            model_path: Local path where model files are located.
 
         Returns:
-            Validated ModelInfo object containing model metadata.
+            Parsed ModelInfo object.
 
         Raises:
-            ModelInfoError: If model_info.json is missing or fails validation.
-
-        Example:
-            >>> model_info = downloader._load_model_info(Path("/models/clip_vit_b32"))
-            >>> print(model_info.name)
-            'ViT-B-32'
+            ModelInfoError: If model_info.json is missing or invalid.
         """
-        info_file = model_path / "model_info.json"
-
-        if not info_file.exists():
-            msg = (
-                f"model_info.json not found in {model_path}. "
-                "Repository must contain model metadata."
-            )
-            raise ModelInfoError(msg)
+        info_path = model_path / "model_info.json"
+        if not info_path.exists():
+            raise ModelInfoError(f"Missing model_info.json in {model_path}")
 
         try:
-            return load_and_validate_model_info(info_file)
+            return load_and_validate_model_info(info_path)
         except Exception as e:
-            raise ModelInfoError(f"Failed to load/validate model_info.json: {e}")
+            raise ModelInfoError(f"Failed to load model_info.json: {e}")
 
     def _validate_model_config(
         self, model_info: ModelInfo, model_config: ModelConfig
     ) -> None:
-        """Validate that model supports the requested configuration.
+        """Validate model configuration against model_info.json.
 
-        Checks if the model metadata indicates support for the requested
-        runtime, device (for RKNN), and dataset configurations.
+        Checks that the requested runtime and dataset are supported
+        by the model metadata.
 
         Args:
-            model_info: Validated model metadata from model_info.json.
-            model_config: Requested model configuration from LumenConfig.
+            model_info: Parsed model information.
+            model_config: Model configuration to validate.
 
         Raises:
-            ValidationError: If the requested configuration is not supported
-                by the model according to its metadata.
-
-        Example:
-            >>> downloader._validate_model_config(model_info, model_config)  # No exception
-            >>> # If runtime is not supported, raises ValidationError
+            ValidationError: If configuration is not supported by the model.
         """
-        runtime = model_config.runtime
-        rknn_device = model_config.rknn_device
-
-        # Check if runtime is available
-        runtime_config = model_info.runtimes.get(runtime.value)
-        if not runtime_config or not runtime_config.available:
+        # Validate runtime support
+        runtime_str = (
+            model_config.runtime.value
+            if hasattr(model_config.runtime, "value")
+            else str(model_config.runtime)
+        )
+        if runtime_str not in model_info.runtimes:
             raise ValidationError(
-                f"Model {model_config.model} does not support runtime '{runtime.value}'"
+                f"Runtime {runtime_str} not supported by model {model_config.model}. "
+                f"Supported runtimes: {', '.join(model_info.runtimes)}"
             )
-
-        # Special check for RKNN device support
-        if runtime == Runtime.rknn and rknn_device:
-            if not runtime_config.devices or rknn_device not in runtime_config.devices:
-                msg = (
-                    f"Model {model_config.model} does not support "
-                    f"runtime '{runtime.value}' with device '{rknn_device}'"
-                )
-                raise ValidationError(msg)
 
         # Validate dataset if specified
         if model_config.dataset:
@@ -397,63 +483,74 @@ class Downloader:
                 not model_info.datasets
                 or model_config.dataset not in model_info.datasets
             ):
-                msg = (
-                    f"Dataset '{model_config.dataset}' not available for "
-                    f"model {model_config.model}"
+                raise ValidationError(
+                    f"Dataset {model_config.dataset} not supported by model {model_config.model}. "
+                    f"Available datasets: {', '.join(model_info.datasets.keys() if model_info.datasets else [])}"
                 )
-                raise ValidationError(msg)
+
+        # Validate RKNN device if RKNN runtime
+        if model_config.runtime == Runtime.rknn and not model_config.rknn_device:
+            raise ValidationError(
+                f"RKNN runtime requires rknn_device specification for model {model_config.model}"
+            )
 
     def _validate_files(
-        self, model_path: Path, model_info: ModelInfo, model_config: ModelConfig
+        self,
+        model_path: Path,
+        model_info: ModelInfo,
+        model_config: ModelConfig,
+        is_fp16: bool | None = None,
     ) -> list[str]:
-        """Validate that required model files exist.
+        """Validate that all required files are present after download.
 
-        Checks that all required files for the specified runtime and device
-        are present in the downloaded model directory. Also validates dataset
-        files if specified in the configuration.
+        Checks model files, tokenizer files, and dataset files against
+        the model_info.json metadata based on the actual precision
+        downloaded.
 
         Args:
-            model_path: Path to the downloaded model directory.
-            model_info: Validated model metadata from model_info.json.
-            model_config: Model configuration specifying runtime and dataset.
+            model_path: Local path where model files are located.
+            model_info: Parsed model information.
+            model_config: Model configuration to validate.
+            is_fp16: Whether FP16 files were downloaded (None for non-ONNX
+                runtimes).
 
         Returns:
-            List of missing file paths relative to model directory.
-            Empty list if all required files are present.
+            List of missing file paths. Empty list if all files present.
 
-        Example:
-            >>> missing = downloader._validate_files(model_path, model_info, model_config)
-            >>> if not missing:
-            ...     print("All required files are present")
-            ... else:
-            ...     print(f"Missing files: {missing}")
+        Raises:
+            ValidationError: If critical files are missing.
         """
         missing: list[str] = []
+        runtime_str = (
+            model_config.runtime.value
+            if hasattr(model_config.runtime, "value")
+            else str(model_config.runtime)
+        )
 
-        # Get runtime configuration
-        runtime_config = model_info.runtimes.get(model_config.runtime.value)
-        if not runtime_config or not runtime_config.files:
-            return missing
-
-        # Get required files based on runtime type
-        if model_config.runtime == Runtime.rknn and model_config.rknn_device:
-            # RKNN files are organized by device
-            if isinstance(runtime_config.files, dict):
-                required_files = runtime_config.files.get(model_config.rknn_device, [])
-            else:
-                required_files = []
-        else:
-            # Other runtimes have simple list
+        # Check runtime files
+        runtime_config = model_info.runtimes.get(runtime_str)
+        if runtime_config and runtime_config.files:
             if isinstance(runtime_config.files, list):
-                required_files = runtime_config.files
-            else:
-                required_files = []
+                runtime_files = runtime_config.files
 
-        # Check each required file
-        for file_path in required_files:
-            full_path = model_path / file_path
-            if not full_path.exists():
-                missing.append(file_path)
+                # For ONNX runtime, filter by precision if specified
+                if runtime_str == "onnx" and is_fp16 is not None:
+                    precision_str = "fp16" if is_fp16 else "fp32"
+                    runtime_files = [
+                        f
+                        for f in runtime_files
+                        if not f.endswith((".fp16.onnx", ".fp32.onnx"))
+                        or f.endswith(f".{precision_str}.onnx")
+                    ]
+            elif isinstance(runtime_config.files, dict) and model_config.rknn_device:
+                # RKNN files are organized by device
+                runtime_files = runtime_config.files.get(model_config.rknn_device, [])
+            else:
+                runtime_files = []
+
+            for file_name in runtime_files:
+                if not (model_path / file_name).exists():
+                    missing.append(file_name)
 
         # Check dataset files if specified
         if model_config.dataset and model_info.datasets:
