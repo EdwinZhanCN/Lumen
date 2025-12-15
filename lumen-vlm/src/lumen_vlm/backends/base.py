@@ -31,6 +31,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Sequence,
+    cast
 )
 
 import numpy as np
@@ -395,6 +396,11 @@ class BaseFastVLMBackend(abc.ABC):
             raise ModelLoadingError(
                 f"Failed to load tokenizer from {tokenizer_path}: {exc}"
             ) from exc
+
+        if self._tokenizer is None:
+            raise ModelLoadingError(
+                f"Failed to load tokenizer from {tokenizer_path}"
+            )
 
         return self._tokenizer
 

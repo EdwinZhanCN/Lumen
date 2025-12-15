@@ -33,10 +33,6 @@ config = ["pyyaml>=6.0.0"]
 [project.scripts]
 lumen-resources = "lumen_resources.cli:main"
 
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "N"]
-ignore = []
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

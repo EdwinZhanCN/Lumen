@@ -10,8 +10,8 @@ authors = [
 ]
 dependencies = [
     "jinja2>=3.1.6",
-    "lumen-resources>=0.3.1",
-    "numpy>=2.2.6",
+    "lumen-resources>=0.3.2",
+    "numpy>=1.26.0",
     "tokenizers>=0.22.1",
     "colorlog>=6.7.0",
     "grpcio>=1.59.0",
@@ -51,6 +51,7 @@ openvino253 = [
 # Python Dependency For Jetson Platform.
 # Cuda Version should be 12.6 fixed.
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+# Note: Jetson platform requires numpy<2 due to CUDA toolkit compatibility
 jp61cu126 = [
     "onnxruntime-gpu",
 ]
@@ -100,9 +101,4 @@ ignore = [
     "F401",   # unused imports (generated files)
     "F403",   # star imports (generated files)
     "F405",   # undefined names from star imports (generated files)
-]
-
-[dependency-groups]
-dev = [
-    "ruff>=0.14.2",
 ]

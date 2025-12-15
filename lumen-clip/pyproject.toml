@@ -24,7 +24,7 @@ dependencies = [
     "colorlog",
     "zeroconf",
     "transformers",
-    "lumen-resources>=0.3.0"
+    "lumen-resources>=0.3.2"
 ]
 
 [project.urls]

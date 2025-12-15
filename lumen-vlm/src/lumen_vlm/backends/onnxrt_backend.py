@@ -13,7 +13,7 @@ import logging
 import time
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator, cast
+from typing import Any, Generator, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,30 +34,22 @@ from .base import (
     GenerationResult,
 )
 
-_ORT_IMPORT_ERROR = None
-
-if TYPE_CHECKING:
-    import onnxruntime as ort
-
-    # Type aliases for cleaner annotations
-    InferenceSession = ort.InferenceSession
-else:
-    try:
-        import onnxruntime as ort
-
-        InferenceSession = ort.InferenceSession
-    except ImportError as exc:
-        ort = None
-        InferenceSession = Any
-        _ORT_IMPORT_ERROR = exc
-    else:
-        _ORT_IMPORT_ERROR = None
-
 logger = logging.getLogger(__name__)
 
 
 class ONNXRuntimeNotAvailableError(ModelLoadingError):
     """Raised when onnxruntime cannot be imported."""
+
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    raise ONNXRuntimeNotAvailableError(
+            "onnxruntime is required but not installed.\n"
+            "Please install it with: pip install onnxruntime\n"
+            "For CUDA (Nvidia/AMD) GPU support: pip install onnxruntime-gpu"
+        )
+
 
 
 class FastVLMONNXBackend(BaseFastVLMBackend):
@@ -75,10 +67,6 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         max_new_tokens: int | None = None,
         prefer_fp16: bool = True,
     ) -> None:
-        if ort is None:
-            raise ONNXRuntimeNotAvailableError(
-                "onnxruntime is required for FastVLM ONNX backend"
-            ) from _ORT_IMPORT_ERROR
 
         super().__init__(
             resources=resources,
@@ -89,9 +77,9 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         self._prefer_fp16 = prefer_fp16
 
         # Sessions
-        self._sess_vision: InferenceSession | None = None
-        self._sess_embed: InferenceSession | None = None
-        self._sess_decoder: InferenceSession | None = None
+        self._sess_vision: ort.InferenceSession | None = None
+        self._sess_embed: ort.InferenceSession | None = None
+        self._sess_decoder: ort.InferenceSession | None = None
 
         # IO Metadata
         self._vision_input_name: str | None = None
@@ -124,6 +112,9 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
 
         t0 = time.time()
         runtime_root = Path(self.resources.model_root_path) / "onnx"
+        logger.info(
+            f"Providers: {self._providers}"
+        )
         try:
             self._sess_vision = self._build_session(
                 runtime_root, "vision", prefer_fp16=self._prefer_fp16
@@ -482,10 +473,14 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
                     inputs[cache_name] = cache_tensor
 
         # 2. Run inference
+        if self._sess_decoder is None:
+            raise RuntimeError(
+                "Decoder session is not initialized"
+            )
         outputs = self._sess_decoder.run(self._decoder_output_names, inputs)
 
         # 3. Process Outputs (Logits + KV)
-        logits = outputs[0]
+        logits = cast(NDArray[np.float32], outputs[0])
 
         new_kv = {}
         # Map 'present' outputs back to 'past' inputs for next step
@@ -505,10 +500,15 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
     ) -> NDArray[np.float32]:
         ids = np.array([input_ids], dtype=np.int64)
 
+        if self._sess_embed is None:
+            raise RuntimeError(
+                "Embed session is not initialized"
+            )
+
         out = self._sess_embed.run(
             [self._embed_output_name], {self._embed_input_name: ids}
         )
-        text_embeds = out[0]
+        text_embeds = cast(NDArray[np.float32], out[0])
         return text_embeds
 
     def _sample(self, logits: NDArray[np.float32], temp: float, top_p: float) -> int:
@@ -547,7 +547,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         component: str,
         *,
         prefer_fp16: bool = True,
-    ) -> InferenceSession:
+    ) -> ort.InferenceSession:
         if ort is None:
             raise ONNXRuntimeNotAvailableError("onnxruntime not available")
 
@@ -660,19 +660,6 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
                     )
                     break
 
-        # Final fallback
-        if self._decoder_embed_dtype is None:
-            self._decoder_embed_dtype = np.float32
-            logger.warning(
-                "Could not detect decoder embedding dtype, defaulting to float32"
-            )
-
-        if self._decoder_kv_dtype is None:
-            self._decoder_kv_dtype = np.float32
-            logger.warning(
-                "Could not detect decoder KV cache dtype, defaulting to float32"
-            )
-
         logger.info(
             f"Decoder data types - Embeddings: {self._decoder_embed_dtype}, KV Cache: {self._decoder_kv_dtype}"
         )
@@ -776,7 +763,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
     def _detect_precisions(self) -> list[str]:
         precisions: list[str] = []
 
-        def _label(sess: InferenceSession | None) -> str | None:
+        def _label(sess: ort.InferenceSession | None) -> str | None:
             if not sess:
                 return None
             try:

@@ -130,7 +130,7 @@ class GeneralFastVLMService(rpc.InferenceServicer):
             ResourceNotFoundError: If model files cannot be found or downloaded.
             RuntimeNotSupportedError: If specified runtime is not available.
         """
-        from lumen_vlm.resources.exceptions import ConfigError
+        from ..resources.exceptions import ConfigError
 
         # Load resources using the validated model_config
         logger.info(f"Loading resources for FastVLM model: {model_config.model}")
@@ -141,6 +141,7 @@ class GeneralFastVLMService(rpc.InferenceServicer):
         device_pref = getattr(backend_settings, "device", "cpu")
         max_new_tokens = getattr(backend_settings, "max_new_tokens", 512)
         prefer_fp16 = getattr(backend_settings, "prefer_fp16", True)
+        providers = getattr(backend_settings, "onnx_providers", None)
 
         if runtime == "onnx":
             from lumen_vlm.backends.onnxrt_backend import FastVLMONNXBackend
@@ -148,6 +149,7 @@ class GeneralFastVLMService(rpc.InferenceServicer):
             backend = FastVLMONNXBackend(
                 resources=resources,
                 device_preference=device_pref,
+                providers=providers,
                 max_new_tokens=max_new_tokens,
                 prefer_fp16=prefer_fp16,
             )

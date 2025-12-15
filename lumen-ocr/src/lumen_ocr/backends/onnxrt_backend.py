@@ -289,7 +289,7 @@ class OnnxOcrBackend(BaseOcrBackend):
                     line.decode("utf-8").strip("\n").strip("\r\n") for line in lines
                 ]
         except Exception as e:
-            raise ModelLoadingError(f"Failed to load vocab file {path}: {e}")
+            raise ModelLoadingError(f"Failed to load vocab file {path}: {e}") from e
 
     def _decode_image(self, image_bytes: bytes) -> np.ndarray | None:
         """Decode image bytes to BGR numpy array."""
@@ -422,7 +422,7 @@ class OnnxOcrBackend(BaseOcrBackend):
 
     def _get_mini_boxes(self, contour):
         bounding_box = cv2.minAreaRect(contour)
-        points = sorted(list(cv2.boxPoints(bounding_box)), key=lambda x: x[0])
+        points = sorted(cv2.boxPoints(bounding_box), key=lambda x: x[0])
 
         index_1, index_2, index_3, index_4 = 0, 1, 2, 3
         if points[1][1] > points[0][1]:
@@ -486,14 +486,14 @@ class OnnxOcrBackend(BaseOcrBackend):
         """Crop image based on box points, handling rotation."""
         img_crop_width = int(
             max(
-                np.linalg.norm(points[0] - points[1]),
-                np.linalg.norm(points[2] - points[3]),
+                float(np.linalg.norm(points[0] - points[1])),
+                float(np.linalg.norm(points[2] - points[3])),
             )
         )
         img_crop_height = int(
             max(
-                np.linalg.norm(points[0] - points[3]),
-                np.linalg.norm(points[1] - points[2]),
+                float(np.linalg.norm(points[0] - points[3])),
+                float(np.linalg.norm(points[1] - points[2])),
             )
         )
         pts_std = np.array(
