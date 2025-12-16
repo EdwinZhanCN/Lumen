@@ -1,223 +1,100 @@
+Lumen/lumen-vlm/README.md
 # Lumen VLM
 
-FastVLM multimodal vision-language understanding service for the Lumen ecosystem.
+`lumen-vlm` provides vision-language model services inside the Lumen AI inference server family. It follows the shared monorepo conventions (task registry, protobuf APIs, configuration-driven runtime) so it can be routed and orchestrated alongside other services.
 
 ## Overview
 
-Lumen VLM provides state-of-the-art vision-language model capabilities including:
-- **Multimodal Understanding**: Process images and text together
-- **Text Generation**: Generate coherent text responses from visual input
-- **Streaming Support**: Real-time streaming generation for interactive applications
-- **Chat Templates**: Support for conversation context and structured dialogues
-- **Multiple Runtimes**: ONNX Runtime support with GPU/CPU acceleration
+- **Service name:** `vlm-fast`
+- **Package entry point:** `lumen_vlm.fastvlm.GeneralFastVLMService`
+- **gRPC interface:** `lumen_vlm.proto.ml_service_pb2_grpc.InferenceServicer`
+- **Task routing:** All requests are routed by keyword via the task registry—clients set `task` in `InferRequest` to select behavior.
 
-## Architecture
+## Backends
 
-This implementation follows the Lumen development protocol with a clean 5-layer architecture:
+| Backend | Runtime | Notes |
+|---------|---------|-------|
+| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML, DirectML, OpenVINO) | Loads FastVLM-style models (vision encoder, text embedder, causal decoder). Provider priority is detected automatically, or you can pass `onnx_providers` in config to bias selection. |
 
-```
-Service Registry (协调层)
-    ↓
-Service (API层) - FastVLMService
-    ↓
-Model Manager (业务逻辑层) - FastVLMModelManager  
-    ↓
-Backend Implementation (具体实现) - FastVLMONNXBackend
-    ↓
-Base Backend (抽象层) - BaseFastVLMBackend
-```
+## Keyword-Based Tasks
 
-### Key Components
+Tasks are registered in `TaskRegistry` and exposed through gRPC streaming inference. The available tasks depend on the active service mode.
 
-#### 1. **Base Backend (`src/lumen_vlm/backends/base.py`)**
-- Abstract interface for all FastVLM runtime backends
-- Defines standard data structures and protocols
-- Provides utilities for chat templates and tokenization
+### VLM Generation Tasks
+Available when running `GeneralFastVLMService`.
 
-#### 2. **ONNX Backend (`src/lumen_vlm/backends/onnxrt_backend.py`)**  
-- Complete ONNX Runtime implementation
-- Multi-GPU support with automatic provider selection
-- Optimized inference for vision encoder + text decoder pipeline
+| Task keyword | Description | Input MIME | Output MIME |
+|--------------|-------------|------------|-------------|
+| `vlm_generate` | Generate text from image and text input. | `image/jpeg`, `image/png`, `image/webp` | `application/json;schema=text_generation_v1` |
+| `vlm_generate_stream` | Generate text from image and text input with streaming output. | `image/jpeg`, `image/png`, `image/webp` | `application/json;schema=text_generation_v1` |
 
-#### 3. **Model Manager (`src/lumen_vlm/fastvlm/fastvlm_model.py`)**
-- Business logic layer managing VLM model lifecycle
-- Handles multimodal preprocessing and postprocessing
-- Provides clean API for generation tasks with dependency injection
+Each task returns a protobuf-defined schema serialized as JSON and includes per-request metadata such as processing time, generated tokens, or finish reason.
 
-#### 4. **Service Layer (`src/lumen_vlm/fastvlm/fastvlm_service.py`)**
-- gRPC service implementing the Lumen Inference protocol
-- Task registry for capability reporting and routing
-- Support for both streaming and non-streaming generation
+## Configuration & Models
 
-#### 5. **Server (`src/lumen_vlm/server.py`)**
-- Complete server implementation with configuration management
-- Graceful shutdown and error handling
-- Performance optimizations for production use
+Service configuration is provided through the shared Lumen YAML schema (see `examples/config/vlm_cn.yaml`):
 
-## Features
-
-### ✅ Implemented
-- **Complete Architecture**: Full 5-layer Lumen-compliant implementation
-- **Dependency Injection**: Service-managed backend creation for testability
-- **Multimodal Input**: Support for images (JPEG/PNG/WebP) + text
-- **Generation Tasks**: Core `vlm_generate` and `vlm_generate_stream` tasks
-- **Configuration**: YAML-based configuration with backend settings
-- **Error Handling**: Comprehensive error handling with proper gRPC status codes
-- **Resource Management**: Model loading, caching, and lifecycle management
-- **Protocol Compliance**: Full Lumen Inference protocol implementation
-
-### 🚀 Generation Capabilities
-- **Chat Templates**: Support for conversation history and structured prompts
-- **Streaming**: Real-time text generation for interactive applications  
-- **Parameters**: Temperature, top_p, repetition_penalty, stop_sequences
-- **Multimodal Fusion**: Integrated vision encoder + text decoder pipeline
-
-### 🔧 Technical Features
-- **Type Safety**: Full type annotations throughout the codebase
-- **Logging**: Structured logging with colorized console output
-- **Performance**: Optimized ONNX Runtime with multi-provider support
-- **Extensibility**: Clean interfaces for adding new backends and tasks
-
-## Quick Start
-
-### Installation
-```bash
-# From the monorepo root
-cd lumen-vlm
-pip install -e .
-```
-
-### Configuration
-Create a `config.yaml` file:
 ```yaml
-cache_dir: "~/.cache/lumen"
+metadata:
+  region: "cn"
+  cache_dir: "~/.lumen"
+
+deployment:
+  mode: "single"
+  service: "vlm"
+
+server:
+  port: 50051
+  mdns:
+    enabled: true
+    service_name: "lumen-vlm"
+
 services:
   vlm:
-    models:
-      fastvlm:
-        model: "fastvlm-2b"
-        runtime: "onnx"
+    enabled: true
+    package: lumen_vlm
+    import:
+      registry_class: "lumen_vlm.fastvlm.GeneralFastVLMService"
+      add_to_server: "lumen_vlm.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
     backend_settings:
-      device: "cuda"  # or "cpu", "mps"
+      device: null          # auto-detect (cpu/cuda/coreml/...)
       max_new_tokens: 512
+      prefer_fp16: true
+    models:
+      general:
+        model: "FastVLM-0.5B"
+        runtime: onnx
 ```
 
-### Running the Service
+Key points:
+
+1. **Model caching** is handled by `lumen-resources`: it downloads model weights, tokenizers, and metadata.
+2. **Service Selection**: The server automatically instantiates `GeneralFastVLMService` based on the config.
+3. **Backend settings** allow you to bias provider selection (`device`), set generation limits (`max_new_tokens`), and enable optimizations (`prefer_fp16`).
+
+## Supported Models
+
+| Model ID | Type | Embedding Dim | Notes |
+|----------|------|---------------|-------|
+| `FastVLM-0.5B` | General | N/A | Efficient vision-language model for multimodal understanding and generation. |
+
+All models support image inputs (JPEG, PNG, WebP) and text generation with configurable parameters like temperature, top_p, and repetition penalty.
+
+## Running the Server
+
 ```bash
-# Start the VLM service
-lumen-vlm --config config.yaml --port 50051
-
-# Or with Python directly
-python -m lumen_vlm.server config.yaml 50051
+lumen-vlm --config lumen-vlm/examples/config/vlm_cn.yaml --log-level INFO
 ```
 
-### Client Usage
-```python
-import grpc
-from lumen_vlm.proto import ml_service_pb2, ml_service_pb2_grpc
+The runner will:
 
-# Connect to service
-channel = grpc.insecure_channel('localhost:50051')
-stub = ml_service_pb2_grpc.InferenceStub(channel)
+1. Validate and download resources via `lumen-resources`.
+2. Instantiate `GeneralFastVLMService` with the configured model/runtime.
+3. Initialize `ONNXRTBackend`.
+4. Start the gRPC server (and optional mDNS advertisement).
 
-# Prepare multimodal request
-with open('image.jpg', 'rb') as f:
-    image_data = f.read()
+You can override the port with `--port` and dynamically scale logging via `--log-level`.
 
-messages = [
-    {"role": "user", "content": "What do you see in this image?"}
-]
+---
 
-request = ml_service_pb2.InferRequest(
-    task="vlm_generate",
-    payload=image_data,
-    payload_mime="image/jpeg",
-    meta={
-        "messages": json.dumps(messages),
-        "max_new_tokens": "256",
-        "temperature": "0.7"
-    }
-)
-
-# Get response
-response = stub.Infer(iter([request]))
-for resp in response:
-    if resp.is_final:
-        result = json.loads(resp.result)
-        print(f"Generated: {result['text']}")
-```
-
-## Architecture Benefits
-
-### 🎯 **Dependency Injection**
-- Service layer creates and manages Backend lifecycle
-- Model Manager receives Backend interface, enabling easy testing
-- Clean separation of concerns following SOLID principles
-
-### 🔧 **Extensibility** 
-- New backends (TensorRT, CoreML) can be added without modifying Model Manager
-- Task Registry allows easy addition of new capabilities
-- Protocol-based design supports diverse client implementations
-
-### 🧪 **Testability**
-- Interface-based design enables comprehensive unit testing
-- Mock backends can be injected for isolated testing
-- Clear boundaries between layers simplify test setup
-
-### 📈 **Production Ready**
-- Comprehensive error handling and logging
-- Resource management and cleanup
-- Performance optimizations and configuration options
-- Graceful shutdown and signal handling
-
-## Development
-
-### Project Structure
-```
-src/lumen_vlm/
-├── __init__.py                 # Package initialization and CLI entry point
-├── cli.py                      # Command-line interface
-├── server.py                   # Server startup and configuration
-├── registry.py                 # Task registry for capability management
-├── backends/                   # Backend abstraction layer
-│   ├── base.py                 # Abstract backend interface
-│   ├── backend_exceptions.py   # Backend-specific exceptions
-│   └── onnxrt_backend.py       # ONNX Runtime implementation
-├── fastvlm/                    # VLM-specific implementation
-│   ├── fastvlm_model.py        # Model Manager (business logic)
-│   └── fastvlm_service.py      # Service layer (API)
-├── proto/                      # gRPC protocol definitions
-└── resources/                  # Resource management
-    ├── exceptions.py           # Resource-level exceptions
-    └── loader.py               # Model resource loading
-```
-
-### Adding New Backends
-1. Implement `BaseFastVLMBackend` interface
-2. Add backend creation logic in `FastVLMService.from_config()`
-3. Register supported runtime in configuration schema
-
-### Adding New Tasks
-1. Implement task handler method in `FastVLMService`
-2. Register task in `_setup_task_registry()`
-3. Update capability metadata and documentation
-
-## Dependencies
-
-### Core Dependencies
-- `grpcio`: gRPC framework and protocol buffers
-- `protobuf`: Protocol buffer implementation
-- `numpy`: Numerical computing and array operations
-- `pillow`: Image processing and format handling
-- `jinja2`: Template engine for chat templates
-- `tokenizers`: Hugging Face tokenizers library
-- `colorlog`: Colored logging output
-
-### Runtime Dependencies
-- `onnxruntime`: CPU inference (default)
-- `onnxruntime-gpu`: CUDA accelerated inference
-- `lumen-resources`: Shared Lumen resource management
-
-## License
-
-This project is part of the Lumen ecosystem and follows the same licensing terms.
+For shared contributor guidelines, lint rules, and deployment workflows, refer to the root `README.md` and `docs/` in the Lumen monorepo.

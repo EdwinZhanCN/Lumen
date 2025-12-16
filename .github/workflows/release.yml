@@ -48,7 +48,6 @@ jobs:
 
             - name: Build Service Packages
               run: |
-                  # 一次性构建剩下的包
                   for pkg in lumen-clip lumen-face lumen-ocr; do
                     echo "📦 Building $pkg..."
                     uv build --package $pkg
@@ -95,7 +94,7 @@ jobs:
                       --extra-index-url https://download.pytorch.org/whl/cu126
                       ```
 
-                      **Apple Silicon (Mac M1/M2/M3):**
+                      **Apple Silicon (Mac M Series):**
                       ```bash
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[mps]"
                       ```
@@ -105,7 +104,7 @@ jobs:
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[openvino253]"
                       ```
 
-                      **NVIDIA Jetson (JetPack 6):**
+                      **NVIDIA Jetson (JetPack 6 with CUDA 12.6):**
                       ```bash
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[jp61cu126]" \
                       --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126

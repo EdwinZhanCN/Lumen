@@ -5,7 +5,7 @@
 ## Overview
 
 - **Service name:** `clip-general` (or `bioclip`, `smartclip` depending on config)
-- **Package entry point:** `lumen_clip.general_clip.clip_service.GeneralCLIPService`
+- **Package entry point:** `lumen_clip.general_clip.clip_service.GeneralCLIPService`, `lumen_clip.unified_smartclip.smartclip_service.SmartCLIPService`, `lumen_clip.expert_bioclip.bioclip_service.BioCLIPService`
 - **gRPC interface:** `lumen_clip.proto.ml_service_pb2_grpc.InferenceServicer`
 - **Task routing:** All requests are routed by keyword via the task registry—clients set `task` in `InferRequest` to select behavior.
 
@@ -14,7 +14,7 @@
 | Backend | Runtime | Notes |
 |---------|---------|-------|
 | `TorchBackend` | `torch` (CPU, MPS, CUDA) | Native PyTorch implementation. Supports dynamic batching and device selection (`cpu`, `mps`, `cuda`). |
-| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML) | Optimized inference using ONNX Runtime. Provider priority is detected automatically, or you can pass `device` in config to bias selection. |
+| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML, DirectML, OpenVINO) | Optimized inference using ONNX Runtime. Provider priority is detected automatically, or you can pass `onnx_providers` in config to bias selection. |
 
 ## Keyword-Based Tasks
 
@@ -110,7 +110,7 @@ Key points:
 | `CN-CLIP_ViT-L-14` | General | 768 | Larger bilingual model, higher accuracy. |
 | `MobileCLIP2-S2` | General | 512 | Efficient mobile-optimized CLIP model. |
 | `MobileCLIP2-S4` | General | 768 | Robust mobile-optimized CLIP model. |
-| `bioclip-2` | Expert | 512 | Specialized for biology/nature (requires `bioclip` config). |
+| `bioclip-2` | Expert | 768 | Specialized for biology/nature (requires `bioclip` config). |
 
 All models support both text and image inputs. The `dataset` configuration option enables zero-shot classification tasks if the corresponding dataset artifacts are present.
 

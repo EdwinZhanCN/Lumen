@@ -13,7 +13,7 @@
 
 | Backend | Runtime | Notes |
 |---------|---------|-------|
-| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML, DirectML, OpenVINO) | Loads InsightFace-style model packs such as `buffalo_l`, `buffalo_m`, `antelopev2`, `buffalo_s`, `buffalo_sc`. Provider priority is detected automatically, or you can pass `device` in config to bias selection. |
+| `ONNXRTBackend` | `onnxruntime` (CPU, CUDA, CoreML, DirectML, OpenVINO) | Loads InsightFace-style model packs such as `buffalo_l`, `antelopev2`. Provider priority is detected automatically, or you can pass `onnx_providers` in config to bias selection. |
 
 > Additional runtimes (RKNN, Torch, etc.) follow the same backend contract and can be added in the future through `FaceRecognitionBackend`.
 
@@ -60,7 +60,7 @@ services:
       batch_size: 8
     models:
       general:
-        model: "buffalo_l"  # or antelopev2/buffalo_m/buffalo_s/...
+        model: "buffalo_l"  # or antelopev2
         runtime: onnx
 ```
 
