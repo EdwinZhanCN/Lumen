@@ -10,21 +10,16 @@ authors = [
 ]
 
 dependencies = [
-    "tokenizers",
-    "onnx",
-    "pillow",
-    "grpcio",
-    "grpcio-tools",
-    "protobuf",
-    "numpy",
-    "python-dotenv",
-    "importlib-resources",
-    "colorama",
-    "pygbif",
-    "colorlog",
-    "zeroconf",
-    "transformers",
-    "lumen-resources>=0.3.2"
+    "colorlog>=6.10.1",
+    "grpcio>=1.76.0",
+    "lumen-resources>=0.3.1",
+    "numpy>=1.26.0",
+    "onnx>=1.20.0",
+    "pillow>=12.0.0",
+    "protobuf>=6.33.0",
+    "tokenizers>=0.22.1",
+    "transformers>=4.57.3",
+    "zeroconf>=0.148.0",
 ]
 
 [project.urls]
@@ -122,6 +117,9 @@ ignore = [
     "F403",   # star imports (generated files)
     "F405",   # undefined names from star imports (generated files)
 ]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }
 
 [dependency-groups]
 dev = [

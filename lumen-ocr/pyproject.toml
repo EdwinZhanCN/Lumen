@@ -13,7 +13,7 @@ dependencies = [
     "opencv-python-headless>=4.12.0.88",
     "pyclipper>=1.4.0",
     "shapely>=2.1.2",
-    "lumen-resources>=0.3.2",
+    "lumen-resources>=0.3.1",
     "colorlog>=6.7.0",
     "grpcio>=1.59.0",
     "protobuf>=4.25.0",
@@ -97,6 +97,9 @@ ignore = [
     "F403",   # star imports (generated files)
     "F405",   # undefined names from star imports (generated files)
 ]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }
 
 [dependency-groups]
 dev = [

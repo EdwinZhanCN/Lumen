@@ -23,7 +23,7 @@ from typing_extensions import override
 
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, ONNXRTBackend, TorchBackend
+from lumen_clip.backends import BaseClipBackend, create_backend, RuntimeKind
 from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 from lumen_clip.general_clip.clip_model import CLIPModelManager
 from lumen_clip.registry import TaskRegistry
@@ -102,50 +102,37 @@ class SmartCLIPService(rpc.InferenceServicer):
         )
 
         # Handle optional backend_settings
-        device_pref = "cpu"
-        max_batch_size = 1
-        providers_list = None
-
-        if backend_settings:
-            device_pref = backend_settings.device or "cpu"
-            max_batch_size = backend_settings.batch_size or 8
-            providers_list = backend_settings.onnx_providers
-
-        # CLIP backend
-        clip_runtime = clip_config.runtime.value
-        if clip_runtime == "torch":
-            clip_backend = TorchBackend(
-                resources=clip_resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+        if backend_settings is None:
+            # Create default backend settings if not provided
+            clip_backend_settings = BackendSettings(
+                device="cpu",
+                batch_size=8,
+                onnx_providers=None
             )
-        elif clip_runtime == "onnx":
-            clip_backend = ONNXRTBackend(
-                resources=clip_resources,
-                providers=providers_list,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+
+            bioclip_backend_settings = BackendSettings(
+                device="cpu",
+                batch_size=8,
+                onnx_providers=None
             )
         else:
-            raise ConfigError(f"Unsupported CLIP runtime: {clip_runtime}")
+            # Create backend settings for each model
+            clip_backend_settings = BackendSettings(
+                device=backend_settings.device or "cpu",
+                batch_size=backend_settings.batch_size or 8,
+                onnx_providers=backend_settings.onnx_providers,
+            )
 
-        # BioCLIP backend
-        bioclip_runtime = bioclip_config.runtime.value
-        if bioclip_runtime == "torch":
-            bioclip_backend = TorchBackend(
-                resources=bioclip_resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+            bioclip_backend_settings = BackendSettings(
+                device=backend_settings.device or "cpu",
+                batch_size=backend_settings.batch_size or 8,
+                onnx_providers=backend_settings.onnx_providers,
             )
-        elif bioclip_runtime == "onnx":
-            bioclip_backend = ONNXRTBackend(
-                resources=bioclip_resources,
-                providers=providers_list,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
-            )
-        else:
-            raise ConfigError(f"Unsupported BioCLIP runtime: {bioclip_runtime}")
+
+        # Create backends using factory
+        runtime_kind = RuntimeKind(clip_config.runtime.value)
+        clip_backend = create_backend(clip_backend_settings, clip_resources, runtime_kind)
+        bioclip_backend = create_backend(bioclip_backend_settings, bioclip_resources, runtime_kind)
 
         # Create service
         service = cls(clip_backend, clip_resources, bioclip_backend, bioclip_resources)

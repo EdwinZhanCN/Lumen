@@ -2,15 +2,15 @@ name: Release Packages
 
 on:
     push:
-        tags: ["v*"] # Only trigger on version tags
+        tags: ["v*"]
 
 jobs:
-    pypi-publish:
+    release:
         name: Build and Publish
         runs-on: ubuntu-latest
         permissions:
-            contents: write # For creating GitHub Release
-            id-token: write # For PyPI trusted publishing (optional)
+            contents: write # For GitHub Release
+            id-token: write # For PyPI
 
         steps:
             - name: Checkout
@@ -18,54 +18,48 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v4
+            - name: Install uv
+              uses: astral-sh/setup-uv@v4
               with:
-                  python-version: "3.10"
+                  version: "latest"
 
-            - name: Install build tools
-              run: pip install build twine setuptools_scm
+            - name: Set up Python
+              run: uv python install 3.10
 
-            - name: Get version
-              id: get_version
+            - name: Verify Version matches Tag
               run: |
-                  # Get version from tag (e.g., v0.2.0 -> 0.2.0)
-                  VERSION=${GITHUB_REF#refs/tags/v}
-                  echo "Version determined from tag: $VERSION"
-                  echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-            # 1. Build and Publish lumen-resources to PyPI
-            - name: Build and Publish lumen-resources
-              env:
-                  TWINE_USERNAME: __token__
-                  TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.VERSION }}
-              run: |
-                  echo "📦 Building and Publishing lumen-resources..."
                   cd lumen-resources
-                  python -m build --outdir ../dist
-                  twine upload ../dist/lumen_resources-*.whl ../dist/lumen_resources-*.tar.gz
+                  uv run --with setuptools_scm python -m setuptools_scm
                   cd ..
 
-            # 2. Build other packages (lumen-clip, etc.) ONLY for GitHub Release
-            # We do NOT upload these to PyPI, but we build wheels so users can download them from GitHub.
-            - name: Build other packages
-              env:
-                  SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.VERSION }}
+                  VERSION=${GITHUB_REF#refs/tags/v}
+                  echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+            - name: Build and Publish lumen-resources
               run: |
+                  echo "📦 Building lumen-resources..."
+                  uv build --package lumen-resources
+
+                  echo "🚀 Publishing to PyPI..."
+                  uvx twine upload dist/* --username __token__ --password ${{ secrets.PYPI_API_TOKEN }}
+
+            - name: Clean dist
+              run: rm -rf dist/*
+
+            - name: Build Service Packages
+              run: |
+                  # 一次性构建剩下的包
                   for pkg in lumen-clip lumen-face lumen-ocr; do
-                    echo "📦 Building $pkg (GitHub Release only)..."
-                    cd $pkg
-                    python -m build --outdir ../dist
-                    cd ..
+                    echo "📦 Building $pkg..."
+                    uv build --package $pkg
                   done
 
-            # 3. Create GitHub Release with ALL artifacts
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v1
               with:
                   tag_name: ${{ github.ref_name }}
                   name: Release ${{ github.ref_name }}
+                  files: dist/*
                   body: |
                       ## Release Notes
                       Automated release created from tag ${{ github.ref_name }}
@@ -73,10 +67,11 @@ jobs:
                       **Published to PyPI:**
                       - `lumen-resources`
 
-                      **Attached Binaries (Manual Install):**
+                      **Attached Binaries:**
                       - `lumen-clip`
                       - `lumen-face`
                       - `lumen-ocr`
+                      - `lumen-vlm`
 
                       ### Installation Guide
 
@@ -97,7 +92,7 @@ jobs:
                       **NVIDIA GPU (CUDA 12.6):**
                       ```bash
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cu126]" \
-                        --extra-index-url https://download.pytorch.org/whl/cu126
+                      --extra-index-url https://download.pytorch.org/whl/cu126
                       ```
 
                       **Apple Silicon (Mac M1/M2/M3):**
@@ -113,17 +108,10 @@ jobs:
                       **NVIDIA Jetson (JetPack 6):**
                       ```bash
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[jp61cu126]" \
-                        --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+                      --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
                       ```
 
                       **PyTorch:**
                       ```bash
                       pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[torch]"
                       ```
-
-                      *Note: Replace `lumen_clip` with `lumen_face` or `lumen_ocr` as needed.*
-                  draft: false
-                  prerelease: false
-                  files: |
-                      dist/*.whl
-                      dist/*.tar.gz

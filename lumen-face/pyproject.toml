@@ -12,7 +12,7 @@ dependencies = [
     "grpcio",
     "grpcio-tools",
     "protobuf",
-    "lumen-resources>=0.3.2",
+    "lumen-resources>=0.3.1",
     "opencv-python-headless>=4.12.0.88",
     "numpy>=1.26.0",
     "pillow>=12.0.0",
@@ -103,6 +103,9 @@ ignore = [
     "F403",   # star imports (generated files)
     "F405",   # undefined names from star imports (generated files)
 ]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }
 
 [dependency-groups]
 dev = [

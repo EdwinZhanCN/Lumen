@@ -12,4 +12,5 @@ build
 
 examples/**/*.yaml
 !examples/**/*.example.yaml
-lumen-face/examples/config/face_cn.yaml
+
+.ruff_cache

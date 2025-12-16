@@ -46,7 +46,7 @@ class RuntimeKind(str, enum.Enum):
     """Enumerates the primary runtime families for backends."""
 
     TORCH = "torch"
-    ONNXRT = "onnxrt"
+    ONNXRT = "onnx"
     RKNN = "rknn"
 
 

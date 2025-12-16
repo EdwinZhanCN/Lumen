@@ -27,8 +27,6 @@ services:
             add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:
             device: "mps"
-            onnx_providers:
-                - "CoreMLExecutionProvider"
             batch_size: 8
         models:
             bioclip:

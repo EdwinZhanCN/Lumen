@@ -5,25 +5,30 @@ Exports:
 - BaseClipBackend: abstract interface for runtime-agnostic backends
 - BackendInfo: metadata container describing runtime, device, and model info
 - RuntimeKind: enumeration of supported runtime families
-- TorchBackend: PyTorch/OpenCLIP implementation of BaseClipBackend
 - ONNXRTBackend: ONNX Runtime implementation scaffold of BaseClipBackend
 - RKNNBackend: RKNN backend shim (Linux-only optional; provided via separate module)
+- create_backend: factory function to create backends based on configuration
 """
 
 from .base import BackendInfo, BaseClipBackend, RuntimeKind
+from .factory import create_backend, get_available_backends
 from .onnxrt_backend import ONNXRTBackend
-from .rknn_backend import RKNNBackend
 
+# Optional backends
 try:
-    from .torch_backend import TorchBackend
+    from .rknn_backend import RKNNBackend
 except ImportError:
-    TorchBackend = None
+    RKNNBackend = None
+
+# TorchBackend is not imported by default to avoid requiring torch dependency
+# It will be dynamically imported by the factory when needed
 
 __all__ = [
     "BaseClipBackend",
     "BackendInfo",
     "RuntimeKind",
-    "TorchBackend",
     "ONNXRTBackend",
     "RKNNBackend",
+    "create_backend",
+    "get_available_backends",
 ]

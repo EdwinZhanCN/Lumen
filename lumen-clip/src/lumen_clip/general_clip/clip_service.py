@@ -17,14 +17,16 @@ from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
 import grpc
-from fontTools.misc.filesystem._errors import ResourceNotFound
 from google.protobuf import empty_pb2
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
+from lumen_clip.backends.base import RuntimeKind
+from ..resources import ResourceNotFoundError
+
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import ONNXRTBackend, TorchBackend
+from lumen_clip.backends import create_backend
 from lumen_clip.registry import TaskRegistry
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
@@ -84,41 +86,20 @@ class GeneralCLIPService(rpc.InferenceServicer):
             resources = ResourceLoader.load_model_resources(cache_dir, model_config)
         except Exception as e:
             logger.error(f"Failed to load resources for General CLIP model: {e}")
-            raise ResourceNotFound(
+            raise ResourceNotFoundError(
                 f"Failed to load resources for General CLIP model: {e}"
             ) from e
 
-        # Create backend based on runtime
-        runtime = model_config.runtime.value
-
-        # Handle optional backend_settings
-        device_pref = "cpu"
-        max_batch_size = 1
-        providers_list = None
-        prefer_fp16 = True
-
-        if backend_settings:
-            device_pref = backend_settings.device or "cpu"
-            max_batch_size = backend_settings.batch_size or 1
-            providers_list = backend_settings.onnx_providers
-            prefer_fp16 = getattr(backend_settings, "prefer_fp16", True)
-
-        if runtime == "torch":
-            backend = TorchBackend(
-                resources=resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+        # Create backend based on runtime using factory
+        if backend_settings is None:
+            backend_settings = BackendSettings(
+                device="cpu",
+                batch_size=1,
+                onnx_providers=None
             )
-        elif runtime == "onnx":
-            backend = ONNXRTBackend(
-                resources=resources,
-                providers=providers_list,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
-                prefer_fp16=prefer_fp16,
-            )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
+
+        # Use factory to create backend
+        backend = create_backend(backend_settings, resources, RuntimeKind(model_config.runtime.value))
 
         # Create service
         service = cls(backend, resources)

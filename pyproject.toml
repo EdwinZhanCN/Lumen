@@ -1,0 +1,28 @@
+[project]
+name = "lumen"
+version = "0.0.0"
+description = "Monorepo root for Lumen AI services"
+requires-python = ">=3.10"
+dependencies = [
+    "lumen-resources",
+    "lumen-ocr",
+    "lumen-face",
+    "lumen-clip",
+    "lumen-vlm"
+]
+
+[tool.uv.workspace]
+members = [
+    "lumen-resources",
+    "lumen-ocr",
+    "lumen-face",
+    "lumen-clip",
+    "lumen-vlm"
+]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }
+lumen-ocr = { workspace = true }
+lumen-face = { workspace = true }
+lumen-clip = { workspace = true }
+lumen-vlm = { workspace = true }

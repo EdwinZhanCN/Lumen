@@ -25,9 +25,10 @@ from google.protobuf import empty_pb2
 from lumen_resources.lumen_config import BackendSettings, ModelConfig
 from typing_extensions import override
 
+from lumen_clip.backends.base import RuntimeKind
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, ONNXRTBackend, TorchBackend
+from lumen_clip.backends import BaseClipBackend, create_backend
 from lumen_clip.registry import TaskRegistry
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
@@ -108,34 +109,16 @@ class BioCLIPService(rpc.InferenceServicer):
             logger.error(f"Failed to load model resources: {e}")
             raise ResourceNotFoundError from e
 
-        # Create backend based on runtime
-        runtime = model_config.runtime.value
-
-        # Handle optional backend_settings
-        device_pref = "cpu"
-        max_batch_size = 1
-        providers_list = None
-
-        if backend_settings:
-            device_pref = backend_settings.device or "cpu"
-            max_batch_size = backend_settings.batch_size or 1
-            providers_list = backend_settings.onnx_providers
-
-        if runtime == "torch":
-            backend = TorchBackend(
-                resources=resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+        # Create backend based on runtime using factory
+        if backend_settings is None:
+            backend_settings = BackendSettings(
+                device="cpu",
+                batch_size=1,
+                onnx_providers=None
             )
-        elif runtime == "onnx":
-            backend = ONNXRTBackend(
-                resources=resources,
-                providers=providers_list,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
-            )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
+
+        # Use factory to create backend
+        backend = create_backend(backend_settings, resources, RuntimeKind(model_config.runtime.value))
 
         # Create service
         service = cls(backend, resources)

@@ -7,87 +7,32 @@ on:
         branches: [main, dev]
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-
-            - name: Set up Python
-              uses: actions/setup-python@v4
-              with:
-                  python-version: "3.10"
-
-            - name: Install build tools
-              run: pip install build setuptools_scm
-
-            - name: Build all packages
-              run: |
-                  # Force version to 0.3.0 to satisfy local dependency constraints (>=0.3.0)
-                  # This ensures that when we build/install, the version matches what pyproject.toml expects
-                  export SETUPTOOLS_SCM_PRETEND_VERSION="0.3.0"
-                  echo "Building packages with version: $SETUPTOOLS_SCM_PRETEND_VERSION"
-
-                  # Build lumen-resources first, then others
-                  for pkg in lumen-resources lumen-clip lumen-face lumen-ocr; do
-                    echo "Building $pkg..."
-                    cd $pkg
-                    python -m build --outdir ../dist
-                    cd ..
-                  done
-
-            - name: List built packages
-              run: |
-                  echo "Built packages:"
-                  ls -la dist/
-
     test:
         runs-on: ubuntu-latest
-        env:
-            # Critical: Pretend to be version 0.3.0 so that pip install -e .
-            # registers the package as 0.3.0. This satisfies the "lumen-resources>=0.3.0"
-            # requirement in other packages, preventing pip from trying to download it from PyPI.
-            SETUPTOOLS_SCM_PRETEND_VERSION: "0.3.0"
         steps:
             - name: Checkout
               uses: actions/checkout@v4
 
-            - name: Set up Python
-              uses: actions/setup-python@v4
+            - name: Install uv
+              uses: astral-sh/setup-uv@v4
               with:
-                  python-version: "3.10"
+                  version: "latest"
+                  enable-cache: true
 
-            - name: Install dependencies
+            - name: Set up Python
+              run: uv python install 3.10
+
+            - name: Install Dependencies
+              run: uv sync
+
+            - name: Test Imports & Functionality
               run: |
-                  # 1. Install the base package first (lumen-resources)
-                  # This registers it in the environment with the PRETEND_VERSION (0.2.0)
-                  echo "Installing lumen-resources..."
-                  cd lumen-resources
-                  pip install -e .
-                  cd ..
-
-                  # 2. Install dependent packages
-                  # pip will detect that lumen-resources==0.2.0 is already installed
-                  # and skip attempting to download it from PyPI.
-                  for pkg in lumen-clip lumen-face lumen-ocr; do
-                    echo "Installing $pkg..."
-                    cd $pkg
-                    pip install -e .
-                    cd ..
-                  done
-
-            - name: Test imports
-              run: |
-                  # Test that all packages can be imported
-                  python -c "
-                  import sys
-                  for pkg in ['lumen_clip', 'lumen_face', 'lumen_ocr', 'lumen_resources']:
-                      try:
-                          __import__(pkg)
-                          print(f'✓ {pkg} imported successfully')
-                      except ImportError as e:
-                          print(f'✗ {pkg} import failed: {e}')
-                          sys.exit(1)
+                  echo "🔍 Verifying imports..."
+                  uv run python -c "
+                  import lumen_resources
+                  import lumen_ocr
+                  import lumen_face
+                  import lumen_clip
+                  import lumen_vlm
+                  print('✅ All modules imported successfully from Workspace!')
                   "

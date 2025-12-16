@@ -466,7 +466,7 @@ dev = [
 requires-dist = [
     { name = "colorlog", specifier = ">=6.7.0" },
     { name = "grpcio", specifier = ">=1.59.0" },
-    { name = "lumen-resources", specifier = ">=0.3.0" },
+    { name = "lumen-resources", specifier = ">=0.3.1" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", marker = "extra == 'cpu'", specifier = ">=1.16.0" },
     { name = "onnxruntime", marker = "extra == 'mps'", specifier = ">=1.16.0" },

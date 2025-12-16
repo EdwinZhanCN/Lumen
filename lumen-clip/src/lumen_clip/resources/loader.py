@@ -72,7 +72,10 @@ class ModelResources:
 
     def get_embedding_dim(self) -> int:
         """Get embedding dimension from model_info."""
-        return self.model_info.embedding_dim
+        embedding_dim = self.model_info.embedding_dim
+        if embedding_dim is None:
+            raise ModelInfoError("Cannot get embedding_dim from model_info.json.")
+        return embedding_dim
 
     def get_image_size(self) -> tuple[int, int] | None:
         """Get image input size from config.json."""
@@ -345,8 +348,11 @@ class ResourceLoader:
             )
             return None, None
 
-        # 4. get the dataset file relative paths
-        dataset_info: Datasets = model_info.datasets.get(dataset_name)
+        dataset_info: Datasets | None = model_info.datasets.get(dataset_name)
+        if dataset_info is None:
+            raise ResourceValidationError(
+                f"Failed to get datasets information."
+            )
         labels_path = model_root_path / dataset_info.labels
         embeddings_path = model_root_path / dataset_info.embeddings
 
