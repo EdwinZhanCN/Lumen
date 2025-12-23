@@ -1,0 +1,13 @@
+name: lumen_env
+channels:
+    - nvidia
+    - conda-forge
+    - defaults
+dependencies:
+    - python=3.11
+    - uv
+    - cuda-version=12.6
+    - cuda-toolkit
+    - cudnn
+    - cutensor
+    - tensorrt

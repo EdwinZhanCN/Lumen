@@ -1,4 +1,3 @@
-# L1-625
 """
 ONNX Runtime backend for InsightFace model packages.
 

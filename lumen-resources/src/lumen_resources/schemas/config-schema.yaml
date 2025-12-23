@@ -131,6 +131,9 @@ properties:
         patternProperties:
             "^[a-z][a-z0-9_]*$":
                 type: object
+                x-pydantic-config:
+                    validate_by_name: true
+                    validate_by_alias: true
                 required:
                     - enabled
                     - package
@@ -150,7 +153,7 @@ properties:
                             - "lumen_clip"
                             - "lumen_face"
 
-                    import:
+                    import_info:
                         type: object
                         required:
                             - registry_class
@@ -202,10 +205,6 @@ definitions:
                     type: string
                 description: "List of ONNX execution providers. If null, uses ONNX Runtime defaults."
                 default: null
-            prefer_fp16:
-                type: boolean
-                description: "Whether to prefer FP16 model files over FP32 when available. Improves performance on supported hardware."
-                default: true
         additionalProperties: false
     ModelConfig:
         type: object
@@ -240,6 +239,13 @@ definitions:
                 examples:
                     - "ImageNet_1k"
                     - "TreeOfLife-10M"
+            precision:
+                type: string
+                description: Preferred precision for running the model, valid only when runtime is 'onnx' or 'rknn'. The download validator will check the precision field in model_info.json to verify if the preferred precision is available for the current model.
+                examples:
+                    - "fp32"
+                    - "int8"
+                    - "q4fp16"
 
         # If runtime=rknn, rknn_device is required
         if:

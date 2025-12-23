@@ -1,0 +1,30 @@
+[project]
+name = "lumen-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "EdwinZhan", email = "ed_zhan@outlook.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "flet[all]>=0.28.3",
+    "lumen-resources",
+    "python-i18n>=0.3.9",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+lumen-app = "lumen_hub.main:start_app"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.4",
+]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }
