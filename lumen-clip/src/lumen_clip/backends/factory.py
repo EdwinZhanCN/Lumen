@@ -9,7 +9,6 @@ unconditionally.
 from __future__ import annotations
 
 import logging
-from typing import Type
 
 from lumen_resources.lumen_config import BackendSettings
 
@@ -19,12 +18,12 @@ from .onnxrt_backend import ONNXRTBackend
 logger = logging.getLogger(__name__)
 
 # Global registry for backends
-_BACKEND_REGISTRY: dict[RuntimeKind, Type[BaseClipBackend]] = {
+_BACKEND_REGISTRY: dict[RuntimeKind, type[BaseClipBackend]] = {
     RuntimeKind.ONNXRT: ONNXRTBackend,
 }
 
 
-def register_backend(kind: RuntimeKind, backend_class: Type[BaseClipBackend]) -> None:
+def register_backend(kind: RuntimeKind, backend_class: type[BaseClipBackend]) -> None:
     """Register a backend class for a given runtime kind."""
     _BACKEND_REGISTRY[kind] = backend_class
 
@@ -42,7 +41,8 @@ def get_available_backends() -> list[RuntimeKind]:
 
     # Check PyTorch (optional dependency)
     try:
-        import torch #type: ignore
+        import torch  #type: ignore
+
         # Try to import TorchBackend
         from .torch_backend import TorchBackend
         register_backend(RuntimeKind.TORCH, TorchBackend)

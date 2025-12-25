@@ -94,6 +94,14 @@ where = ["src"]
 line-length = 88
 target-version = "py310"
 
+[tool.ruff.per-file-ignores]
+"*_pb2.py" = ["ALL"]
+"*_pb2_grpc.py" = ["ALL"]
+"*.pb2.py" = ["ALL"]
+"*.pb2_grpc.py" = ["ALL"]
+"*.pyi" = ["ALL"]
+
+
 [tool.ruff.lint]
 select = [
     "E",      # pycodestyle errors
@@ -108,14 +116,6 @@ ignore = [
     "E501",   # line too long, handled by black
     "B008",   # do not perform function calls in argument defaults
     "C901",   # too complex
-]
-
-[tool.ruff.lint.per-file-ignores]
-"proto/*" = [
-    "E402",   # module level import not at top of file
-    "F401",   # unused imports (generated files)
-    "F403",   # star imports (generated files)
-    "F405",   # undefined names from star imports (generated files)
 ]
 
 [tool.uv.sources]

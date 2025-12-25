@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
 from .backend_exceptions import *
 
 if TYPE_CHECKING:
@@ -110,7 +111,7 @@ class BaseClipBackend(abc.ABC):
 
     def __init__(
         self,
-        resources: "ModelResources",
+        resources: ModelResources,
         device_preference: str | None = None,
         max_batch_size: int | None = None,
     ) -> None:

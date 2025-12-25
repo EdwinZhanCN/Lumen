@@ -733,14 +733,14 @@ class TorchBackend(BaseClipBackend):
                             feats = self._hf_model.get_text_features(**inputs)
                         else:
                             raise TorchBackendError(
-                                f"Model does not have get_text_features method"
+                                "Model does not have get_text_features method"
                             )
                 else:
                     if hasattr(self._hf_model, "get_text_features"):
                         feats = self._hf_model.get_text_features(**inputs)
                     else:
                         raise TorchBackendError(
-                            f"Model does not have get_text_features method"
+                            "Model does not have get_text_features method"
                         )
             else:
                 # OpenCLIP path

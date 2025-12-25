@@ -229,20 +229,10 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         service_display_name = "General OCR"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
 
-        # Extract device preference from backend settings if available
-        device_preference = None
-        if service_config.backend_settings:
-            # Assuming backend_settings might have a default device or similar
-            # For now, we can leave it None or check specific fields if defined in schema
-            pass
-
-        logger.info(f"Configuration for '{service_display_name}' identified.")
-
         # Step 3: Initialize the service
         service_instance = GeneralOcrService.from_config(
-            config=config,
+            service_config=service_config,
             cache_dir=str(cache_dir),
-            device_preference=device_preference,
         )
 
         logger.info(f"Initializing {service_display_name} service...")

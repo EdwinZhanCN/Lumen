@@ -1,12 +1,13 @@
 [project]
 name = "lumen-app"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "Desktop application for Lumen AI services"
 readme = "README.md"
-authors = [
-    { name = "EdwinZhan", email = "ed_zhan@outlook.com" }
-]
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
 dependencies = [
     "flet[all]>=0.28.3",
     "lumen-resources",
@@ -14,16 +15,29 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
+
 [project.scripts]
-lumen-app = "lumen_hub.main:start_app"
+lumen-app = "lumen_app.main:start_app"
 
 [build-system]
-requires = ["uv_build>=0.8.0,<0.9"]
-build-backend = "uv_build"
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+search_parent_directories = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.4",
+    "ruff>=0.14.2",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
 ]
 
 [tool.uv.sources]

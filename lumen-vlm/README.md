@@ -61,10 +61,17 @@ services:
       max_new_tokens: 512
       prefer_fp16: true
     models:
+      # Supported keys: "general", "vlm", "fastvlm"
       general:
         model: "FastVLM-0.5B"
         runtime: onnx
 ```
+
+### Supported Model Configuration Keys
+
+| Service Type | Supported Keys | Description |
+|--------------|----------------|-------------|
+| **GeneralFastVLMService** | `general`, `vlm`, `fastvlm` | Loads a vision-language model for multimodal understanding and text generation |
 
 Key points:
 

@@ -200,11 +200,10 @@ definitions:
                 minimum: 1
                 default: 8
             onnx_providers:
-                type: [array, "null"] # Allow array or null
-                items:
-                    type: string
-                description: "List of ONNX execution providers. If null, uses ONNX Runtime defaults."
+                type: [array, "null"]
+                description: "List of ONNX execution providers. Each item can be a string or a tuple of (name, config_dict)."
                 default: null
+
         additionalProperties: false
     ModelConfig:
         type: object

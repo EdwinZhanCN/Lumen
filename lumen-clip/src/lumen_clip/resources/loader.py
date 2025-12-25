@@ -351,7 +351,7 @@ class ResourceLoader:
         dataset_info: Datasets | None = model_info.datasets.get(dataset_name)
         if dataset_info is None:
             raise ResourceValidationError(
-                f"Failed to get datasets information."
+                "Failed to get datasets information."
             )
         labels_path = model_root_path / dataset_info.labels
         embeddings_path = model_root_path / dataset_info.embeddings
@@ -366,7 +366,7 @@ class ResourceLoader:
                         f"Missing dataset files: {labels_path} or {embeddings_path}"
                     )
 
-                with open(labels_path, "r", encoding="utf-8") as f:
+                with open(labels_path, encoding="utf-8") as f:
                     labels = np.array(json.load(f), dtype=object)
 
                 logger.info(

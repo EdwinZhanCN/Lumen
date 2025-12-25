@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import io
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, cast
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -85,7 +85,7 @@ class ONNXRTBackend(BaseClipBackend):
 
     def __init__(
         self,
-        resources: "ModelResources",
+        resources: ModelResources,
         providers: list[str] | None = None,
         device_preference: str | None = None,
         max_batch_size: int | None = None,

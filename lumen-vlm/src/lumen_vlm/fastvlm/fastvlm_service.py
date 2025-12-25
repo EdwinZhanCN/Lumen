@@ -19,7 +19,7 @@ from pathlib import Path
 import grpc
 from google.protobuf import empty_pb2
 from lumen_resources import TextGenerationV1
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_resources.lumen_config import BackendSettings, ModelConfig, Services
 from typing_extensions import override
 
 import lumen_vlm.proto.ml_service_pb2 as pb
@@ -101,25 +101,22 @@ class GeneralFastVLMService(rpc.InferenceServicer):
     @classmethod
     def from_config(
         cls,
-        model_config: ModelConfig,
+        service_config: Services,
         cache_dir: Path,
-        backend_settings: BackendSettings | None,
     ):
-        """Create GeneralFastVLMService from Lumen configuration.
+        """Create GeneralFastVLMService from service configuration.
 
         This factory method creates a fully configured service instance by:
-        1. Loading model resources using the validated configuration
-        2. Selecting appropriate backend based on runtime settings
-        3. Configuring backend with device and performance settings
-        4. Creating and returning the initialized service
+        1. Extracting model configuration from service_config.models
+        2. Loading model resources using the validated configuration
+        3. Selecting appropriate backend based on runtime settings
+        4. Configuring backend with device and performance settings
+        5. Creating and returning the initialized service
 
         Args:
-            model_config: Model configuration from lumen_config.yaml containing
-                model name, runtime type, and model-specific parameters.
+            service_config: Services config from lumen_config (services.vlm).
             cache_dir: Directory path for model caching and temporary files.
                 Models will be downloaded and stored here if not present.
-            backend_settings: Optional backend configuration including device
-                preferences, batch sizes, and performance optimizations.
 
         Returns:
             GeneralFastVLMService: Fully configured service instance ready for
@@ -132,16 +129,35 @@ class GeneralFastVLMService(rpc.InferenceServicer):
         """
         from ..resources.exceptions import ConfigError
 
+        # Extract model_config from service_config.models
+        # Supports keys: "general", "vlm", "fastvlm"
+        model_config = None
+        for key in ["general", "vlm", "fastvlm"]:
+            if key in service_config.models:
+                model_config = service_config.models[key]
+                break
+
+        if model_config is None:
+            # Fall back to first available model
+            if not service_config.models:
+                raise ValueError("No models configured for VLM service")
+            model_key = next(iter(service_config.models.keys()))
+            logger.info(f"Using model '{model_key}' for VLM service")
+            model_config = service_config.models[model_key]
+
+        # Get backend_settings from service_config
+        backend_settings = service_config.backend_settings
+
         # Load resources using the validated model_config
         logger.info(f"Loading resources for FastVLM model: {model_config.model}")
         resources = ResourceLoader.load_model_resource(cache_dir, model_config)
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = getattr(backend_settings, "device", "cpu")
-        max_new_tokens = getattr(backend_settings, "max_new_tokens", 512)
-        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True)
-        providers = getattr(backend_settings, "onnx_providers", None)
+        device_pref = getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
+        max_new_tokens = getattr(backend_settings, "max_new_tokens", 512) if backend_settings else 512
+        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True) if backend_settings else True
+        providers = getattr(backend_settings, "onnx_providers", None) if backend_settings else None
 
         if runtime == "onnx":
             from lumen_vlm.backends.onnxrt_backend import FastVLMONNXBackend

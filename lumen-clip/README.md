@@ -83,23 +83,35 @@ services:
       batch_size: 8
     models:
       # Define 'general' for GeneralCLIPService
+      # Supported keys: "general", "clip", "general_clip"
       general:
-        model: "CN-CLIP_ViT-B-16" 
+        model: "CN-CLIP_ViT-B-16"
         runtime: torch
         dataset: ImageNet_1k # Optional, enables classification tasks
-      
+
       # Define 'bioclip' for BioCLIPService
       # Define BOTH for SmartCLIPService
+      # Supported keys: "bioclip", "bio", "bioclip2"
       # bioclip:
       #   model: "bioclip-2"
       #   runtime: torch
       #   dataset: TreeOfLife-200M
 ```
 
+### Supported Model Configuration Keys
+
+The service automatically selects which service class to instantiate based on the model keys present in `services.clip.models`:
+
+| Service Type | Supported Keys | Description |
+|--------------|----------------|-------------|
+| **GeneralCLIPService** | `general`, `clip`, `general_clip` | Loads a general-purpose CLIP model for text/image embeddings and ImageNet classification |
+| **BioCLIPService** | `bioclip`, `bio`, `bioclip2` | Loads BioCLIP for biological and scientific image analysis |
+| **SmartCLIPService** | Both general AND bioclip keys | Unified service with both models loaded, enabling intelligent model selection |
+
 Key points:
 
 1. **Model caching** is handled by `lumen-resources`: it downloads model weights, tokenizers, and optional datasets (like `ImageNet_1k.npz` or `TreeOfLife`).
-2. **Service Selection**: The server automatically instantiates `GeneralCLIPService`, `BioCLIPService`, or `SmartCLIPService` based on which models (`general` and/or `bioclip`) are defined in the config.
+2. **Service Selection**: The server automatically instantiates `GeneralCLIPService`, `BioCLIPService`, or `SmartCLIPService` based on which model keys are defined in the config.
 3. **Backend settings** allow you to bias provider selection (`device`) and tweak batch sizes for high-throughput scenarios.
 
 ## Supported Models

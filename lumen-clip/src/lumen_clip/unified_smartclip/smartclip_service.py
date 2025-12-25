@@ -13,17 +13,19 @@ streaming Inference protocol to expose tasks:
 import json
 import logging
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
 
 import grpc
 from google.protobuf import empty_pb2
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_resources import EmbeddingV1, LabelsV1
+from lumen_resources.lumen_config import BackendSettings, Services
+from lumen_resources.result_schemas.labels_v1 import Label
 from typing_extensions import override
 
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, create_backend, RuntimeKind
+from lumen_clip.backends import BaseClipBackend, RuntimeKind, create_backend
 from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 from lumen_clip.general_clip.clip_model import CLIPModelManager
 from lumen_clip.registry import TaskRegistry
@@ -72,24 +74,50 @@ class SmartCLIPService(rpc.InferenceServicer):
     @classmethod
     def from_config(
         cls,
-        clip_config: ModelConfig,
-        bioclip_config: ModelConfig,
+        service_config: Services,
         cache_dir: Path,
-        backend_settings: BackendSettings | None,
     ):
         """
         Create SmartCLIPService from configuration.
 
         Args:
-            clip_config: Configuration for CLIP model
-            bioclip_config: Configuration for BioCLIP model
+            service_config: Services config from lumen_config (services.clip).
             cache_dir: Cache directory path
-            backend_settings: Backend settings
 
         Returns:
             Initialized SmartCLIPService instance
         """
-        from lumen_clip.resources.exceptions import ConfigError
+
+        # Extract clip_config from service_config.models
+        # Supports keys: "general", "clip", "general_clip"
+        clip_config = None
+        for key in ["general", "clip", "general_clip"]:
+            if key in service_config.models:
+                clip_config = service_config.models[key]
+                break
+
+        if clip_config is None:
+            raise ValueError(
+                "No CLIP model config found in service_config.models. "
+                "Expected one of: 'general', 'clip', 'general_clip'"
+            )
+
+        # Extract bioclip_config from service_config.models
+        # Supports keys: "bioclip", "bio", "bioclip2"
+        bioclip_config = None
+        for key in ["bioclip", "bio", "bioclip2"]:
+            if key in service_config.models:
+                bioclip_config = service_config.models[key]
+                break
+
+        if bioclip_config is None:
+            raise ValueError(
+                "No BioCLIP model config found in service_config.models. "
+                "Expected one of: 'bioclip', 'bio', 'bioclip2'"
+            )
+
+        # Get backend_settings from service_config
+        backend_settings = service_config.backend_settings
 
         # Load CLIP resources
         logger.info(f"Loading resources for CLIP model: {clip_config.model}")
@@ -105,15 +133,11 @@ class SmartCLIPService(rpc.InferenceServicer):
         if backend_settings is None:
             # Create default backend settings if not provided
             clip_backend_settings = BackendSettings(
-                device="cpu",
-                batch_size=8,
-                onnx_providers=None
+                device="cpu", batch_size=8, onnx_providers=None
             )
 
             bioclip_backend_settings = BackendSettings(
-                device="cpu",
-                batch_size=8,
-                onnx_providers=None
+                device="cpu", batch_size=8, onnx_providers=None
             )
         else:
             # Create backend settings for each model
@@ -131,8 +155,12 @@ class SmartCLIPService(rpc.InferenceServicer):
 
         # Create backends using factory
         runtime_kind = RuntimeKind(clip_config.runtime.value)
-        clip_backend = create_backend(clip_backend_settings, clip_resources, runtime_kind)
-        bioclip_backend = create_backend(bioclip_backend_settings, bioclip_resources, runtime_kind)
+        clip_backend = create_backend(
+            clip_backend_settings, clip_resources, runtime_kind
+        )
+        bioclip_backend = create_backend(
+            bioclip_backend_settings, bioclip_resources, runtime_kind
+        )
 
         # Create service
         service = cls(clip_backend, clip_resources, bioclip_backend, bioclip_resources)
@@ -233,7 +261,7 @@ class SmartCLIPService(rpc.InferenceServicer):
         if not self.is_initialized:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Models not initialized")
 
-        buffers: Dict[str, bytearray] = {}
+        buffers: dict[str, bytearray] = {}
 
         for req in request_iterator:
             cid = req.correlation_id or f"cid-{_now_ms()}"
@@ -302,30 +330,29 @@ class SmartCLIPService(rpc.InferenceServicer):
     # -------- Task Handlers ----------
 
     def _handle_text_embed(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles text embedding with intelligent model selection."""
         if not payload_mime.startswith("text/"):
             raise ValueError(f"text_embed expects text/* payload, got {payload_mime!r}")
 
         text = payload.decode("utf-8")
 
-        # Use CLIP for text embedding (generally better for general text)
         vec = self.clip_model.encode_text(text).tolist()
-
         info = self.clip_model.info()
         model_id = f"smartclip:{info.model_name}"
 
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
+
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj).encode("utf-8"),
             "application/json;schema=embedding_v1",
-            {"dim": str(len(vec))},
+            {},
         )
 
     def _handle_image_embed(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles image embedding with intelligent model selection."""
         if not payload_mime.startswith("image/"):
             raise ValueError(
@@ -338,16 +365,16 @@ class SmartCLIPService(rpc.InferenceServicer):
         info = self.clip_model.info()
         model_id = f"smartclip:{info.model_name}"
 
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj).encode("utf-8"),
             "application/json;schema=embedding_v1",
-            {"dim": str(len(vec))},
+            {},
         )
 
     def _handle_classify(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles intelligent image classification."""
         if not self.clip_model.supports_classification:
             raise RuntimeError(
@@ -362,40 +389,38 @@ class SmartCLIPService(rpc.InferenceServicer):
         info = self.clip_model.info()
         model_id = f"smartclip:{info.model_name}"
 
-        obj = {
-            "labels": [
-                {"label": label, "score": float(score)} for label, score in scores
-            ],
-            "model_id": model_id,
-        }
+        resp_obj = LabelsV1(
+            labels=[Label(label=label, score=float(score)) for label, score in scores],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": str(len(scores))},
         )
 
     def _handle_scene_classify(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles scene classification using CLIP."""
         label, score = self.clip_model.classify_scene(payload)
 
         info = self.clip_model.info()
         model_id = f"smartclip:{info.model_name}"
 
-        obj = {
-            "labels": [{"label": label, "score": float(score)}],
-            "model_id": model_id,
-        }
+        resp_obj = LabelsV1(
+            labels=[Label(label=label, score=float(score))],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": "1"},
         )
 
     def _handle_bioclassify(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles biological classification using BioCLIP."""
         if not self.bioclip_model.supports_classification:
             raise RuntimeError(
@@ -414,12 +439,12 @@ class SmartCLIPService(rpc.InferenceServicer):
         info = self.bioclip_model.info()
         model_id = f"smartclip:{info.model_name}"
 
-        obj = {
-            "labels": [{"label": name, "score": float(score)} for name, score in pairs],
-            "model_id": model_id,
-        }
+        resp_obj = LabelsV1(
+            labels=[Label(label=name, score=float(score)) for name, score in pairs],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": str(len(pairs))},
         )
@@ -427,8 +452,8 @@ class SmartCLIPService(rpc.InferenceServicer):
     # -------- Helper Methods ----------
 
     def _assemble(
-        self, cid: str, req: pb.InferRequest, buffers: Dict[str, bytearray]
-    ) -> Tuple[bytes, bool]:
+        self, cid: str, req: pb.InferRequest, buffers: dict[str, bytearray]
+    ) -> tuple[bytes, bool]:
         """
         Reassembles chunked request payloads.
         """

@@ -234,59 +234,54 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             logger.error("Configuration error: 'services.clip.models' is not defined.")
             sys.exit(1)
 
-        general_model_config = service_config.models.get("general")
-        bioclip_model_config = service_config.models.get("bioclip")
-        if not (general_model_config or bioclip_model_config):
-            logger.error(
-                "Configuration error: at least one of `services.clip.models.general` or `services.clip.models.bioclip` must be defined."
-            )
-            sys.exit(1)
-
-        service_instance = None
-        service_display_name = "Unknown"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
-        backend_settings = service_config.backend_settings
+
         # Decision logic: choose the service based on which models are configured.
-        if general_model_config and bioclip_model_config:
+        # Check for both CLIP and BioCLIP models -> SmartCLIP (Unified Service)
+        has_clip = any(
+            key in service_config.models for key in ["general", "clip", "general_clip"]
+        )
+        has_bioclip = any(
+            key in service_config.models for key in ["bioclip", "bio", "bioclip2"]
+        )
+
+        if has_clip and has_bioclip:
             # Case 1: Both models are defined -> Unified Service
             service_display_name = "Unified SmartCLIP"
             logger.info(
                 f"Configuration for '{service_display_name}' service identified."
             )
             service_instance = SmartCLIPService.from_config(
-                clip_config=general_model_config,
-                bioclip_config=bioclip_model_config,
+                service_config=service_config,
                 cache_dir=cache_dir,
-                backend_settings=backend_settings,
             )
 
-        elif general_model_config:
+        elif has_clip:
             # Case 2: Only general model is defined -> General CLIP Service
             service_display_name = "General CLIP"
             logger.info(
                 f"Configuration for '{service_display_name}' service identified."
             )
             service_instance = GeneralCLIPService.from_config(
-                model_config=general_model_config,
+                service_config=service_config,
                 cache_dir=cache_dir,
-                backend_settings=backend_settings,
             )
 
-        elif bioclip_model_config:
+        elif has_bioclip:
             # Case 3: Only BioCLIP model is defined -> BioCLIP Service
             service_display_name = "BioCLIP"
             logger.info(
                 f"Configuration for '{service_display_name}' service identified."
             )
             service_instance = BioCLIPService.from_config(
-                model_config=bioclip_model_config,
+                service_config=service_config,
                 cache_dir=cache_dir,
-                backend_settings=backend_settings,
             )
 
         else:
             logger.error(
-                "Configuration error: No valid models ('general' or 'bioclip') found under 'services.clip'."
+                "Configuration error: No valid models found under 'services.clip.models'. "
+                "Expected at least one of: 'general', 'clip', 'general_clip', 'bioclip', 'bio', 'bioclip2'"
             )
             sys.exit(1)
 
