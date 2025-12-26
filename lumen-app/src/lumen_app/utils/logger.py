@@ -97,6 +97,8 @@ def _suppress_third_party_loggers() -> None:
         "flet": logging.WARNING,
         "flet_core": logging.WARNING,
         "flet.view": logging.WARNING,
+        "flet_web": logging.WARNING,
+        "flet_web.fastapi": logging.WARNING,
         "httpx": logging.WARNING,
         "urllib3": logging.WARNING,
         "websockets": logging.WARNING,
