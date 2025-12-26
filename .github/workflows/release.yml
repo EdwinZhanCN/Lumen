@@ -38,6 +38,8 @@ jobs:
             - name: Build and Publish lumen-resources
               run: |
                   echo "📦 Building lumen-resources..."
+                  export SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.VERSION }}
+                  export SETUPTOOLS_SCM_PRETEND_NAMED=true
                   uv build --package lumen-resources
 
                   echo "🚀 Publishing to PyPI..."
