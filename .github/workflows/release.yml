@@ -90,24 +90,34 @@ jobs:
 
                       **NVIDIA GPU (CUDA 12.6):**
                       ```bash
-                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cu126]" \
-                      --extra-index-url https://download.pytorch.org/whl/cu126
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cuda]"
+                      ```
+
+                      **NVIDIA GPU with PyTorch CUDA wheels:**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cuda]" \
+                      --index-url https://download.pytorch.org/whl/cu126
                       ```
 
                       **Apple Silicon (Mac M Series):**
                       ```bash
-                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[mps]"
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[apple]"
                       ```
 
                       **Intel OpenVINO:**
                       ```bash
-                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[openvino253]"
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[openvino]"
                       ```
 
                       **NVIDIA Jetson (JetPack 6 with CUDA 12.6):**
                       ```bash
-                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[jp61cu126]" \
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[cuda]" \
                       --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+                      ```
+
+                      **Rockchip NPU:**
+                      ```bash
+                      pip install "./lumen_clip-${{ env.VERSION }}-py3-none-any.whl[rknn]"
                       ```
 
                       **PyTorch:**

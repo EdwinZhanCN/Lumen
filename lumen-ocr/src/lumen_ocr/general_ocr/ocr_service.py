@@ -14,7 +14,7 @@ from typing import Any, Optional
 import grpc
 from google.protobuf import empty_pb2
 from lumen_resources import OCRV1
-from lumen_resources.lumen_config import LumenConfig
+from lumen_resources.lumen_config import Services
 
 from lumen_ocr.proto import ml_service_pb2, ml_service_pb2_grpc
 
@@ -72,44 +72,47 @@ class GeneralOcrService(ml_service_pb2_grpc.InferenceServicer):
     @classmethod
     def from_config(
         cls,
-        config: LumenConfig,
+        service_config: Services,
         cache_dir: str,
-        device_preference: Optional[str] = None,
     ) -> "GeneralOcrService":
         """
-        Create service instance from Lumen configuration.
+        Create service instance from service configuration.
 
         Args:
-            config: Parsed LumenConfig object.
+            service_config: Services config from lumen_config (services.ocr).
             cache_dir: Directory for model caching.
-            device_preference: Optional device hint (e.g., "cuda", "cpu").
 
         Returns:
             GeneralOcrService: Configured service instance.
 
         Raises:
-            ValueError: If OCR service or models are not configured.
+            ValueError: If OCR models are not configured.
         """
-        if "ocr" not in config.services:
-            raise ValueError("OCR service not configured in Lumen config")
+        # Select model configuration from service_config.models
+        # Supports keys: "general", "ocr", "ppocr"
+        model_key = None
+        for key in ["general", "ocr", "ppocr"]:
+            if key in service_config.models:
+                model_key = key
+                break
 
-        ocr_config = config.services["ocr"]
-
-        # Select model configuration
-        # Default to 'general' if available, otherwise take the first one
-        model_key = "general"
-        if model_key not in ocr_config.models:
-            if not ocr_config.models:
+        if model_key is None:
+            # Fall back to first available model
+            if not service_config.models:
                 raise ValueError("No models configured for OCR service")
-            model_key = next(iter(ocr_config.models.keys()))
+            model_key = next(iter(service_config.models.keys()))
             logger.info(f"Defaulting to model '{model_key}' for OCR service")
 
-        model_config = ocr_config.models[model_key]
+        model_config = service_config.models[model_key]
+
+        # Extract backend settings from service_config
         providers = None
         prefer_fp16 = True
-        if ocr_config.backend_settings:
-            providers = ocr_config.backend_settings.onnx_providers
-            prefer_fp16 = getattr(ocr_config.backend_settings, "prefer_fp16", True)
+        device_preference = None
+        if service_config.backend_settings:
+            providers = service_config.backend_settings.onnx_providers
+            prefer_fp16 = getattr(service_config.backend_settings, "prefer_fp16", True)
+            device_preference = service_config.backend_settings.device
 
         manager = OcrModelManager(
             config=model_config,

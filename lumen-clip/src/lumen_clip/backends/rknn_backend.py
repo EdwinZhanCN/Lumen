@@ -16,12 +16,12 @@ How to enable RKNN (Linux only):
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from typing_extensions import override
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import override
 
-from .base import BaseClipBackend, BackendInfo
+from .base import BackendInfo, BaseClipBackend
 
 if TYPE_CHECKING:
     from lumen_clip.resources import ModelResources
@@ -40,7 +40,7 @@ class RKNNBackend(BaseClipBackend):
 
     def __init__(
         self,
-        resources: "ModelResources",
+        resources: ModelResources,
         device_preference: str | None = None,
         max_batch_size: int | None = None,
     ) -> None:

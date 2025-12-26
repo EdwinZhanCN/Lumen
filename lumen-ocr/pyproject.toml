@@ -31,7 +31,8 @@ cpu = [
 # Python Dependency For Nvidia GPU Platform
 # Cuda Version should be 12.6 fixed.
 # Python Version Should be 3.10 fixed, be sure to use --index-url https://download.pytorch.org/whl/cu126
-cu126 = [
+# For Jetson platform, use --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+cuda = [
     "onnxruntime-gpu",
 ]
 
@@ -39,21 +40,14 @@ cu126 = [
 # Python Version Should be above 3.10.
 # All dependencies will be installed from PyPI. All backends are officially supported on M Series.
 # ONNX Runtime: CoreMLEP backend.
-mps = [
+apple = [
     "onnxruntime>=1.16.0",
 ]
 
 # Python Dependency For Intel OpenVINO Platform.
 # Python Version Should be 3.11 fixed.
-openvino253 = [
-    "onnxruntime-openvino==1.21.0",
-]
-
-# Python Dependency For Jetson Platform.
-# Cuda Version should be 12.6 fixed.
-# Python Version Should be 3.10 fixed, be sure to use --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
-jp61cu126 = [
-    "onnxruntime-gpu",
+openvino = [
+    "onnxruntime-openvino>=1.21.0",
 ]
 
 [project.scripts]

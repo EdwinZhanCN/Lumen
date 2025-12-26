@@ -67,10 +67,17 @@ services:
     backend_settings:
       device: null          # auto-detect (cpu/cuda/coreml/...)
     models:
+      # Supported keys: "general", "ocr", "ppocr"
       general:
         model: "PP-OCRv5"   # or other supported model IDs
         runtime: onnx
 ```
+
+### Supported Model Configuration Keys
+
+| Service Type | Supported Keys | Description |
+|--------------|----------------|-------------|
+| **GeneralOcrService** | `general`, `ocr`, `ppocr` | Loads a PaddleOCR-style model for text detection and recognition |
 
 Key points:
 

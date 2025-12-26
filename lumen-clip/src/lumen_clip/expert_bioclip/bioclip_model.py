@@ -9,15 +9,17 @@ Refactored BioCLIPModelManager to use ModelResources from lumen-resources.
 """
 
 from __future__ import annotations
+
 import logging
 import time
 from typing import Any
 
 import numpy as np
-from lumen_clip.backends import BaseClipBackend
-from lumen_clip.resources.loader import ModelResources
-from lumen_clip.models import ModelInfo, BackendInfo
 from numpy.typing import NDArray
+
+from lumen_clip.backends import BaseClipBackend
+from lumen_clip.models import BackendInfo, ModelInfo
+from lumen_clip.resources.loader import ModelResources
 
 logger = logging.getLogger(__name__)
 

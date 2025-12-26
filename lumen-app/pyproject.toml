@@ -1,0 +1,45 @@
+[project]
+name = "lumen-app"
+dynamic = ["version"]
+description = "Desktop application for Lumen AI services"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "EdwinZhanCN", email = "support@lumilio.org" }
+]
+dependencies = [
+    "colorlog>=6.10.1",
+    "flet[all]>=0.28.3",
+    "lumen-resources",
+    "python-i18n>=0.3.9",
+    "pyyaml>=6.0.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/EdwinZhanCN/Lumen"
+Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
+
+[project.scripts]
+lumen-app = "lumen_app.main:start_app"
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+search_parent_directories = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.2",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.uv.sources]
+lumen-resources = { workspace = true }

@@ -9,8 +9,8 @@ pattern as lumen-face for consistency across Lumen services.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
 
 import lumen_clip.proto.ml_service_pb2 as pb
 
@@ -22,9 +22,9 @@ class TaskDefinition:
     """Definition of a CLIP service task with metadata."""
 
     name: str
-    handler: Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]] # def handler(payload, payload_mime, meta) -> (result, result_mime, meta)
+    handler: Callable[[bytes, str, dict[str, str]], tuple[bytes, str, dict[str, str]]] # def handler(payload, payload_mime, meta) -> (result, result_mime, meta)
     description: str
-    input_mimes: List[str] = field(default_factory=list)
+    input_mimes: list[str] = field(default_factory=list)
     output_mime: str = "application/json"
     metadata: dict[str, str] = field(default_factory=dict)
 
@@ -47,17 +47,17 @@ class TaskRegistry:
 
     def __init__(self):
         # [{name, definition}, ...]
-        self._tasks: Dict[str, TaskDefinition] = {}
+        self._tasks: dict[str, TaskDefinition] = {}
         self._service_name: str = "unknown"
 
     def register_task(
         self,
         name: str,
-        handler: Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]],
+        handler: Callable[[bytes, str, dict[str, str]], tuple[bytes, str, dict[str, str]]],
         description: str,
-        input_mimes: List[str] | None = None,
+        input_mimes: list[str] | None = None,
         output_mime: str = "application/json",
-        metadata: Dict[str, str] | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> None:
         """Register a task with the registry."""
         if name in self._tasks:
@@ -79,7 +79,7 @@ class TaskRegistry:
         """Set the service name for capability reporting."""
         self._service_name = service_name
 
-    def get_handler(self, task_name: str) -> Callable[[bytes, str, Dict[str, str]], tuple[bytes, str, Dict[str, str]]]:
+    def get_handler(self, task_name: str) -> Callable[[bytes, str, dict[str, str]], tuple[bytes, str, dict[str, str]]]:
         """Get the handler for a task."""
         if task_name not in self._tasks:
             available_tasks = list(self._tasks.keys())
@@ -93,15 +93,15 @@ class TaskRegistry:
             raise ValueError(f"Task '{task_name}' not found. Available tasks: {available_tasks}")
         return self._tasks[task_name]
 
-    def list_task_names(self) -> List[str]:
+    def list_task_names(self) -> list[str]:
         """Get list of all registered task names."""
         return list(self._tasks.keys())
 
-    def list_task_definitions(self) -> List[TaskDefinition]:
+    def list_task_definitions(self) -> list[TaskDefinition]:
         """Get list of all task definitions."""
         return list(self._tasks.values())
 
-    def get_all_tasks(self) -> List[pb.IOTask]:
+    def get_all_tasks(self) -> list[pb.IOTask]:
         """Get all tasks as protobuf IOTask objects for capabilities."""
         return [task.to_io_task() for task in self._tasks.values()]
 
@@ -110,8 +110,8 @@ class TaskRegistry:
         service_name: str,
         model_id: str,
         runtime: str,
-        precisions: List[str],
-        extra_metadata: Dict[str, str] | None = None,
+        precisions: list[str],
+        extra_metadata: dict[str, str] | None = None,
     ) -> pb.Capability:
         """Build capability protobuf using registered tasks."""
         # Ensure all extra_metadata values are strings and handle None values

@@ -215,43 +215,23 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             logger.error("This server is designed for 'single' deployment mode only.")
             sys.exit(1)
 
-        # Step 2: Determine which general_face to instantiate based on model definitions.
+        # Step 2: Determine which service to instantiate based on model definitions.
         service_config = config.services.get("face")
         if not service_config or not service_config.models:
             logger.error("Configuration error: 'services.face.models' is not defined.")
             sys.exit(1)
 
-        model_config = service_config.models.get("general")
-        if not model_config or not model_config.model:
-            logger.error(
-                "Configuration error: 'services.face.models.general' is not defined."
-            )
-            sys.exit(1)
-
-        service_instance = None
-        service_display_name = "Unknown"
+        service_display_name = "General Face Recognition"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
-        backend_settings = service_config.backend_settings
-        # Decision logic: choose the general_face based on which models are configured.
-        if model_config:
-            service_display_name = "General Face Recognition"
-            logger.info(
-                f"Configuration for '{service_display_name}' general_face identified."
-            )
 
-            service_instance = GeneralFaceService.from_config(
-                model_config=model_config,
-                cache_dir=cache_dir,
-                backend_settings=backend_settings,
-            )
+        logger.info(f"Configuration for '{service_display_name}' service identified.")
 
-        else:
-            logger.error(
-                "Configuration error: No valid model 'general' found under 'services.face'."
-            )
-            sys.exit(1)
+        service_instance = GeneralFaceService.from_config(
+            service_config=service_config,
+            cache_dir=cache_dir,
+        )
 
-        # Step 3: Initialize the chosen general_face (this loads the ML models).
+        # Step 3: Initialize the chosen service (this loads the ML models).
         logger.info(f"Initializing {service_display_name} general_face...")
         service_instance.initialize()
 

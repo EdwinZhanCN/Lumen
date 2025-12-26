@@ -8,7 +8,9 @@ dependencies = [
     "lumen-ocr",
     "lumen-face",
     "lumen-clip",
-    "lumen-vlm"
+    "lumen-vlm",
+    "lumen-app",
+    "colorlog",
 ]
 
 [tool.uv.workspace]
@@ -17,7 +19,8 @@ members = [
     "lumen-ocr",
     "lumen-face",
     "lumen-clip",
-    "lumen-vlm"
+    "lumen-vlm",
+    "lumen-app",
 ]
 
 [tool.uv.sources]
@@ -26,3 +29,4 @@ lumen-ocr = { workspace = true }
 lumen-face = { workspace = true }
 lumen-clip = { workspace = true }
 lumen-vlm = { workspace = true }
+lumen-app = { workspace = true }

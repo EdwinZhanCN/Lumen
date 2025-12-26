@@ -6,7 +6,8 @@ management across all Lumen-CLIP services.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
+
 from .backends import BackendInfo
 
 
@@ -29,17 +30,17 @@ class ModelInfo:
     load_time: float
 
     # Dataset information
-    num_labels: Optional[int] = None  # Number of classes/species
+    num_labels: int | None = None  # Number of classes/species
 
     # Backend information
-    backend_info: Optional[BackendInfo] = None
+    backend_info: BackendInfo | None = None
 
     # Model-specific features
     scene_classification_available: bool = False
 
     # Additional metadata for extensibility
-    extra_metadata: Optional[Dict[str, Any]] = None
-    model_version: Optional[str] = None  # For BioCLIP
+    extra_metadata: dict[str, Any] | None = None
+    model_version: str | None = None  # For BioCLIP
 
     @property
     def embedding_dim(self) -> int:

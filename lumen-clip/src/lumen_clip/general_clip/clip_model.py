@@ -16,14 +16,13 @@ Dependencies:
 
 import logging
 import time
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from lumen_clip.backends import BaseClipBackend
+from lumen_clip.models import BackendInfo, ModelInfo
 from lumen_clip.resources.loader import ModelResources
-from lumen_clip.models import ModelInfo, BackendInfo
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +264,7 @@ class CLIPModelManager:
         if np.any(np.isnan(img_embedding)) or np.any(np.isinf(img_embedding)):
             logger.error(f"Invalid values in image embedding: NaN={np.any(np.isnan(img_embedding))}, Inf={np.any(np.isinf(img_embedding))}")
             logger.error(f"Embedding stats: min={np.min(img_embedding):.6f}, max={np.max(img_embedding):.6f}, mean={np.mean(img_embedding):.6f}")
-            raise RuntimeError(f"Image embedding contains invalid values (NaN/Inf)")
+            raise RuntimeError("Image embedding contains invalid values (NaN/Inf)")
 
         # Compute similarities using numpy (standard operations)
         img_norm = np.linalg.norm(img_embedding)
@@ -277,7 +276,7 @@ class CLIPModelManager:
         # Check text embeddings for invalid values
         if np.any(np.isnan(self.text_embeddings)) or np.any(np.isinf(self.text_embeddings)):
             logger.error(f"Invalid values in text embeddings: NaN={np.any(np.isnan(self.text_embeddings))}, Inf={np.any(np.isinf(self.text_embeddings))}")
-            raise RuntimeError(f"Text embeddings contain invalid values (NaN/Inf)")
+            raise RuntimeError("Text embeddings contain invalid values (NaN/Inf)")
 
         text_embeddings_norm = self.text_embeddings / np.linalg.norm(
             self.text_embeddings, axis=1, keepdims=True

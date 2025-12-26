@@ -1,0 +1,7 @@
+name: lumen_env
+channels:
+    - conda-forge
+dependencies:
+    - python=3.11
+    - openvino=2025.3.0
+    - uv

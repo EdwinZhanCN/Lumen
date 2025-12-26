@@ -22,17 +22,18 @@ from pathlib import Path
 
 import grpc
 from google.protobuf import empty_pb2
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_resources import EmbeddingV1, LabelsV1
+from lumen_resources.lumen_config import BackendSettings, Services
+from lumen_resources.result_schemas.labels_v1 import Label
 from typing_extensions import override
 
-from lumen_clip.backends.base import RuntimeKind
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
 from lumen_clip.backends import BaseClipBackend, create_backend
+from lumen_clip.backends.base import RuntimeKind
 from lumen_clip.registry import TaskRegistry
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
-from ..resources import ResourceNotFoundError
 from .bioclip_model import BioCLIPModelManager
 
 logger = logging.getLogger(__name__)
@@ -74,17 +75,15 @@ class BioCLIPService(rpc.InferenceServicer):
     @classmethod
     def from_config(
         cls,
-        model_config: ModelConfig,
+        service_config: Services,
         cache_dir: Path,
-        backend_settings: BackendSettings | None,
     ):
         """
         Create BioCLIPService from configuration.
 
         Args:
-            model_config: ModelConfig instance, it is the model configuration that user provided in lumen_config.
+            service_config: Services config from lumen_config (services.clip).
             cache_dir: Cache directory path
-            backend_settings: BackendSettings instance or None
 
         Returns:
             Initialized BioCLIPService instance
@@ -94,6 +93,23 @@ class BioCLIPService(rpc.InferenceServicer):
             ConfigError: If configuration is invalid
         """
         from lumen_clip.resources.exceptions import ConfigError
+
+        # Extract model_config from service_config.models
+        # Supports keys: "bioclip", "bio", "bioclip2"
+        model_config = None
+        for key in ["bioclip", "bio", "bioclip2"]:
+            if key in service_config.models:
+                model_config = service_config.models[key]
+                break
+
+        if model_config is None:
+            raise ValueError(
+                "No suitable model config found in service_config.models. "
+                "Expected one of: 'bioclip', 'bio', 'bioclip2'"
+            )
+
+        # Get backend_settings from service_config
+        backend_settings = service_config.backend_settings
 
         # Get dataset name if specified
         dataset = model_config.dataset
@@ -107,18 +123,18 @@ class BioCLIPService(rpc.InferenceServicer):
             resources = ResourceLoader.load_model_resources(cache_dir, model_config)
         except Exception as e:
             logger.error(f"Failed to load model resources: {e}")
-            raise ResourceNotFoundError from e
+            raise ConfigError from e
 
         # Create backend based on runtime using factory
         if backend_settings is None:
             backend_settings = BackendSettings(
-                device="cpu",
-                batch_size=1,
-                onnx_providers=None
+                device="cpu", batch_size=1, onnx_providers=None
             )
 
         # Use factory to create backend
-        backend = create_backend(backend_settings, resources, RuntimeKind(model_config.runtime.value))
+        backend = create_backend(
+            backend_settings, resources, RuntimeKind(model_config.runtime.value)
+        )
 
         # Create service
         service = cls(backend, resources)
@@ -285,10 +301,10 @@ class BioCLIPService(rpc.InferenceServicer):
         vec = self.model.encode_text(text).tolist()
         info = self.model.info()
         model_id = info.model_id
-        # TODO: Use pydantic model to serialize embedding_v1
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=embedding_v1",
             {"dim": str(len(vec))},
         )
@@ -310,9 +326,10 @@ class BioCLIPService(rpc.InferenceServicer):
         vec = self.model.encode_image(payload).tolist()
         info = self.model.info()
         model_id = info.model_id
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=embedding_v1",
             {"dim": str(len(vec))},
         )
@@ -322,7 +339,7 @@ class BioCLIPService(rpc.InferenceServicer):
     ) -> tuple[bytes, str, dict[str, str]]:
         """
         TreeOfLife classification:
-          - Expects payload_mime: "image/jpeg" / "image/png"
+          - Expects payload_mime: "image/jpeg" / "image/png" / "image/webp"
           - Expects meta.namespace="bioatlas"
           - Optional meta.topk (default 5)
           - Output result_mime: "application/json;schema=labels_v1"
@@ -344,12 +361,13 @@ class BioCLIPService(rpc.InferenceServicer):
 
         info = self.model.info()
         model_id = info.model_id
-        obj = {
-            "labels": [{"label": name, "score": float(score)} for name, score in pairs],
-            "model_id": model_id,
-        }
+
+        resp_obj = LabelsV1(
+            labels=[Label(label=name, score=float(score)) for name, score in pairs],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": str(len(pairs))},
         )

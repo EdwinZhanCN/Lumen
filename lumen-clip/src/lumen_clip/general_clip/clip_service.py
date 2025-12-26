@@ -13,23 +13,24 @@ to expose tasks:
 import json
 import logging
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
 
 import grpc
 from google.protobuf import empty_pb2
-from lumen_resources.lumen_config import BackendSettings, ModelConfig
+from lumen_resources import EmbeddingV1, LabelsV1
+from lumen_resources.lumen_config import BackendSettings, Services
+from lumen_resources.result_schemas.labels_v1 import Label
 from typing_extensions import override
-
-from lumen_clip.backends.base import RuntimeKind
-from ..resources import ResourceNotFoundError
 
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
 from lumen_clip.backends import create_backend
+from lumen_clip.backends.base import RuntimeKind
 from lumen_clip.registry import TaskRegistry
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
+from ..resources import ResourceNotFoundError
 from .clip_model import CLIPModelManager
 
 logger = logging.getLogger(__name__)
@@ -63,22 +64,36 @@ class GeneralCLIPService(rpc.InferenceServicer):
     @classmethod
     def from_config(
         cls,
-        model_config: ModelConfig,
+        service_config: Services,
         cache_dir: Path,
-        backend_settings: BackendSettings | None,
     ):
         """
         Create GeneralCLIPService from configuration.
 
         Args:
-            model_config: The specific model's configuration from lumen_config.
+            service_config: Services config from lumen_config (services.clip).
             cache_dir: Cache directory path.
-            backend_settings: Backend settings.
 
         Returns:
             Initialized GeneralCLIPService instance.
         """
-        from lumen_clip.resources.exceptions import ConfigError
+
+        # Extract model_config from service_config.models
+        # Supports keys: "general", "clip", "general_clip"
+        model_config = None
+        for key in ["general", "clip", "general_clip"]:
+            if key in service_config.models:
+                model_config = service_config.models[key]
+                break
+
+        if model_config is None:
+            raise ValueError(
+                "No suitable model config found in service_config.models. "
+                "Expected one of: 'general', 'clip', 'general_clip'"
+            )
+
+        # Get backend_settings from service_config
+        backend_settings = service_config.backend_settings
 
         # Load resources using the validated model_config
         logger.info(f"Loading resources for General CLIP model: {model_config.model}")
@@ -93,13 +108,13 @@ class GeneralCLIPService(rpc.InferenceServicer):
         # Create backend based on runtime using factory
         if backend_settings is None:
             backend_settings = BackendSettings(
-                device="cpu",
-                batch_size=1,
-                onnx_providers=None
+                device="cpu", batch_size=1, onnx_providers=None
             )
 
         # Use factory to create backend
-        backend = create_backend(backend_settings, resources, RuntimeKind(model_config.runtime.value))
+        backend = create_backend(
+            backend_settings, resources, RuntimeKind(model_config.runtime.value)
+        )
 
         # Create service
         service = cls(backend, resources)
@@ -184,7 +199,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
         if not self.is_initialized:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Model not initialized")
 
-        buffers: Dict[str, bytearray] = {}  # Buffers for reassembling chunked requests
+        buffers: dict[str, bytearray] = {}  # Buffers for reassembling chunked requests
 
         for req in request_iterator:
             cid = req.correlation_id or f"cid-{_now_ms()}"
@@ -255,8 +270,8 @@ class GeneralCLIPService(rpc.InferenceServicer):
     # -------- Task Handlers ----------
 
     def _handle_embed(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles text embedding requests."""
         text = payload.decode("utf-8")
         vec = self.model.encode_text(text).tolist()
@@ -264,16 +279,16 @@ class GeneralCLIPService(rpc.InferenceServicer):
         info = self.model.info()
         model_id = f"{info.model_name}:{info.model_id}"
 
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=embedding_v1",
             {"dim": str(len(vec))},
         )
 
     def _handle_classify(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles ImageNet classification requests."""
         # Check if classification is supported
         if not self.model.supports_classification:
@@ -288,50 +303,47 @@ class GeneralCLIPService(rpc.InferenceServicer):
         info = self.model.info()
         model_id = info.model_id
 
-        obj = {
-            "labels": [
-                {"label": label, "score": float(score)} for label, score in scores
-            ],
-            "model_id": model_id,
-        }
+        resp_obj = LabelsV1(
+            labels=[Label(label=label, score=float(score)) for label, score in scores],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": str(len(scores))},
         )
 
     def _handle_classify_scene(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles scene classification requests."""
         label, score = self.model.classify_scene(payload)
 
         info = self.model.info()
         model_id = info.model_id
 
-        # The labels_v1 schema supports multiple labels, so we format the single result into a list
-        obj = {
-            "labels": [{"label": label, "score": float(score)}],
-            "model_id": model_id,
-        }
+        resp_obj = LabelsV1(
+            labels=[Label(label=label, score=float(score))],
+            model_id=model_id,
+        ).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=labels_v1",
             {"labels_count": "1"},
         )
 
     def _handle_image_embed(
-        self, payload: bytes, payload_mime: str, meta: Dict[str, str]
-    ) -> Tuple[bytes, str, Dict[str, str]]:
+        self, payload: bytes, payload_mime: str, meta: dict[str, str]
+    ) -> tuple[bytes, str, dict[str, str]]:
         """Handles image embedding requests."""
         vec = self.model.encode_image(payload).tolist()
 
         info = self.model.info()
         model_id = info.model_id
 
-        obj = {"vector": vec, "dim": len(vec), "model_id": model_id}
+        resp_obj = EmbeddingV1(vector=vec, dim=len(vec), model_id=model_id).model_dump()
         return (
-            json.dumps(obj, separators=(",", ":")).encode("utf-8"),
+            json.dumps(resp_obj, separators=(",", ":")).encode("utf-8"),
             "application/json;schema=embedding_v1",
             {"dim": str(len(vec))},
         )
@@ -339,8 +351,8 @@ class GeneralCLIPService(rpc.InferenceServicer):
     # -------- Helpers ----------
 
     def _assemble(
-        self, cid: str, req: pb.InferRequest, buffers: Dict[str, bytearray]
-    ) -> Tuple[bytes, bool]:
+        self, cid: str, req: pb.InferRequest, buffers: dict[str, bytearray]
+    ) -> tuple[bytes, bool]:
         """
         Reassembles chunked request payloads.
 

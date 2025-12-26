@@ -59,10 +59,17 @@ services:
       device: null          # auto-detect (cpu/cuda/coreml/...)
       batch_size: 8
     models:
+      # Supported keys: "general", "face", "recognition"
       general:
         model: "buffalo_l"  # or antelopev2
         runtime: onnx
 ```
+
+### Supported Model Configuration Keys
+
+| Service Type | Supported Keys | Description |
+|--------------|----------------|-------------|
+| **GeneralFaceService** | `general`, `face`, `recognition` | Loads an InsightFace-style model pack for face detection, recognition, and embedding extraction |
 
 Key points:
 

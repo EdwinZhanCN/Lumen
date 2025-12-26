@@ -233,11 +233,8 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
         # Step 3: Initialize the service
         service_instance = GeneralFastVLMService.from_config(
-            model_config=list(service_config.models.values())[
-                0
-            ],  # Use first configured model
+            service_config=service_config,
             cache_dir=cache_dir,
-            backend_settings=service_config.backend_settings,
         )
 
         logger.info(f"Initializing {service_display_name} service...")
