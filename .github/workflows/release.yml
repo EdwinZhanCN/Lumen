@@ -34,12 +34,12 @@ jobs:
 
                   VERSION=${GITHUB_REF#refs/tags/v}
                   echo "VERSION=$VERSION" >> $GITHUB_ENV
+                  echo "SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION" >> $GITHUB_ENV
+                  echo "SETUPTOOLS_SCM_PRETEND_NAMED=true" >> $GITHUB_ENV
 
             - name: Build and Publish lumen-resources
               run: |
                   echo "📦 Building lumen-resources..."
-                  export SETUPTOOLS_SCM_PRETEND_VERSION=${{ env.VERSION }}
-                  export SETUPTOOLS_SCM_PRETEND_NAMED=true
                   uv build --package lumen-resources
 
                   echo "🚀 Publishing to PyPI..."
@@ -48,9 +48,16 @@ jobs:
             - name: Clean dist
               run: rm -rf dist/*
 
+            - name: 🕵️ Debug Why is git dirty?
+              run: |
+                  echo "=== Git Status ==="
+                  git status
+                  echo "=== Ignored files that might act up ==="
+                  git status --ignored
+
             - name: Build Service Packages
               run: |
-                  for pkg in lumen-clip lumen-face lumen-ocr; do
+                  for pkg in lumen-clip lumen-face lumen-ocr lumen-vlm; do
                     echo "📦 Building $pkg..."
                     uv build --package $pkg
                   done
