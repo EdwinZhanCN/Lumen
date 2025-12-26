@@ -1,8 +1,9 @@
 import importlib
-import logging
 from typing import Any, Type
 
-logger = logging.getLogger("ServiceLoader")
+from lumen_app.utils.logger import get_logger
+
+logger = get_logger("lumen.loader")
 
 
 class ServiceLoader:

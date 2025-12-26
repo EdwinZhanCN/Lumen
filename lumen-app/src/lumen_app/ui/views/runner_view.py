@@ -12,10 +12,13 @@ from typing import Any, Callable, Dict, Optional
 import flet as ft
 import yaml
 
+from ...utils.logger import get_logger
 from ..components.button_container import ButtonContainer
 from ..components.continue_button import ContinueButton
 from ..components.reset_button import ResetButton
 from ..i18n_manager import t
+
+logger = get_logger("lumen.ui.runner_view")
 
 
 class RunnerState(Enum):
@@ -93,7 +96,7 @@ class ViewDataBinding:
             try:
                 listener(key, value)
             except Exception as e:
-                print(f"⚠️ Listener error: {e}")
+                logger.error(f"Listener error: {e}")
 
 
 class ButtonManager:
@@ -135,7 +138,7 @@ class ButtonManager:
         continue_btn.get_button().on_click = self._create_continue_handler(view_name)
         reset_btn.get_button().on_click = self._create_reset_handler(view_name)
 
-        print(f"✓ Registered buttons for view: {view_name}")
+        logger.debug(f"Registered buttons for view: {view_name}")
         return container
 
     def _create_continue_handler(self, view_name: str):
@@ -255,7 +258,9 @@ class RunnerStateMachine:
     def transition_to_state(self, state: RunnerState):
         """转换到新状态"""
         if self.current_state != state:
-            print(f"🔄 State transition: {self.current_state.value} → {state.value}")
+            logger.debug(
+                f"State transition: {self.current_state.value} -> {state.value}"
+            )
             self.current_state = state
             self.notify_state_changed()
 
@@ -325,7 +330,7 @@ class RunnerView:
         Args:
             view_name: 视图名称
         """
-        print(f"🔄 Continue action from view: {view_name}")
+        logger.debug(f"Continue action from view: {view_name}")
 
         # 根据视图类型处理不同的业务逻辑
         if view_name == "device_conf":
@@ -335,7 +340,7 @@ class RunnerView:
         elif view_name == "advanced":
             self._handle_advanced_continue()
         else:
-            print(f"⚠️ Unknown view: {view_name}")
+            logger.warning(f"Unknown view: {view_name}")
 
     def handle_reset_action(self, view_name: str):
         """
@@ -344,7 +349,7 @@ class RunnerView:
         Args:
             view_name: 视图名称
         """
-        print(f"🔄 Reset action from view: {view_name}")
+        logger.debug(f"Reset action from view: {view_name}")
 
         # 重置当前视图的数据
         if view_name in self.view_data:
@@ -360,30 +365,30 @@ class RunnerView:
         # 获取设备配置数据
         device_config = self.view_data.get("device_conf", {})
         if device_config:
-            print(f"✅ Device config saved: {device_config}")
+            logger.info(f"Device config saved: {device_config}")
             self.state_machine.on_device_conf_completed()
         else:
-            print("❌ No device configuration selected")
+            logger.warning("No device configuration selected")
 
     def _handle_presets_continue(self):
         """处理预设选择继续"""
         # 获取预设数据
         preset_data = self.view_data.get("presets", {})
         if preset_data.get("selected_preset"):
-            print(f"✅ Preset selected: {preset_data['selected_preset']}")
+            logger.info(f"Preset selected: {preset_data['selected_preset']}")
             self.state_machine.on_presets_completed()
         else:
-            print("❌ No preset selected")
+            logger.warning("No preset selected")
 
     def _handle_advanced_continue(self):
         """处理高级配置继续"""
         # 获取高级配置数据
         advanced_config = self.view_data.get("advanced", {})
         if advanced_config:
-            print(f"✅ Advanced config saved: {advanced_config}")
+            logger.info(f"Advanced config saved: {advanced_config}")
             self.state_machine.on_advanced_completed()
         else:
-            print("❌ No advanced configuration provided")
+            logger.warning("No advanced configuration provided")
 
     def _handle_installer_continue(self):
         """处理安装器继续"""
@@ -393,7 +398,7 @@ class RunnerView:
             # 转移到活动状态
             self.state_machine.on_installer_completed()
         else:
-            print("❌ Installation not complete")
+            logger.warning("Installation not complete")
 
     def create_data_binding(self, view_name: str) -> ViewDataBinding:
         """
@@ -423,7 +428,7 @@ class RunnerView:
             state: 当前状态
             force_update: 是否强制更新视图（首次创建时应为 False）
         """
-        print(f"📱 Updating view for state: {state.value}")
+        logger.debug(f"Updating view for state: {state.value}")
 
         # 清除旧的视图内容
         self.main_container.content = None
@@ -453,9 +458,9 @@ class RunnerView:
                 self.main_container.update()
             elif hasattr(self.main_container, "page") and self.main_container.page:
                 self.main_container.page.update()
-            print("🔄 View updated successfully")
+            logger.debug("View updated successfully")
         except Exception as e:
-            print(f"⚠️ Could not update view: {e}")
+            logger.error(f"Could not update view: {e}")
 
     def _create_welcome_view(self):
         """创建欢迎视图"""
@@ -471,7 +476,7 @@ class RunnerView:
 
     def _create_device_conf_view(self):
         """创建设备配置视图"""
-        print("🔧 Creating device configuration view...")
+        logger.debug("Creating device configuration view...")
 
         # 创建按钮组件
         continue_btn = ContinueButton()
@@ -495,7 +500,7 @@ class RunnerView:
         )
 
         self.main_container.content = device_conf_view
-        print("✅ Device configuration view set up complete")
+        logger.debug("Device configuration view set up complete")
 
     def _create_presets_view(self):
         """创建预设选择视图"""
@@ -517,7 +522,7 @@ class RunnerView:
         cache_dir = str(self.state_machine.cache_directory)
 
         if not device_config:
-            print("❌ No device configuration found")
+            logger.warning("No device configuration found")
             return
 
         # 创建预设视图
@@ -570,10 +575,10 @@ class RunnerView:
         elif self.state_machine.workflow_type == WorkflowType.ADVANCED:
             device_config = self.view_data.get("advanced", {}).get("device_config")
             # TODO: 从 advanced config_dict 构建 lumen_config
-            print("⚠️ Advanced workflow config building not yet implemented")
+            logger.warning("Advanced workflow config building not yet implemented")
 
         if not device_config:
-            print("❌ No device configuration found")
+            logger.warning("No device configuration found")
             return
 
         # 创建按钮组件
@@ -642,13 +647,13 @@ class RunnerView:
                         lumen_config
                     )
                 except Exception as e:
-                    print(f"❌ Failed to load config: {e}")
+                    logger.error(f"Failed to load config: {e}")
                     import traceback
 
                     traceback.print_exc()
                     return
             else:
-                print("❌ No LumenConfig found and no config file exists")
+                logger.warning("No LumenConfig found and no config file exists")
                 return
 
         # 导入并使用活动运行器视图
@@ -688,9 +693,9 @@ class RunnerView:
                     yaml.dump(
                         config_data, f, default_flow_style=False, allow_unicode=True
                     )
-                print(f"💾 Configuration saved to: {config_path}")
+                logger.info(f"Configuration saved to: {config_path}")
             except Exception as e:
-                print(f"❌ Failed to save configuration: {e}")
+                logger.error(f"Failed to save configuration: {e}")
 
 
 def create_runner_view(cache_directory: str = "~/.lumen"):

@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from lumen_app.core.config import DeviceConfig
+from lumen_app.utils.logger import get_logger
 
-logger = logging.getLogger("PresetRegistry")
+logger = get_logger("lumen.preset_registry")
 
 
 @dataclass

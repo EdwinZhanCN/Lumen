@@ -2,8 +2,11 @@ from pathlib import Path
 
 from lumen_resources.lumen_config import LumenConfig, Services
 
+from ..utils.logger import get_logger
 from .loader import ServiceLoader  # 负责动态 importlib
 from .router import HubRouter
+
+logger = get_logger("lumen.service")
 
 
 class AppService:
@@ -37,7 +40,7 @@ class AppService:
                     service_config=svc_cfg, cache_dir=cache_dir
                 )
                 instances.append(instance)
-                print(f"Loaded service: {name} with package {svc_cfg.package}")
+                logger.info(f"Loaded service: {name} with package {svc_cfg.package}")
             else:
                 raise RuntimeError(
                     f"Cannot load import_info from configuration for service:{svc_cfg.package}"

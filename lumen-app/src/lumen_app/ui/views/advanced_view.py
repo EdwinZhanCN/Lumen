@@ -9,8 +9,11 @@ from typing import Any, Callable, Dict, List, Optional
 import flet as ft
 from lumen_resources import Region
 
+from ...utils.logger import get_logger
 from ..components.button_container import ButtonContainer
 from ..i18n_manager import t
+
+logger = get_logger("lumen.ui.advanced_view")
 
 
 class AdvancedView(ft.Column):
@@ -547,12 +550,12 @@ if __name__ == "__main__":
 
             def set_data(self, key: str, value: Any):
                 self.data[key] = value
-                print(f"[DataBinding] {key} = {value}")
+                logger.debug(f"[DataBinding] {key} = {value}")
 
         data_binding = MockDataBinding()
 
         def handle_config_changed(config):
-            print(f"[ConfigChanged] Valid: {config is not None}")
+            logger.debug(f"[ConfigChanged] Valid: {config is not None}")
 
         advanced_view = AdvancedView(
             button_container=None,  # type: ignore

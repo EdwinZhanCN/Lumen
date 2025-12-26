@@ -1,2 +1,7 @@
+from lumen_app.utils.logger import get_logger
+
+logger = get_logger("lumen")
+
+
 def main() -> None:
-    print("Hello from lumen-app!")
+    logger.info("Hello from lumen-app!")

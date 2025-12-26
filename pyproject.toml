@@ -9,7 +9,8 @@ dependencies = [
     "lumen-face",
     "lumen-clip",
     "lumen-vlm",
-    "lumen-app"
+    "lumen-app",
+    "colorlog",
 ]
 
 [tool.uv.workspace]

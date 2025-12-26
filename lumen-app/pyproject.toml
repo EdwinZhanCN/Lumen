@@ -9,6 +9,7 @@ authors = [
     { name = "EdwinZhanCN", email = "support@lumilio.org" }
 ]
 dependencies = [
+    "colorlog>=6.10.1",
     "flet[all]>=0.28.3",
     "lumen-resources",
     "python-i18n>=0.3.9",

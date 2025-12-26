@@ -5,10 +5,13 @@ import flet as ft
 from lumen_resources import Region
 
 from ...core.config import Config, DeviceConfig
+from ...utils.logger import get_logger
 
 # 假设这些是你项目中的依赖，保留引用
 from ..components.button_container import ButtonContainer
 from ..i18n_manager import t
+
+logger = get_logger("lumen.ui.presets_view")
 
 
 class PresetsView(ft.Column):
@@ -256,9 +259,9 @@ class PresetsView(ft.Column):
         if config_file.exists():
             try:
                 config_file.unlink()
-                print(f"✅ Deleted config file: {config_file}")
+                logger.info(f"Deleted config file: {config_file}")
             except Exception as e:
-                print(f"⚠️ Failed to delete config file: {e}")
+                logger.error(f"Failed to delete config file: {e}")
 
         # 调用重置回调
         if self.on_reset:
@@ -348,7 +351,7 @@ if __name__ == "__main__":
 
         def set_data(self, key: str, value: Any):
             self.data[key] = value
-            print(f"[DataBinding] {key} = {value}")
+            logger.debug(f"[DataBinding] {key} = {value}")
 
     class MockButtonContainer:
         """Mock ButtonContainer for testing"""
@@ -364,7 +367,7 @@ if __name__ == "__main__":
 
         def update_disabled(self, disabled: bool):
             self.disabled = disabled
-            print(f"[Button] disabled = {disabled}")
+            logger.debug(f"[Button] disabled = {disabled}")
 
     def main(page: ft.Page):
         page.title = "Presets View Demo"

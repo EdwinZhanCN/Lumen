@@ -11,6 +11,10 @@ from typing import Optional
 
 import flet as ft
 
+from ...utils.logger import get_logger
+
+logger = get_logger("lumen.ui.log_viewer")
+
 
 class LogLevel(Enum):
     """Log levels for color coding."""
@@ -128,7 +132,7 @@ class LogViewer(ft.Column):
                 self.log_file.parent.mkdir(parents=True, exist_ok=True)
                 self.log_file_handle = open(self.log_file, "a", encoding="utf-8")
             except Exception as e:
-                print(f"[LogViewer] Failed to open log file: {e}")
+                logger.error(f"[LogViewer] Failed to open log file: {e}")
 
     def add_log(self, message: str, level: LogLevel = LogLevel.INFO):
         """Add a log entry with timestamp and level.
@@ -161,7 +165,7 @@ class LogViewer(ft.Column):
                 self.log_file_handle.write(formatted_message + "\n")
                 self.log_file_handle.flush()
             except Exception as e:
-                print(f"[LogViewer] Failed to write log: {e}")
+                logger.error(f"[LogViewer] Failed to write log: {e}")
 
         # Schedule UI update
         try:

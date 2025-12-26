@@ -2,7 +2,10 @@ from typing import Callable
 
 import flet as ft
 
+from ...utils.logger import get_logger
 from ..i18n_manager import t
+
+logger = get_logger("lumen.ui.welcome_view")
 
 
 class WelcomeView(ft.Column):
@@ -86,7 +89,7 @@ class WelcomeView(ft.Column):
     def _on_lumilio_click(self, e):
         # 关键点：这里可以轻松获取输入框的值！
         current_path = self.cache_dir_input.value
-        print(f"user input cache_dir: {current_path}")
+        logger.info(f"user input cache_dir: {current_path}")
 
         if self.lumilio_handler:
             # 你甚至可以将路径作为参数传给外部 handler
