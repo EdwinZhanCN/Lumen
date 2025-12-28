@@ -14,3 +14,4 @@ examples/**/*.yaml
 !examples/**/*.example.yaml
 
 .ruff_cache
+.pytest_cache

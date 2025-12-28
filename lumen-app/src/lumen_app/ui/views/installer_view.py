@@ -5,11 +5,10 @@ This module provides comprehensive installation functionality including:
 - Micromamba installation
 - Python environment setup
 - Driver installation via micromamba
-- Lumen package installation via uv
+- Lumen package installation via GitHub Releases
 - Configuration file persistence
 """
 
-import subprocess
 import threading
 from datetime import datetime
 from enum import Enum
@@ -23,7 +22,16 @@ from ...core.config import DeviceConfig
 from ...utils.env_checker import (
     DependencyInstaller,
     EnvironmentChecker,
-    MicromambaChecker,
+)
+from ...utils.installation import (
+    InstallationVerifier,
+    LumenPackageInstaller,
+    MicromambaInstaller,
+    PythonEnvManager,
+)
+from ...utils.package_resolver import (
+    GitHubPackageResolver,
+    LumenPackageResolver,
 )
 from ..components.button_container import ButtonContainer
 from ..components.log_viewer import LogLevel, LogViewer
@@ -303,6 +311,12 @@ class InstallerView(ft.Column):
     def _run_installation(self):
         """Run the complete installation process in background thread."""
         try:
+            # Initialize installers
+            # Get region from lumen_config
+            region = self.lumen_config.metadata.region
+            micromamba_installer = MicromambaInstaller(self.cache_dir, region=region)
+            github_resolver = GitHubPackageResolver(region)
+
             # Step 1: Check drivers (update progress)
             self._update_step(0, StepStatus.IN_PROGRESS)
             self.log_viewer.add_log("Checking system drivers...", LogLevel.INFO)
@@ -322,27 +336,77 @@ class InstallerView(ft.Column):
 
             # Step 2: Install micromamba
             self._update_step(1, StepStatus.IN_PROGRESS)
-            self._install_micromamba()
+            self.log_viewer.add_log("Installing micromamba...", LogLevel.INFO)
+            micromamba_exe = micromamba_installer.install()
+            self.log_viewer.add_log(
+                f"Micromamba installed: {micromamba_exe}", LogLevel.SUCCESS
+            )
             self._update_step(1, StepStatus.COMPLETE)
 
             # Step 3: Create Python environment
             self._update_step(2, StepStatus.IN_PROGRESS)
-            self._create_python_env()
+            self.log_viewer.add_log("Creating Python environment...", LogLevel.INFO)
+            env_manager = PythonEnvManager(self.cache_dir, micromamba_exe)
+
+            # Get Python version and yaml config from DeviceConfig
+            python_version = "3.11"
+            yaml_config = "default"
+            if self.device_config.dependency_metadata:
+                python_version = self.device_config.dependency_metadata.python_version
+            yaml_config = self.device_config.env
+
+            env_manager.create_env(
+                yaml_config=yaml_config, python_version=python_version
+            )
+            self.log_viewer.add_log(
+                f"Environment created: {env_manager.get_env_path()}", LogLevel.SUCCESS
+            )
             self._update_step(2, StepStatus.COMPLETE)
 
             # Step 4: Install drivers
             self._update_step(3, StepStatus.IN_PROGRESS)
-            self._install_drivers(env_report)
+            self._install_drivers(env_report, micromamba_exe)
             self._update_step(3, StepStatus.COMPLETE)
 
             # Step 5: Install Lumen packages
             self._update_step(4, StepStatus.IN_PROGRESS)
-            self._install_lumen_packages()
+            self.log_viewer.add_log("Installing Lumen packages...", LogLevel.INFO)
+
+            packages = LumenPackageResolver.resolve_packages(self.lumen_config)
+            self.log_viewer.add_log(
+                f"Packages to install: {', '.join(packages)}", LogLevel.INFO
+            )
+
+            package_installer = LumenPackageInstaller(
+                env_manager, github_resolver, self.log_viewer.add_log
+            )
+            package_installer.install_packages(
+                packages, self.device_config, self.lumen_config.metadata.region
+            )
             self._update_step(4, StepStatus.COMPLETE)
 
             # Step 6: Verify installation
             self._update_step(5, StepStatus.IN_PROGRESS)
-            self._verify_installation()
+            self.log_viewer.add_log("Verifying installation...", LogLevel.INFO)
+            verifier = InstallationVerifier(env_manager)
+            results = verifier.verify_imports(packages)
+
+            # Log verification results
+            all_success = True
+            for pkg, success in results.items():
+                if success:
+                    self.log_viewer.add_log(
+                        f"✓ {pkg} import successful", LogLevel.SUCCESS
+                    )
+                else:
+                    self.log_viewer.add_log(f"✗ {pkg} import failed", LogLevel.ERROR)
+                    all_success = False
+
+            if not all_success:
+                self.log_viewer.add_log(
+                    "Some packages failed verification", LogLevel.WARNING
+                )
+
             self._update_step(5, StepStatus.COMPLETE)
 
             # Save config
@@ -376,76 +440,12 @@ class InstallerView(ft.Column):
             except Exception:
                 pass
 
-    def _install_micromamba(self):
-        """Install micromamba to cache_dir."""
-        self.log_viewer.add_log("Installing micromamba...", LogLevel.INFO)
-
-        success, message = MicromambaChecker.install_micromamba(
-            cache_dir=str(self.cache_dir), target_name="micromamba", dry_run=False
-        )
-
-        if success:
-            self.micromamba_path = Path(self.cache_dir) / "micromamba" / "bin"
-            if not self.micromamba_path.exists():
-                # Windows uses different structure
-                self.micromamba_path = Path(self.cache_dir) / "micromamba"
-
-            self.log_viewer.add_log(
-                f"Micromamba installed: {self.micromamba_path}", LogLevel.SUCCESS
-            )
-        else:
-            raise Exception(f"Failed to install micromamba: {message}")
-
-    def _create_python_env(self):
-        """Create Python 3.11 environment using micromamba."""
-        self.log_viewer.add_log("Creating Python 3.11 environment...", LogLevel.INFO)
-
-        if not self.micromamba_path:
-            raise Exception("Micromamba not installed")
-
-        # Get micromamba executable
-        micromamba_exe = MicromambaChecker.get_executable_path(self.cache_dir)
-
-        # Create environment
-        env_path = self.cache_dir / "micromamba" / "envs" / "lumen_env"
-
-        cmd = [
-            str(micromamba_exe),
-            "create",
-            "-n",
-            "lumen_env",
-            "python=3.11",
-            "-y",
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minutes
-            )
-
-            if result.returncode == 0:
-                self.log_viewer.add_log(
-                    f"Environment created: {env_path}", LogLevel.SUCCESS
-                )
-            else:
-                # Environment might already exist
-                if "already exists" in result.stderr:
-                    self.log_viewer.add_log(
-                        f"Environment already exists: {env_path}", LogLevel.WARNING
-                    )
-                else:
-                    raise Exception(f"Failed to create environment: {result.stderr}")
-        except subprocess.TimeoutExpired:
-            raise Exception("Environment creation timed out")
-
-    def _install_drivers(self, env_report):
+    def _install_drivers(self, env_report, micromamba_exe):
         """Install hardware drivers using micromamba.
 
         Args:
             env_report: Environment report with driver status
+            micromamba_exe: Path to micromamba executable
         """
         self.log_viewer.add_log("Installing hardware drivers...", LogLevel.INFO)
 
@@ -459,9 +459,6 @@ class InstallerView(ft.Column):
         if not missing_drivers:
             self.log_viewer.add_log("All drivers already installed", LogLevel.SUCCESS)
             return
-
-        # Get micromamba executable
-        micromamba_exe = MicromambaChecker.get_executable_path(self.cache_dir)
 
         # Create dependency installer
         mamba_configs_dir = Path(__file__).parent.parent.parent / "utils" / "mamba"
@@ -485,150 +482,6 @@ class InstallerView(ft.Column):
                 self.log_viewer.add_log(
                     f"{driver_name} installation skipped: {message}", LogLevel.WARNING
                 )
-
-    def _install_lumen_packages(self):
-        """Install Lumen packages using pip."""
-        self.log_viewer.add_log("Installing Lumen packages...", LogLevel.INFO)
-
-        # Get micromamba executable
-        micromamba_exe = MicromambaChecker.get_executable_path(self.cache_dir)
-
-        # Get required packages from lumen_config
-        packages = []
-        if (
-            hasattr(self.lumen_config, "deployment")
-            and self.lumen_config.deployment is not None
-            and hasattr(self.lumen_config.deployment, "services")
-            and self.lumen_config.deployment.services is not None
-        ):
-            for service in self.lumen_config.deployment.services:
-                if hasattr(service, "package"):
-                    packages.append(f"lumen-{service.root}")
-
-        # Remove duplicates
-        packages = list(set(packages))
-
-        self.log_viewer.add_log(
-            f"Installing packages: {', '.join(packages)}", LogLevel.INFO
-        )
-
-        # Get environment path
-        env_path = self.cache_dir / "micromamba" / "envs" / "lumen_env"
-
-        # Install all packages in one command using pip
-        cmd = (
-            [
-                str(micromamba_exe),
-                "run",
-                "-p",
-                str(env_path),
-                "pip",
-                "install",
-            ]
-            + packages
-            + [
-                "--quiet",
-                "--no-warn-script-location",
-            ]
-        )
-
-        try:
-            self.log_viewer.add_log(
-                f"Running: pip install {' '.join(packages)}", LogLevel.INFO
-            )
-
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-            if result.returncode == 0:
-                self.log_viewer.add_log(
-                    f"All packages installed successfully", LogLevel.SUCCESS
-                )
-            else:
-                # Try installing one by one
-                self.log_viewer.add_log(
-                    "Batch installation failed, trying one by one...", LogLevel.WARNING
-                )
-
-                for package in packages:
-                    self.log_viewer.add_log(f"Installing {package}...", LogLevel.INFO)
-
-                    cmd = [
-                        str(micromamba_exe),
-                        "run",
-                        "-p",
-                        str(env_path),
-                        "pip",
-                        "install",
-                        package,
-                        "--quiet",
-                    ]
-
-                    try:
-                        result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=180
-                        )
-
-                        if result.returncode == 0:
-                            self.log_viewer.add_log(
-                                f"{package} installed successfully", LogLevel.SUCCESS
-                            )
-                        else:
-                            self.log_viewer.add_log(
-                                f"{package} installation failed: {result.stderr}",
-                                LogLevel.ERROR,
-                            )
-                            raise Exception(
-                                f"Failed to install {package}: {result.stderr}"
-                            )
-
-                    except subprocess.TimeoutExpired:
-                        self.log_viewer.add_log(
-                            f"{package} installation timed out", LogLevel.ERROR
-                        )
-                        raise Exception(f"{package} installation timed out")
-
-        except subprocess.TimeoutExpired:
-            self.log_viewer.add_log("Package installation timed out", LogLevel.ERROR)
-            raise Exception("Package installation timed out")
-
-    def _verify_installation(self):
-        """Verify installation was successful."""
-        self.log_viewer.add_log("Verifying installation...", LogLevel.INFO)
-
-        # Check micromamba
-        micromamba_exe = MicromambaChecker.get_executable_path(self.cache_dir)
-        if micromamba_exe and Path(micromamba_exe).exists():
-            self.log_viewer.add_log("✓ Micromamba installed", LogLevel.SUCCESS)
-        else:
-            raise Exception("Micromamba not found")
-
-        # Check environment
-        env_path = self.cache_dir / "micromamba" / "envs" / "lumen_env"
-        if env_path.exists():
-            self.log_viewer.add_log("✓ Python environment created", LogLevel.SUCCESS)
-        else:
-            raise Exception("Python environment not found")
-
-        # Check uv
-        cmd = [
-            str(micromamba_exe),
-            "run",
-            "-p",
-            str(env_path),
-            "uv",
-            "--version",
-        ]
-
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                self.log_viewer.add_log(
-                    f"✓ uv installed: {result.stdout.strip()}", LogLevel.SUCCESS
-                )
-        except subprocess.TimeoutExpired:
-            pass
-
-        self.log_viewer.add_log("Installation verification complete", LogLevel.SUCCESS)
 
     def _save_config(self):
         """Save lumen_config to YAML file."""

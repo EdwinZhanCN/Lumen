@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 import flet as ft
 import yaml
+from lumen_resources import Region
 
 from ...utils.logger import get_logger
 from ..components.button_container import ButtonContainer
@@ -221,11 +222,21 @@ class ButtonManager:
 class RunnerStateMachine:
     """状态机，管理应用程序流程"""
 
-    def __init__(self, cache_directory: str = "~/.lumen"):
+    def __init__(
+        self, cache_directory: str = "~/.lumen", runner_view: "RunnerView | None" = None
+    ):
+        """
+        初始化状态机
+
+        Args:
+            cache_directory: 缓存目录
+            runner_view: RunnerView 实例（用于访问 view_data）
+        """
         self.cache_directory = Path(cache_directory).expanduser()
         self.current_state = RunnerState.WELCOME
         self.workflow_type: Optional[WorkflowType] = None
         self.state_changed_callbacks: list[Callable] = []
+        self.runner_view = runner_view  # 保存 RunnerView 引用
 
         # 确定初始状态
         self._determine_initial_state()
@@ -265,10 +276,19 @@ class RunnerStateMachine:
             self.notify_state_changed()
 
     # 状态转换处理器
-    def on_welcome_lumilio_photos(self, cache_dir: Optional[str] = None):
+    def on_welcome_lumilio_photos(
+        self, cache_dir: Optional[str] = None, region: Optional[Region] = None
+    ):
         """处理 Lumilio Photos 工作流选择"""
         if cache_dir:
             self.cache_directory = Path(cache_dir).expanduser()
+        if region and self.runner_view:
+            # 保存 region 到 view_data
+            self.runner_view.view_data["welcome"] = self.runner_view.view_data.get(
+                "welcome", {}
+            )
+            self.runner_view.view_data["welcome"]["region"] = region
+            logger.info(f"[StateMachine] Set region: {region}")
         self.workflow_type = WorkflowType.LUMILIO_PHOTOS
         self.transition_to_state(RunnerState.DEVICE_CONF)
 
@@ -312,13 +332,17 @@ class RunnerView:
             cache_directory: 缓存目录
         """
         self.cache_directory = cache_directory
-        self.state_machine = RunnerStateMachine(cache_directory)
+        # 注意：StateM achine 需要在 view_data 初始化之后创建
+        # 所以先初始化数据结构
         self.main_container: ft.Container = ft.Container()
+        self.view_data: Dict[str, Dict[str, Any]] = {}  # 存储各视图的数据
+        self.view_bindings: Dict[str, ViewDataBinding] = {}  # 存储数据绑定
+
+        # 然后创建 StateMachine，传入 self 引用
+        self.state_machine = RunnerStateMachine(cache_directory, runner_view=self)
 
         # 新增组件
         self.button_manager = ButtonManager(self)
-        self.view_data: Dict[str, Dict[str, Any]] = {}  # 存储各视图的数据
-        self.view_bindings: Dict[str, ViewDataBinding] = {}  # 存储数据绑定
 
         # 设置状态变化处理
         self.state_machine.add_state_changed_callback(self.update_view)
@@ -468,7 +492,8 @@ class RunnerView:
 
         welcome_view = WelcomeView(
             lumilio_handler=lambda e,
-            cache_dir: self.state_machine.on_welcome_lumilio_photos(cache_dir),
+            cache_dir,
+            region: self.state_machine.on_welcome_lumilio_photos(cache_dir, region),
             advanced_handler=lambda e: self.state_machine.on_welcome_advanced_mode(),
         )
 

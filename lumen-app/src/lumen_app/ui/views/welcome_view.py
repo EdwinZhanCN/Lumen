@@ -1,6 +1,7 @@
 from typing import Callable
 
 import flet as ft
+from lumen_resources import Region
 
 from ...utils.logger import get_logger
 from ..i18n_manager import t
@@ -12,7 +13,8 @@ class WelcomeView(ft.Column):
     """A welcome view component for the application.
 
     This class represents the welcome screen of the runner, allowing users to input
-    a cache directory and choose between Lumilio Photos mode or Advanced Mode.
+    a cache directory, choose region for mirror selection, and choose between
+    Lumilio Photos mode or Advanced Mode.
 
     The lumilio-config.yaml file under cache directory will be the source for navigation router to determine if the presets_view should be skipped in lumilio navigation route.
 
@@ -20,6 +22,7 @@ class WelcomeView(ft.Column):
         lumilio_handler (Callable | None): Handler for Lumilio Photos button click.
         advanced_handler (Callable | None): Handler for Advanced Mode button click.
         cache_dir_input (ft.TextField): Text field for cache directory input.
+        region_dropdown (ft.Dropdown): Dropdown for region selection.
     """
 
     def __init__(
@@ -38,6 +41,21 @@ class WelcomeView(ft.Column):
             value="~/.lumen",
         )
 
+        self.region_dropdown = ft.Dropdown(
+            label=t("welcome.region_label"),
+            hint_text=t("welcome.region_hint"),
+            options=[
+                ft.dropdown.Option(
+                    Region.cn.value, t("region.cn")
+                ),  # 使用 .value 获取 "cn"
+                ft.dropdown.Option(
+                    Region.other.value, t("region.other")
+                ),  # 使用 .value 获取 "other"
+            ],
+            value=Region.cn.value,  # 默认 "cn"
+            width=200,
+        )
+
         # 2. 初始化布局
         self.setup_ui()
 
@@ -54,6 +72,7 @@ class WelcomeView(ft.Column):
                         ft.Column(
                             controls=[
                                 self.cache_dir_input,  # 使用类属性
+                                self.region_dropdown,  # Region 选择
                                 ft.ElevatedButton(
                                     "For Lumilio Photos",
                                     icon=ft.Icons.ARROW_FORWARD,
@@ -89,11 +108,12 @@ class WelcomeView(ft.Column):
     def _on_lumilio_click(self, e):
         # 关键点：这里可以轻松获取输入框的值！
         current_path = self.cache_dir_input.value
-        logger.info(f"user input cache_dir: {current_path}")
+        selected_region = Region(self.region_dropdown.value)
+        logger.info(f"user input cache_dir: {current_path}, region: {selected_region}")
 
         if self.lumilio_handler:
-            # 你甚至可以将路径作为参数传给外部 handler
-            self.lumilio_handler(e, current_path)
+            # 将路径和 region 作为参数传给外部 handler
+            self.lumilio_handler(e, current_path, selected_region)
 
     def _on_advanced_click(self, e):
         if self.advanced_handler:
