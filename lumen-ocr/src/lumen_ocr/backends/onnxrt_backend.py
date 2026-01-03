@@ -40,7 +40,7 @@ class OnnxOcrBackend(BaseOcrBackend):
         resources: ModelResources,
         providers: list[str] | None = None,
         device_preference: str | None = None,
-        prefer_fp16: bool = True,
+        prefer_fp16: bool = False,
     ):
         """
         Initialize the ONNX backend.

@@ -291,7 +291,7 @@ def cmd_list(args: argparse.Namespace) -> None:
             import json
 
             try:
-                with open(info_file, "r") as f:
+                with open(info_file) as f:
                     info = json.load(f)
                 print(f"     Version: {info.get('version', 'unknown')}")
                 runtimes = info.get("runtimes", {})

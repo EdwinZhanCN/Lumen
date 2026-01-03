@@ -10,7 +10,6 @@ dependencies = [
     "lumen-clip",
     "lumen-vlm",
     "lumen-app",
-    "colorlog",
 ]
 
 [tool.uv.workspace]

@@ -64,7 +64,6 @@ class OcrModelManager:
         cache_dir: str,
         providers: list[str] | None = None,
         device_preference: Optional[str] = None,
-        prefer_fp16: bool = True,
     ):
         """
         Initialize the manager.
@@ -73,13 +72,11 @@ class OcrModelManager:
             config: Model configuration from lumen_config.yaml.
             cache_dir: Directory where model files are stored.
             device_preference: Optional device hint (e.g., "cuda", "cpu").
-            prefer_fp16: Whether to prefer FP16 model files over FP32 when available.
         """
         self.config = config
         self.providers = providers
         self.cache_dir = cache_dir
         self.device_preference = device_preference
-        self._prefer_fp16 = prefer_fp16
 
         self._backend: BaseOcrBackend
         self._resources: ModelResources
@@ -109,11 +106,18 @@ class OcrModelManager:
             # 2. Instantiate Backend based on runtime
             runtime = self.config.runtime.value
             if runtime == "onnx":
+                # Determine precision preference from ModelConfig
+                prefer_fp16 = (
+                    self.config.precision in ["fp16", "q4fp16"]
+                    if self.config.precision
+                    else False
+                )
+
                 self._backend = OnnxOcrBackend(
                     resources=self._resources,
                     providers=self.providers,
                     device_preference=self.device_preference,
-                    prefer_fp16=self._prefer_fp16,
+                    prefer_fp16=prefer_fp16,
                 )
             # Future support for other runtimes (e.g., rknn, torch) can be added here
             else:

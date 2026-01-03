@@ -119,7 +119,6 @@ class DeviceConfig:
             description="Preset for low RAM (< 12GB) Nvidia GPUs",
             env="cuda",
             dependency_metadata=DependencyMetadata(
-                extra_index_url=["https://download.pytorch.org/whl/cu126"],
                 extra_deps=["cuda"],
             ),
         )
@@ -144,7 +143,6 @@ class DeviceConfig:
             description="Preset for high RAM (>= 12GB) Nvidia GPUs",
             env="tensorrt",
             dependency_metadata=DependencyMetadata(
-                extra_index_url=["https://download.pytorch.org/whl/cu126"],
                 extra_deps=["cuda"],
             ),
         )
@@ -234,7 +232,10 @@ class DeviceConfig:
             description="Preset for low RAM (< 12GB) Nvidia Jetson Devices",
             env="default",
             os="linux",
-            dependency_metadata=DependencyMetadata(extra_deps=["cuda"]),
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -257,7 +258,10 @@ class DeviceConfig:
             description="Preset for high RAM (>= 12GB) Nvidia Jetson Devices",
             env="default",
             os="linux",
-            dependency_metadata=DependencyMetadata(extra_deps=["cuda"]),
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod

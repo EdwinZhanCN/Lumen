@@ -180,9 +180,18 @@ class GeneralFaceService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
-        max_batch_size = getattr(backend_settings, "batch_size", 1) if backend_settings else 1
-        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True) if backend_settings else True
+        device_pref = (
+            getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
+        )
+        max_batch_size = (
+            getattr(backend_settings, "batch_size", 1) if backend_settings else 1
+        )
+
+        # Determine precision preference from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        prefer_fp16 = False
+        if model_config.precision and runtime in ["onnx", "rknn"]:
+            prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
 
         if runtime == "onnx":
             backend = ONNXRTBackend(

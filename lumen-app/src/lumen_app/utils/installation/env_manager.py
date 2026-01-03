@@ -29,12 +29,11 @@ class PythonEnvManager:
             f"micromamba_exe={self.micromamba_exe}"
         )
 
-    def create_env(self, yaml_config: str, python_version: str = "3.11") -> Path:
+    def create_env(self, yaml_config: str = "default") -> Path:
         """Create Python environment using micromamba.
 
         Args:
-            yaml_config: Mamba yaml config identifier (e.g., "cuda", "default")
-            python_version: Python version (e.g., "3.11")
+            yaml_config: Mamba yaml config identifier (e.g., "cuda", "openvino", "default")
 
         Returns:
             Path to created environment
@@ -44,7 +43,7 @@ class PythonEnvManager:
         """
         logger.info(
             f"[PythonEnvManager] Creating environment '{self.ENV_NAME}' "
-            f"with yaml_config={yaml_config}, python={python_version}"
+            f"with yaml_config={yaml_config}"
         )
 
         env_path = self.get_env_path()
@@ -60,36 +59,22 @@ class PythonEnvManager:
         # Determine which yaml file to use
         yaml_file = self.mamba_configs_dir / f"{yaml_config}.yaml"
 
-        if yaml_config == "default" or not yaml_file.exists():
-            # Create basic environment
-            cmd = [
-                str(self.micromamba_exe),
-                "create",
-                "-p",  # Use path instead of name
-                str(env_path),
-                f"python={python_version}",
-                "-y",
-            ]
-            logger.debug(
-                f"[PythonEnvManager] Creating basic environment: {' '.join(cmd)}"
-            )
-        else:
-            # Use yaml config file
-            if not yaml_file.exists():
-                raise Exception(f"YAML config file not found: {yaml_file}")
+        if not yaml_file.exists():
+            raise Exception(f"YAML config file not found: {yaml_file}")
 
-            cmd = [
-                str(self.micromamba_exe),
-                "install",
-                "-y",
-                "-p",  # Use path instead of name
-                str(env_path),
-                "-f",
-                str(yaml_file),
-            ]
-            logger.debug(
-                f"[PythonEnvManager] Creating environment from yaml: {' '.join(cmd)}"
-            )
+        # Create environment from yaml config file
+        cmd = [
+            str(self.micromamba_exe),
+            "install",
+            "-y",
+            "-p",  # Use path instead of name
+            str(env_path),
+            "-f",
+            str(yaml_file),
+        ]
+        logger.debug(
+            f"[PythonEnvManager] Creating environment from yaml: {' '.join(cmd)}"
+        )
 
         try:
             result = subprocess.run(

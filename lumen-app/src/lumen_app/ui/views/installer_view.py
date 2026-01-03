@@ -348,16 +348,10 @@ class InstallerView(ft.Column):
             self.log_viewer.add_log("Creating Python environment...", LogLevel.INFO)
             env_manager = PythonEnvManager(self.cache_dir, micromamba_exe)
 
-            # Get Python version and yaml config from DeviceConfig
-            python_version = "3.11"
-            yaml_config = "default"
-            if self.device_config.dependency_metadata:
-                python_version = self.device_config.dependency_metadata.python_version
+            # Get yaml config from DeviceConfig
             yaml_config = self.device_config.env
 
-            env_manager.create_env(
-                yaml_config=yaml_config, python_version=python_version
-            )
+            env_manager.create_env(yaml_config=yaml_config)
             self.log_viewer.add_log(
                 f"Environment created: {env_manager.get_env_path()}", LogLevel.SUCCESS
             )

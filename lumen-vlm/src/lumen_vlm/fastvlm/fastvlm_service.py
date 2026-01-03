@@ -154,10 +154,26 @@ class GeneralFastVLMService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
-        max_new_tokens = getattr(backend_settings, "max_new_tokens", 512) if backend_settings else 512
-        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True) if backend_settings else True
-        providers = getattr(backend_settings, "onnx_providers", None) if backend_settings else None
+        device_pref = (
+            getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
+        )
+        max_new_tokens = (
+            getattr(backend_settings, "max_new_tokens", 512)
+            if backend_settings
+            else 512
+        )
+
+        # Determine precision preference from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        prefer_fp16 = False
+        if model_config.precision and runtime in ["onnx", "rknn"]:
+            prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
+
+        providers = (
+            getattr(backend_settings, "onnx_providers", None)
+            if backend_settings
+            else None
+        )
 
         if runtime == "onnx":
             from lumen_vlm.backends.onnxrt_backend import FastVLMONNXBackend
