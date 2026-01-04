@@ -35,16 +35,18 @@ def get_available_backends() -> list[RuntimeKind]:
     # Check ONNXRT (always available since it's in base dependencies)
     try:
         import onnxruntime
+
         available.append(RuntimeKind.ONNXRT)
     except ImportError:
         pass
 
     # Check PyTorch (optional dependency)
     try:
-        import torch  #type: ignore
+        import torch  # type: ignore
 
         # Try to import TorchBackend
         from .torch_backend import TorchBackend
+
         register_backend(RuntimeKind.TORCH, TorchBackend)
         available.append(RuntimeKind.TORCH)
     except ImportError:
@@ -53,6 +55,7 @@ def get_available_backends() -> list[RuntimeKind]:
     # Check RKNN (optional dependency, Linux only)
     try:
         from .rknn_backend import RKNNBackend
+
         register_backend(RuntimeKind.RKNN, RKNNBackend)
         available.append(RuntimeKind.RKNN)
     except ImportError:
@@ -61,13 +64,20 @@ def get_available_backends() -> list[RuntimeKind]:
     return available
 
 
-def create_backend(backend_config: BackendSettings, resources, runtime: RuntimeKind) -> BaseClipBackend:
+def create_backend(
+    backend_config: BackendSettings,
+    resources,
+    runtime: RuntimeKind,
+    prefer_fp16: bool = False,
+) -> BaseClipBackend:
     """
     Create a backend instance based on the configuration.
 
     Args:
         backend_config: Backend configuration containing runtime kind, device, etc.
         resources: Model resources containing model files and configurations
+        runtime: The runtime kind to use
+        prefer_fp16: Whether to prefer FP16 precision for ONNX models
 
     Returns:
         A backend instance
@@ -92,6 +102,7 @@ def create_backend(backend_config: BackendSettings, resources, runtime: RuntimeK
     # Create backend instance based on runtime
     if runtime == RuntimeKind.TORCH:
         from .torch_backend import TorchBackend
+
         return TorchBackend(
             resources=resources,
             device_preference=backend_config.device,
@@ -99,8 +110,7 @@ def create_backend(backend_config: BackendSettings, resources, runtime: RuntimeK
         )
     elif runtime == RuntimeKind.ONNXRT:
         # Get ONNX-specific settings from backend_config if available
-        providers = getattr(backend_config, 'onnx_providers', None)
-        prefer_fp16 = getattr(backend_config, 'prefer_fp16', True)
+        providers = getattr(backend_config, "onnx_providers", None)
 
         return ONNXRTBackend(
             resources=resources,
@@ -111,6 +121,7 @@ def create_backend(backend_config: BackendSettings, resources, runtime: RuntimeK
         )
     elif runtime == RuntimeKind.RKNN:
         from .rknn_backend import RKNNBackend
+
         return RKNNBackend(
             resources=resources,
             device_preference=backend_config.device,

@@ -11,9 +11,11 @@ authors = [
 dependencies = [
     "colorlog>=6.10.1",
     "flet[all]>=0.28.3",
+    "grpcio>=1.76.0",
     "lumen-resources",
     "python-i18n>=0.3.9",
     "pyyaml>=6.0.3",
+    "zeroconf",
 ]
 
 [project.urls]

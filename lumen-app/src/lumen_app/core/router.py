@@ -16,12 +16,12 @@ class HubRouter(ml_service_pb2_grpc.InferenceServicer):
                 if task_key not in self._route_table:
                     self._route_table[task_key] = svc
 
-    async def Infer(self, request_iterator, context):
+    def Infer(self, request_iterator, context):
         """多路复用分发推理请求"""
+        # 获取流的第一条消息以识别 Task
         try:
-            # 获取流的第一条消息以识别 Task
-            first_req = await request_iterator.__anext__()
-        except StopAsyncIteration:
+            first_req = next(request_iterator)
+        except StopIteration:
             return
 
         task_key = first_req.task
@@ -33,19 +33,36 @@ class HubRouter(ml_service_pb2_grpc.InferenceServicer):
 
         if target_svc is not None:
             # 构造包装后的迭代器透传给子服务
-            async def stream_wrapper():
+            def stream_wrapper():
                 yield first_req
-                async for req in request_iterator:
+                for req in request_iterator:
                     yield req
 
             # 零拷贝转发流式响应
-            async for resp in target_svc.Infer(stream_wrapper(), context):
+            for resp in target_svc.Infer(stream_wrapper(), context):
                 yield resp
 
-    async def GetCapabilities(self, request, context):
+    def GetCapabilities(self, request, context):
         """汇总所有子服务的能力宣告"""
         all_tasks = []
         for svc in self.services:
-            caps = await svc.GetCapabilities(request, context)
+            caps = svc.GetCapabilities(request, context)
             all_tasks.extend(caps.tasks)
         return ml_service_pb2.Capability(tasks=all_tasks)
+
+    def Health(self, request, context):
+        """健康检查 - 所有子服务都健康才返回健康"""
+        from google.protobuf import empty_pb2
+
+        for svc in self.services:
+            # 调用子服务的 Health 方法
+            try:
+                svc.Health(empty_pb2.Empty(), context)
+            except Exception as e:
+                # 如果任何子服务健康检查失败，返回错误
+                context.abort(
+                    grpc.StatusCode.UNAVAILABLE, f"Service unhealthy: {str(e)}"
+                )
+
+        # 所有服务都健康，返回 Empty
+        return empty_pb2.Empty()

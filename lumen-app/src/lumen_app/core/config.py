@@ -119,7 +119,6 @@ class DeviceConfig:
             description="Preset for low RAM (< 12GB) Nvidia GPUs",
             env="cuda",
             dependency_metadata=DependencyMetadata(
-                extra_index_url=["https://download.pytorch.org/whl/cu126"],
                 extra_deps=["cuda"],
             ),
         )
@@ -144,7 +143,6 @@ class DeviceConfig:
             description="Preset for high RAM (>= 12GB) Nvidia GPUs",
             env="tensorrt",
             dependency_metadata=DependencyMetadata(
-                extra_index_url=["https://download.pytorch.org/whl/cu126"],
                 extra_deps=["cuda"],
             ),
         )
@@ -234,7 +232,10 @@ class DeviceConfig:
             description="Preset for low RAM (< 12GB) Nvidia Jetson Devices",
             env="default",
             os="linux",
-            dependency_metadata=DependencyMetadata(extra_deps=["cuda"]),
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -257,7 +258,10 @@ class DeviceConfig:
             description="Preset for high RAM (>= 12GB) Nvidia Jetson Devices",
             env="default",
             os="linux",
-            dependency_metadata=DependencyMetadata(extra_deps=["cuda"]),
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -325,7 +329,7 @@ class Config:
                             model="PP-OCRv5",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision="fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -374,7 +378,7 @@ class Config:
                             model="PP-OCRv5",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision="fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -397,7 +401,7 @@ class Config:
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
                             dataset="ImageNet_1k",
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                         )
                     },
                 ),
@@ -418,7 +422,7 @@ class Config:
                             model="buffalo_l",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },
@@ -491,7 +495,7 @@ class Config:
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
                             dataset="ImageNet_1k",
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                         )
                     },
                 ),
@@ -512,7 +516,7 @@ class Config:
                             model="antelopev2",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },
@@ -648,7 +652,7 @@ class Config:
                             model="FastVLM-0.5B",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },

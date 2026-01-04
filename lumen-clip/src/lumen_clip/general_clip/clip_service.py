@@ -111,9 +111,18 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 device="cpu", batch_size=1, onnx_providers=None
             )
 
+        # Determine precision preference from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        prefer_fp16 = False
+        if model_config.precision and model_config.runtime.value in ["onnx", "rknn"]:
+            prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
+
         # Use factory to create backend
         backend = create_backend(
-            backend_settings, resources, RuntimeKind(model_config.runtime.value)
+            backend_settings,
+            resources,
+            RuntimeKind(model_config.runtime.value),
+            prefer_fp16=prefer_fp16,
         )
 
         # Create service
@@ -172,6 +181,14 @@ class GeneralCLIPService(rpc.InferenceServicer):
             )
         else:
             logger.info("Classification tasks not registered (no dataset available)")
+
+    def get_supported_tasks(self) -> list[str]:
+        """Get list of supported task names for routing.
+
+        Returns:
+            List of task keys registered in the task registry.
+        """
+        return self.registry.list_task_names()
 
     def initialize(self) -> None:
         """Loads the model and prepares it for inference."""

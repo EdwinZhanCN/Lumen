@@ -54,7 +54,7 @@ class ModelInfoValidator:
         if not schema_path.exists():
             raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
-        with open(schema_path, "r", encoding="utf-8") as f:
+        with open(schema_path, encoding="utf-8") as f:
             self.schema: dict[str, Any] = json.load(f)
 
         self.validator = Draft7Validator(self.schema)
@@ -89,7 +89,7 @@ class ModelInfoValidator:
             return False, [f"File not found: {path}"]
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             return False, [f"Invalid JSON: {e}"]
@@ -196,7 +196,7 @@ class ModelInfoValidator:
             )
             raise ValueError(error_msg)
 
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         return ModelInfo.model_validate(data)

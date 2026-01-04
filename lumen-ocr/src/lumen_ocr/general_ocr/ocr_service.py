@@ -107,11 +107,9 @@ class GeneralOcrService(ml_service_pb2_grpc.InferenceServicer):
 
         # Extract backend settings from service_config
         providers = None
-        prefer_fp16 = True
         device_preference = None
         if service_config.backend_settings:
             providers = service_config.backend_settings.onnx_providers
-            prefer_fp16 = getattr(service_config.backend_settings, "prefer_fp16", True)
             device_preference = service_config.backend_settings.device
 
         manager = OcrModelManager(
@@ -119,10 +117,17 @@ class GeneralOcrService(ml_service_pb2_grpc.InferenceServicer):
             cache_dir=cache_dir,
             providers=providers,
             device_preference=device_preference,
-            prefer_fp16=prefer_fp16,
         )
 
         return cls(manager=manager)
+
+    def get_supported_tasks(self) -> list[str]:
+        """Get list of supported task names for routing.
+
+        Returns:
+            List of task keys registered in the task registry.
+        """
+        return self._registry.list_task_names()
 
     def initialize(self) -> None:
         """Initialize the underlying model manager."""
