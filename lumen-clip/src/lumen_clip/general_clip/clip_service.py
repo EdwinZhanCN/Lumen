@@ -111,18 +111,18 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 device="cpu", batch_size=1, onnx_providers=None
             )
 
-        # Determine precision preference from ModelConfig
+        # Determine precision from ModelConfig
         # Only applies to Runtime.onnx and Runtime.rknn
-        prefer_fp16 = False
-        if model_config.precision and model_config.runtime.value in ["onnx", "rknn"]:
-            prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
+        precision = None
+        if model_config.runtime.value in ["onnx", "rknn"]:
+            precision = model_config.precision
 
         # Use factory to create backend
         backend = create_backend(
             backend_settings,
             resources,
             RuntimeKind(model_config.runtime.value),
-            prefer_fp16=prefer_fp16,
+            precision=precision,
         )
 
         # Create service
