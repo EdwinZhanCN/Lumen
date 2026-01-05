@@ -131,9 +131,18 @@ class BioCLIPService(rpc.InferenceServicer):
                 device="cpu", batch_size=1, onnx_providers=None
             )
 
+        # Determine precision from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        precision = None
+        if model_config.runtime.value in ["onnx", "rknn"]:
+            precision = model_config.precision
+
         # Use factory to create backend
         backend = create_backend(
-            backend_settings, resources, RuntimeKind(model_config.runtime.value)
+            backend_settings,
+            resources,
+            RuntimeKind(model_config.runtime.value),
+            precision=precision,
         )
 
         # Create service

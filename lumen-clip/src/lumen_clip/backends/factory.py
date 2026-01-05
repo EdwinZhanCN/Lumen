@@ -68,7 +68,7 @@ def create_backend(
     backend_config: BackendSettings,
     resources,
     runtime: RuntimeKind,
-    prefer_fp16: bool = False,
+    precision: str | None = None,
 ) -> BaseClipBackend:
     """
     Create a backend instance based on the configuration.
@@ -77,7 +77,8 @@ def create_backend(
         backend_config: Backend configuration containing runtime kind, device, etc.
         resources: Model resources containing model files and configurations
         runtime: The runtime kind to use
-        prefer_fp16: Whether to prefer FP16 precision for ONNX models
+        precision: Model precision for ONNX file selection (e.g., "fp32", "fp16", "int8", "q4fp16").
+                   If None, uses default precision (fp32). Only applies to ONNX and RKNN runtimes.
 
     Returns:
         A backend instance
@@ -117,7 +118,7 @@ def create_backend(
             providers=providers,
             device_preference=backend_config.device,
             max_batch_size=backend_config.batch_size,
-            prefer_fp16=prefer_fp16,
+            precision=precision,
         )
     elif runtime == RuntimeKind.RKNN:
         from .rknn_backend import RKNNBackend

@@ -155,11 +155,29 @@ class SmartCLIPService(rpc.InferenceServicer):
 
         # Create backends using factory
         runtime_kind = RuntimeKind(clip_config.runtime.value)
+
+        # Determine precision from CLIP config
+        clip_precision = None
+        if clip_config.runtime.value in ["onnx", "rknn"]:
+            clip_precision = clip_config.precision
+
         clip_backend = create_backend(
-            clip_backend_settings, clip_resources, runtime_kind
+            clip_backend_settings,
+            clip_resources,
+            runtime_kind,
+            precision=clip_precision,
         )
+
+        # Determine precision from BioCLIP config
+        bioclip_precision = None
+        if bioclip_config.runtime.value in ["onnx", "rknn"]:
+            bioclip_precision = bioclip_config.precision
+
         bioclip_backend = create_backend(
-            bioclip_backend_settings, bioclip_resources, runtime_kind
+            bioclip_backend_settings,
+            bioclip_resources,
+            runtime_kind,
+            precision=bioclip_precision,
         )
 
         # Create service

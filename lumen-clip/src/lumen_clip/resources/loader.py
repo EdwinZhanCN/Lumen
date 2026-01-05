@@ -267,14 +267,6 @@ class ResourceLoader:
         if not runtime_path.exists():
             raise ResourceNotFoundError(f"Runtime directory not found: {runtime_path}")
 
-        # Check for existence of required files for the runtime
-        if runtime_info.files and isinstance(runtime_info.files, list):
-            for file_path_str in runtime_info.files:
-                full_path = model_root / file_path_str
-                if not full_path.exists():
-                    raise ResourceNotFoundError(
-                        f"Required runtime file missing: {full_path}"
-                    )
         return runtime_path
 
     @staticmethod
@@ -350,9 +342,7 @@ class ResourceLoader:
 
         dataset_info: Datasets | None = model_info.datasets.get(dataset_name)
         if dataset_info is None:
-            raise ResourceValidationError(
-                "Failed to get datasets information."
-            )
+            raise ResourceValidationError("Failed to get datasets information.")
         labels_path = model_root_path / dataset_info.labels
         embeddings_path = model_root_path / dataset_info.embeddings
 

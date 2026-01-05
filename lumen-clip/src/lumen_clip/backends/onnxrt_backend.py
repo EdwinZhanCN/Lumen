@@ -4,7 +4,9 @@ ONNXRTBackend: ONNX Runtime backend for CLIP-like models.
 This backend:
 - Loads ONNX models from local files with precision-aware naming:
   - FP32: vision.onnx, text.onnx (default fallback)
-  - FP16: vision.fp16.onnx, text.fp16.onnx (preferred on GPU)
+  - FP16: vision.fp16.onnx, text.fp16.onnx
+  - INT8: vision.int8.onnx, text.int8.onnx
+  - Q4FP16: vision.q4fp16.onnx, text.q4fp16.onnx
 - Auto-detects model input/output precision and adapts preprocessing
 - Uses config.json for model configuration
 - Uses tokenizer.json or falls back to SimpleTokenizer
@@ -14,8 +16,8 @@ This backend:
 Notes:
 - Returned vectors are always L2-normalized float32
 - Image preprocessing adapts to model's expected input dtype
-- On GPU, FP16 models are preferred if available; otherwise falls back to FP32
-- On CPU, FP32 models are used by default
+- Model file selection uses the precision parameter directly (e.g., "fp16", "int8")
+- Falls back to default precision (fp32) if specified precision files not found
 """
 
 from __future__ import annotations
@@ -61,7 +63,7 @@ class ONNXRTModelLoadingError(ONNXRTBackendError, ModelLoadingError):
 class ONNXRTBackend(BaseClipBackend):
     # Class-level attribute annotations to satisfy static type checkers
     _providers: list[str]
-    _prefer_fp16: bool
+    _precision: str | None
     _initialized: bool
     """
     ONNX Runtime backend implementing BaseClipBackend.
@@ -71,12 +73,13 @@ class ONNXRTBackend(BaseClipBackend):
         providers: ONNX Runtime execution providers (e.g., ["CPUExecutionProvider"])
         device_preference: Optional hint for device selection
         max_batch_size: Optional hint for batch size
-        prefer_fp16: If True and GPU available, prefer FP16 models over FP32
+        precision: Model precision for file selection (e.g., "fp32", "fp16", "int8", "q4fp16").
+                    If None, uses default precision (fp32).
 
     Behavior:
-        - initialize() loads precision-aware model files:
-          - GPU: tries vision.fp16.onnx first, falls back to vision.onnx
-          - CPU: uses vision.onnx (FP32) by default
+        - initialize() loads precision-aware model files based on the precision parameter:
+          - Tries {component}.{precision}.onnx if precision is specified
+          - Falls back to {component}.onnx (fp32 default) if precision files not found
         - Auto-detects model input dtype and adapts preprocessing accordingly
         - text_to_vector() tokenizes and encodes text via the text encoder
         - image_to_vector() preprocesses and encodes images via the vision encoder
@@ -89,7 +92,7 @@ class ONNXRTBackend(BaseClipBackend):
         providers: list[str] | None = None,
         device_preference: str | None = None,
         max_batch_size: int | None = None,
-        prefer_fp16: bool = True,
+        precision: str | None = None,
     ) -> None:
         if ort is None:
             raise ImportError(
@@ -105,7 +108,7 @@ class ONNXRTBackend(BaseClipBackend):
 
         # Execution providers
         self._providers = providers or self._default_providers(device_preference)
-        self._prefer_fp16 = prefer_fp16 and self._is_gpu_available(self._providers)
+        self._precision = precision
 
         # Runtime objects
         self._sess_vision: ort.InferenceSession | None = None
@@ -232,7 +235,7 @@ class ONNXRTBackend(BaseClipBackend):
 
     def _select_model_file(self, model_type: str) -> tuple[Path, str]:
         """
-        Select model file based on precision preference and availability.
+        Select model file based on precision configuration and availability.
 
         Args:
             model_type: "vision" or "text"
@@ -245,26 +248,35 @@ class ONNXRTBackend(BaseClipBackend):
         """
         runtime_dir = self.resources.model_root_path / "onnx"
 
-        # Try FP16 first if GPU and preferred
-        if self._prefer_fp16:
+        # Try specified precision first
+        if self._precision:
+            precision_path = runtime_dir / f"{model_type}.{self._precision}.onnx"
+            if precision_path.exists():
+                return precision_path, self._precision
+            logger.warning(
+                f"Precision {self._precision} model file not found at {precision_path}, "
+                f"falling back to default precision"
+            )
+
+        # Fall back to default (fp32, no extension)
+        default_path = runtime_dir / f"{model_type}.onnx"
+        if default_path.exists():
+            return default_path, "fp32"
+
+        # If still not found and we had a precision, check for fp16 as last resort
+        if self._precision and self._precision != "fp16":
             fp16_path = runtime_dir / f"{model_type}.fp16.onnx"
             if fp16_path.exists():
+                logger.warning(
+                    f"Only FP16 model found for {model_type}, using it instead of {self._precision}"
+                )
                 return fp16_path, "fp16"
-            logger.info(f"FP16 model not found at {fp16_path}, falling back to FP32")
 
-        # Fall back to FP32 (default naming)
-        fp32_path = runtime_dir / f"{model_type}.onnx"
-        if fp32_path.exists():
-            return fp32_path, "fp32"
-
-        # If still not found, check if there's an fp16 variant as last resort
-        fp16_path = runtime_dir / f"{model_type}.fp16.onnx"
-        if fp16_path.exists():
-            logger.warning("Only FP16 model found, using it despite CPU preference")
-            return fp16_path, "fp16"
-
+        # Build error message with both expected paths
+        precision_filename = f"{model_type}.{self._precision or 'fp32'}.onnx"
+        precision_path = runtime_dir / precision_filename
         raise ONNXRTModelLoadingError(
-            f"No {model_type} model found. Expected {fp32_path} or {fp16_path}"
+            f"No {model_type} model found. Expected {default_path} or {precision_path}"
         )
 
     @staticmethod
@@ -282,18 +294,6 @@ class ONNXRTBackend(BaseClipBackend):
         # Default to float32 for unknown types
         logger.warning(f"Unknown ONNX type '{onnx_type}', defaulting to float32")
         return np.dtype(np.float32)
-
-    @staticmethod
-    def _is_gpu_available(providers: list[str]) -> bool:
-        """Check if any GPU execution provider is in the list."""
-        gpu_providers = {
-            "CUDAExecutionProvider",
-            "CoreMLExecutionProvider",
-            "DmlExecutionProvider",
-            "OpenVINOExecutionProvider",
-            "TensorrtExecutionProvider",
-        }
-        return any(p in gpu_providers for p in providers)
 
     def _load_tokenizer(self) -> Callable[[Sequence[str]], np.ndarray]:
         """Load tokenizer from tokenizer.json, transformers, or fallback to SimpleTokenizer."""
@@ -375,11 +375,11 @@ class ONNXRTBackend(BaseClipBackend):
                 return tokens.numpy().astype(np.int64)
 
             return tokenize_fn_simple
-        except ImportError:
+        except ImportError as exc:
             raise ONNXRTModelLoadingError(
                 "Tokenization failed: 'tokenizer.json' not found/valid, 'transformers' failed, and 'open_clip' not installed. "
                 "Install with `pip install lumen-clip[cpu]` (or other extras) to include open-clip-torch."
-            )
+            ) from exc
 
     def _create_image_preprocessor(self) -> Callable[[Image.Image], np.ndarray]:
         """Create image preprocessing function based on model config and input dtype."""
@@ -616,7 +616,7 @@ class ONNXRTBackend(BaseClipBackend):
         image_size_str = f"{image_size[0]}x{image_size[1]}" if image_size else None
 
         # Determine precision list
-        precisions = list(set([self._vision_precision, self._text_precision]))
+        precisions = list({self._vision_precision, self._text_precision})
         if "unknown" in precisions:
             precisions.remove("unknown")
         if not precisions:
