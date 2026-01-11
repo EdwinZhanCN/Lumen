@@ -22,7 +22,6 @@ Notes:
 from __future__ import annotations
 
 import abc
-import enum
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -40,18 +39,9 @@ if TYPE_CHECKING:
 
 
 __all__ = [
-    "RuntimeKind",
     "BackendInfo",
     "BaseClipBackend",
 ]
-
-
-class RuntimeKind(str, enum.Enum):
-    """Enumerates the primary runtime families for backends."""
-
-    TORCH = "torch"
-    ONNXRT = "onnx"
-    RKNN = "rknn"
 
 
 @dataclass

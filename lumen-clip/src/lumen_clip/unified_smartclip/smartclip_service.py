@@ -25,7 +25,7 @@ from typing_extensions import override
 
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
-from lumen_clip.backends import BaseClipBackend, RuntimeKind, create_backend
+from lumen_clip.backends import BaseClipBackend, create_backend
 from lumen_clip.expert_bioclip.bioclip_model import BioCLIPModelManager
 from lumen_clip.general_clip.clip_model import CLIPModelManager
 from lumen_clip.registry import TaskRegistry
@@ -154,7 +154,8 @@ class SmartCLIPService(rpc.InferenceServicer):
             )
 
         # Create backends using factory
-        runtime_kind = RuntimeKind(clip_config.runtime.value)
+        # Use runtime string directly (normalized to lowercase in create_backend)
+        runtime_kind = clip_config.runtime.value
 
         # Determine precision from CLIP config
         clip_precision = None
