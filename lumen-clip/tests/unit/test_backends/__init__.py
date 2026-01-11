@@ -1,1 +1,1 @@
-# Unit tests for lumen-clip backends
+"""Tests for lumen_clip backends."""

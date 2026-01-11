@@ -2,25 +2,26 @@
 Backend factory for creating backend instances based on configuration.
 
 This module provides a factory pattern implementation to dynamically create
-backend instances based on the configuration, without importing all backends
-unconditionally.
+backend instances based on the configuration, using lazy imports to avoid
+requiring optional dependencies at import time.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 
 from lumen_resources.lumen_config import BackendSettings
 
+from .backend_exceptions import BackendDependencyError
 from .base import BaseClipBackend, RuntimeKind
 from .onnxrt_backend import ONNXRTBackend
 
 logger = logging.getLogger(__name__)
 
-# Global registry for backends
-_BACKEND_REGISTRY: dict[RuntimeKind, type[BaseClipBackend]] = {
-    RuntimeKind.ONNXRT: ONNXRTBackend,
-}
+# Module-level backend registry and initialization flag
+_BACKEND_REGISTRY: dict[RuntimeKind, type[BaseClipBackend]] = {}
+_INITIALIZED: bool = False
 
 
 def register_backend(kind: RuntimeKind, backend_class: type[BaseClipBackend]) -> None:
@@ -28,39 +29,80 @@ def register_backend(kind: RuntimeKind, backend_class: type[BaseClipBackend]) ->
     _BACKEND_REGISTRY[kind] = backend_class
 
 
+def _ensure_backends_registered() -> None:
+    """
+    Register all available backends using lazy imports (idempotent).
+
+    This function checks for available optional dependencies using importlib.util,
+    and only imports backends for dependencies that are available. It is called
+    automatically by get_available_backends() and create_backend().
+
+    The function is idempotent - safe to call multiple times. After the first call,
+    it returns immediately without re-scanning dependencies.
+    """
+    global _INITIALIZED
+
+    if _INITIALIZED:
+        return
+
+    # ONNXRT is always available (base dependency)
+    _BACKEND_REGISTRY[RuntimeKind.ONNXRT] = ONNXRTBackend
+
+    # Torch is optional - check if torch package is available
+    if importlib.util.find_spec("torch") is not None:
+        try:
+            from .torch_backend import TorchBackend
+
+            _BACKEND_REGISTRY[RuntimeKind.TORCH] = TorchBackend
+        except ImportError as e:
+            logger.warning(f"Torch backend unavailable due to import error: {e}")
+
+    # RKNN is optional - check if rknnlite package is available
+    if importlib.util.find_spec("rknnlite") is not None:
+        try:
+            from .rknn_backend import RKNNBackend
+
+            _BACKEND_REGISTRY[RuntimeKind.RKNN] = RKNNBackend
+        except ImportError as e:
+            logger.warning(f"RKNN backend unavailable due to import error: {e}")
+
+    _INITIALIZED = True
+
+
 def get_available_backends() -> list[RuntimeKind]:
-    """Get a list of available runtime kinds."""
-    available = []
+    """
+    Get list of available runtime kinds (cached).
 
-    # Check ONNXRT (always available since it's in base dependencies)
-    try:
-        import onnxruntime
+    The first call triggers backend discovery and registration.
+    Subsequent calls return cached results for performance.
 
-        available.append(RuntimeKind.ONNXRT)
-    except ImportError:
-        pass
+    Returns:
+        List of RuntimeKind enum values representing available backends.
+    """
+    _ensure_backends_registered()
+    return list(_BACKEND_REGISTRY.keys())
 
-    # Check PyTorch (optional dependency)
-    try:
-        import torch  # type: ignore
 
-        # Try to import TorchBackend
-        from .torch_backend import TorchBackend
+def reload_backends() -> list[RuntimeKind]:
+    """
+    Reload backend registry (call after installing new dependencies).
 
-        register_backend(RuntimeKind.TORCH, TorchBackend)
-        available.append(RuntimeKind.TORCH)
-    except ImportError:
-        pass
+    Clears the backend registry cache and re-scans for available
+    dependencies. Call this after installing optional backends
+    (e.g., pip install lumen-clip[torch]) to make them available.
 
-    # Check RKNN (optional dependency, Linux only)
-    try:
-        from .rknn_backend import RKNNBackend
+    Returns:
+        List of RuntimeKind enum values after reload.
+    """
+    global _INITIALIZED, _BACKEND_REGISTRY
 
-        register_backend(RuntimeKind.RKNN, RKNNBackend)
-        available.append(RuntimeKind.RKNN)
-    except ImportError:
-        pass
+    logger.info("Reloading backend registry...")
+    _INITIALIZED = False
+    _BACKEND_REGISTRY.clear()
+    _ensure_backends_registered()
 
+    available = list(_BACKEND_REGISTRY.keys())
+    logger.info(f"Backend registry reloaded. Available backends: {[k.value for k in available]}")
     return available
 
 
@@ -84,21 +126,16 @@ def create_backend(
         A backend instance
 
     Raises:
-        ValueError: If the specified runtime is not available
-        ImportError: If required dependencies are missing
+        BackendDependencyError: If requested runtime requires optional dependencies not installed
+        ValueError: If the specified runtime is not recognized
     """
-
     # Ensure all backends are registered
-    get_available_backends()
+    _ensure_backends_registered()
 
     if runtime not in _BACKEND_REGISTRY:
-        available = list(_BACKEND_REGISTRY.keys())
-        raise ValueError(
-            f"Runtime '{runtime}' is not available. "
-            f"Available runtimes: {[k.value for k in available]}"
-        )
+        raise BackendDependencyError(runtime.value)
 
-    backend_class = _BACKEND_REGISTRY[runtime]
+    _backend_class = _BACKEND_REGISTRY[runtime]
 
     # Create backend instance based on runtime
     if runtime == RuntimeKind.TORCH:

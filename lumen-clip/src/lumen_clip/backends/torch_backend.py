@@ -810,6 +810,34 @@ class TorchBackend(BaseClipBackend):
             },
         )
 
+    @override
+    def get_temperature(self) -> float | None:
+        """
+        Get model temperature (logit scale) for classification calibration.
+
+        Extracts the logit_scale parameter from the loaded model (OpenCLIP or HuggingFace)
+        and returns its exponential value as temperature.
+
+        Returns:
+            Temperature value if model provides logit_scale, None otherwise.
+            Typical CLIP models use values between 1.0 and 10.0.
+        """
+        try:
+            # Try OpenCLIP model first
+            if self._openclip_model is not None:
+                if hasattr(self._openclip_model, "logit_scale"):
+                    return self._openclip_model.logit_scale.exp().item()
+
+            # Try HuggingFace model
+            if self._hf_model is not None:
+                if hasattr(self._hf_model, "logit_scale"):
+                    return self._hf_model.logit_scale.exp().item()
+
+        except Exception as e:
+            logger.debug(f"Could not extract temperature from model: {e}")
+
+        return None
+
     # ---------- Helpers ----------
 
     @staticmethod

@@ -23,7 +23,7 @@ from typing_extensions import override
 
 import lumen_face.proto.ml_service_pb2 as pb
 import lumen_face.proto.ml_service_pb2_grpc as rpc
-from lumen_face.backends import FaceRecognitionBackend, ONNXRTBackend
+from lumen_face.backends import FaceRecognitionBackend, create_backend
 from lumen_face.registry import TaskRegistry
 from lumen_face.resources.loader import ModelResources, ResourceLoader
 
@@ -193,15 +193,17 @@ class GeneralFaceService(rpc.InferenceServicer):
         if model_config.precision and runtime in ["onnx", "rknn"]:
             prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
 
-        if runtime == "onnx":
-            backend = ONNXRTBackend(
+        # Use factory to create backend
+        try:
+            backend = create_backend(
+                backend_config=backend_settings
+                or BackendSettings(device=device_pref, batch_size=max_batch_size),
                 resources=resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+                runtime=runtime,
                 prefer_fp16=prefer_fp16,
             )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
+        except ValueError as e:
+            raise ConfigError(f"Failed to create backend: {e}") from e
 
         # Create service
         service = cls(backend, resources)

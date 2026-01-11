@@ -8,7 +8,7 @@ It follows the standard Lumen architecture for model management.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from lumen_resources.lumen_config import ModelConfig
 
@@ -17,7 +17,7 @@ from ..backends.backend_exceptions import (
     ModelLoadingError,
 )
 from ..backends.base import BackendInfo, BaseOcrBackend, OcrResult
-from ..backends.onnxrt_backend import OnnxOcrBackend
+from ..backends.factory import create_backend
 from ..resources.loader import ModelResources, ResourceLoader
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,10 @@ class ModelInfo:
     model_name: str
     model_id: str
     is_initialized: bool
-    backend_info: Optional[BackendInfo] = None
-    extra_metadata: Optional[Dict[str, Any]] = None
+    backend_info: BackendInfo | None = None
+    extra_metadata: dict[str, Any] | None = None
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
             "model_name": self.model_name,
@@ -63,7 +63,7 @@ class OcrModelManager:
         config: ModelConfig,
         cache_dir: str,
         providers: list[str] | None = None,
-        device_preference: Optional[str] = None,
+        device_preference: str | None = None,
     ):
         """
         Initialize the manager.
@@ -103,27 +103,36 @@ class OcrModelManager:
                 self.cache_dir, self.config
             )
 
-            # 2. Instantiate Backend based on runtime
+            # 2. Instantiate Backend based on runtime using factory
             runtime = self.config.runtime.value
-            if runtime == "onnx":
-                # Determine precision preference from ModelConfig
-                prefer_fp16 = (
-                    self.config.precision in ["fp16", "q4fp16"]
-                    if self.config.precision
-                    else False
-                )
 
-                self._backend = OnnxOcrBackend(
+            # Determine precision preference from ModelConfig
+            prefer_fp16 = (
+                self.config.precision in ["fp16", "q4fp16"]
+                if self.config.precision
+                else False
+            )
+
+            # Create backend settings
+            from lumen_resources.lumen_config import BackendSettings
+
+            backend_settings = BackendSettings(
+                device=self.device_preference,
+                batch_size=1,
+                onnx_providers=self.providers,
+            )
+
+            try:
+                self._backend = create_backend(
+                    backend_config=backend_settings,
                     resources=self._resources,
-                    providers=self.providers,
-                    device_preference=self.device_preference,
+                    runtime=runtime,
                     prefer_fp16=prefer_fp16,
                 )
-            # Future support for other runtimes (e.g., rknn, torch) can be added here
-            else:
+            except ValueError as e:
                 raise NotImplementedError(
-                    f"Runtime '{runtime}' is not supported by OcrModelManager yet."
-                )
+                    f"Runtime '{runtime}' is not supported: {e}"
+                ) from e
 
             # 3. Initialize Backend
             self._backend.initialize()
@@ -142,7 +151,7 @@ class OcrModelManager:
         rec_threshold: float = 0.5,
         use_angle_cls: bool = False,
         **kwargs: Any,
-    ) -> List[OcrResult]:
+    ) -> list[OcrResult]:
         """
         Perform end-to-end OCR on the input image.
 

@@ -40,7 +40,7 @@ from lumen_clip.resources import ModelResources
 try:
     import onnxruntime as ort
 except ImportError:
-    ort = None
+    pass
 
 from .backend_exceptions import *
 from .base import BackendInfo, BaseClipBackend
