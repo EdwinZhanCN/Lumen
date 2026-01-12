@@ -12,7 +12,6 @@ from typing import Any
 
 from .backend_exceptions import (
     BackendNotInitializedError,
-    InvalidInputError,
 )
 
 

@@ -8,12 +8,13 @@ This backend orchestrates the ONNX runtimes for the three FastVLM sub-models
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import logging
 import time
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Generator, cast
+from typing import TYPE_CHECKING, Any, Generator, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,20 +37,19 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+_has_ort = importlib.util.find_spec("onnxruntime") is not None
+
+if TYPE_CHECKING:
+    import onnxruntime as ort
+else:
+    if _has_ort:
+        import onnxruntime as ort
+    else:
+        ort = None
+
 
 class ONNXRuntimeNotAvailableError(ModelLoadingError):
     """Raised when onnxruntime cannot be imported."""
-
-
-try:
-    import onnxruntime as ort
-except ImportError:
-    raise ONNXRuntimeNotAvailableError(
-            "onnxruntime is required but not installed.\n"
-            "Please install it with: pip install onnxruntime\n"
-            "For CUDA (Nvidia/AMD) GPU support: pip install onnxruntime-gpu"
-        )
-
 
 
 class FastVLMONNXBackend(BaseFastVLMBackend):
@@ -67,7 +67,6 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         max_new_tokens: int | None = None,
         prefer_fp16: bool = True,
     ) -> None:
-
         super().__init__(
             resources=resources,
             device_preference=device_preference,
@@ -112,9 +111,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
 
         t0 = time.time()
         runtime_root = Path(self.resources.model_root_path) / "onnx"
-        logger.info(
-            f"Providers: {self._providers}"
-        )
+        logger.info(f"Providers: {self._providers}")
         try:
             self._sess_vision = self._build_session(
                 runtime_root, "vision", prefer_fp16=self._prefer_fp16
@@ -133,6 +130,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
             )
             self._set_backend_info(backend_info)
             self._load_time_seconds = time.time() - t0
+            self._initialized = True
             logger.info(
                 "✅ FastVLM ONNX backend initialized in %.2fs", self._load_time_seconds
             )
@@ -474,9 +472,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
 
         # 2. Run inference
         if self._sess_decoder is None:
-            raise RuntimeError(
-                "Decoder session is not initialized"
-            )
+            raise RuntimeError("Decoder session is not initialized")
         outputs = self._sess_decoder.run(self._decoder_output_names, inputs)
 
         # 3. Process Outputs (Logits + KV)
@@ -501,9 +497,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         ids = np.array([input_ids], dtype=np.int64)
 
         if self._sess_embed is None:
-            raise RuntimeError(
-                "Embed session is not initialized"
-            )
+            raise RuntimeError("Embed session is not initialized")
 
         out = self._sess_embed.run(
             [self._embed_output_name], {self._embed_input_name: ids}
@@ -770,7 +764,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
                 first_input = sess.get_inputs()[0]
                 dtype = self._onnx_type_to_dtype(first_input.type)
                 return "fp16" if dtype == np.float16 else "fp32"
-            except:
+            except Exception:
                 return "fp32"
 
         for sess in (self._sess_vision, self._sess_embed, self._sess_decoder):

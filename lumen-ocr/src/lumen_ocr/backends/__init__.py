@@ -1,16 +1,17 @@
-from .base import BackendInfo, FaceRecognitionBackend
+from .base import BackendInfo, BaseOcrBackend, OcrResult
 from .factory import (
     RuntimeKind,
     create_backend,
     get_available_backends,
     register_backend,
 )
-from .onnxrt_backend import ONNXRTBackend
+from .onnxrt_backend import OnnxOcrBackend
 
 __all__ = [
-    "FaceRecognitionBackend",
+    "BaseOcrBackend",
     "BackendInfo",
-    "ONNXRTBackend",
+    "OcrResult",
+    "OnnxOcrBackend",
     "RuntimeKind",
     "create_backend",
     "get_available_backends",

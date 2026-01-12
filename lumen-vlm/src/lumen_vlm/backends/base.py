@@ -24,15 +24,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Iterable,
-    Mapping,
-    MutableMapping,
-    Sequence,
-    cast
-)
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, MutableMapping, Sequence
 
 import numpy as np
 from jinja2 import Environment, StrictUndefined, TemplateError
@@ -326,6 +318,20 @@ class BaseFastVLMBackend(abc.ABC):
     def vision_config(self) -> VisionConfig:
         return self._vision_config
 
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the backend is properly initialized and ready for inference.
+
+        Returns:
+            bool: True if the backend has been successfully initialized with
+                loaded models and configured devices, False otherwise.
+
+        Note:
+            This property should be checked before inference operations to avoid
+            BackendNotInitializedError exceptions.
+        """
+        return self._initialized
+
     def ensure_initialized(self) -> None:
         if not self._initialized:
             raise BackendNotInitializedError(
@@ -398,9 +404,7 @@ class BaseFastVLMBackend(abc.ABC):
             ) from exc
 
         if self._tokenizer is None:
-            raise ModelLoadingError(
-                f"Failed to load tokenizer from {tokenizer_path}"
-            )
+            raise ModelLoadingError(f"Failed to load tokenizer from {tokenizer_path}")
 
         return self._tokenizer
 

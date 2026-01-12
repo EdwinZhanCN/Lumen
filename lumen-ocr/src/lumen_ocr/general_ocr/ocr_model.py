@@ -7,8 +7,8 @@ It follows the standard Lumen architecture for model management.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any
 
 from lumen_resources.lumen_config import ModelConfig
 
@@ -16,35 +16,12 @@ from ..backends.backend_exceptions import (
     BackendNotInitializedError,
     ModelLoadingError,
 )
-from ..backends.base import BackendInfo, BaseOcrBackend, OcrResult
-from ..backends.onnxrt_backend import OnnxOcrBackend
+from ..backends.base import BaseOcrBackend, OcrResult
+from ..backends.factory import create_backend
 from ..resources.loader import ModelResources, ResourceLoader
+from ..runtime_info import RuntimeModelInfo
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ModelInfo:
-    """Type-safe model information for OCR models.
-
-    Provides a consistent interface for accessing model metadata and status.
-    """
-
-    model_name: str
-    model_id: str
-    is_initialized: bool
-    backend_info: Optional[BackendInfo] = None
-    extra_metadata: Optional[Dict[str, Any]] = None
-
-    def as_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for API responses."""
-        return {
-            "model_name": self.model_name,
-            "model_id": self.model_id,
-            "is_initialized": self.is_initialized,
-            "backend_info": self.backend_info.as_dict() if self.backend_info else None,
-            "extra_metadata": self.extra_metadata,
-        }
 
 
 class OcrModelManager:
@@ -63,7 +40,7 @@ class OcrModelManager:
         config: ModelConfig,
         cache_dir: str,
         providers: list[str] | None = None,
-        device_preference: Optional[str] = None,
+        device_preference: str | None = None,
     ):
         """
         Initialize the manager.
@@ -81,6 +58,7 @@ class OcrModelManager:
         self._backend: BaseOcrBackend
         self._resources: ModelResources
         self._initialized = False
+        self._load_time: float | None = None
 
     def initialize(self) -> None:
         """
@@ -97,39 +75,54 @@ class OcrModelManager:
 
         logger.info(f"Initializing OCR model: {self.config.model}")
 
+        start_time = time.perf_counter()
+
         try:
             # 1. Load Resources
             self._resources = ResourceLoader.load_model_resource(
                 self.cache_dir, self.config
             )
 
-            # 2. Instantiate Backend based on runtime
+            # 2. Instantiate Backend based on runtime using factory
             runtime = self.config.runtime.value
-            if runtime == "onnx":
-                # Determine precision preference from ModelConfig
-                prefer_fp16 = (
-                    self.config.precision in ["fp16", "q4fp16"]
-                    if self.config.precision
-                    else False
-                )
 
-                self._backend = OnnxOcrBackend(
+            # Determine precision preference from ModelConfig
+            prefer_fp16 = (
+                self.config.precision in ["fp16", "q4fp16"]
+                if self.config.precision
+                else False
+            )
+
+            # Create backend settings
+            from lumen_resources.lumen_config import BackendSettings
+
+            backend_settings = BackendSettings(
+                device=self.device_preference,
+                batch_size=1,
+                onnx_providers=self.providers,
+            )
+
+            try:
+                self._backend = create_backend(
+                    backend_config=backend_settings,
                     resources=self._resources,
-                    providers=self.providers,
-                    device_preference=self.device_preference,
+                    runtime=runtime,
                     prefer_fp16=prefer_fp16,
                 )
-            # Future support for other runtimes (e.g., rknn, torch) can be added here
-            else:
+            except ValueError as e:
                 raise NotImplementedError(
-                    f"Runtime '{runtime}' is not supported by OcrModelManager yet."
-                )
+                    f"Runtime '{runtime}' is not supported: {e}"
+                ) from e
 
             # 3. Initialize Backend
             self._backend.initialize()
             self._initialized = True
+            self._load_time = time.perf_counter() - start_time
 
-            logger.info(f"Successfully initialized OCR model: {self.config.model}")
+            logger.info(
+                f"Successfully initialized OCR model: {self.config.model} "
+                f"(load time: {self._load_time:.2f}s)"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize OCR model: {e}")
@@ -142,7 +135,7 @@ class OcrModelManager:
         rec_threshold: float = 0.5,
         use_angle_cls: bool = False,
         **kwargs: Any,
-    ) -> List[OcrResult]:
+    ) -> list[OcrResult]:
         """
         Perform end-to-end OCR on the input image.
 
@@ -171,19 +164,42 @@ class OcrModelManager:
             **kwargs,
         )
 
-    def get_info(self) -> ModelInfo:
-        """Get current model information and status."""
+    def info(self) -> RuntimeModelInfo:
+        """Get current model runtime information and status.
+
+        Returns:
+            RuntimeModelInfo: Comprehensive runtime information including
+                backend details, load time, and model capabilities.
+        """
+        if not self._initialized or not self._backend:
+            # Return minimal info if not initialized
+            return RuntimeModelInfo(
+                model_name=self.config.model,
+                model_id=f"{self.config.model}_uninitialized",
+                is_initialized=False,
+                load_time=self._load_time,
+            )
+
         backend_info = self._backend.get_info()
+
         # Extract extra metadata from resources if available
         extra = None
         if self._resources and self._resources.model_info.extra_metadata:
             extra = self._resources.model_info.extra_metadata
 
-        return ModelInfo(
+        # Check if angle classification is supported
+        supports_angle_cls = backend_info.cls_model_id is not None
+
+        return RuntimeModelInfo(
             model_name=self.config.model,
             model_id=f"{self.config.model}_{backend_info.runtime}",
             is_initialized=self._initialized,
+            load_time=self._load_time,
             backend_info=backend_info,
+            supports_angle_classification=supports_angle_cls,
+            det_model_name=backend_info.det_model_id,
+            rec_model_name=backend_info.rec_model_id,
+            cls_model_name=backend_info.cls_model_id,
             extra_metadata=extra,
         )
 

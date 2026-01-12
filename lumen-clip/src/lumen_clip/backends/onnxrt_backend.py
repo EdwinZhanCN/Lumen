@@ -22,11 +22,12 @@ Notes:
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,15 +38,25 @@ from typing_extensions import override
 
 from lumen_clip.resources import ModelResources
 
-try:
-    import onnxruntime as ort
-except ImportError:
-    ort = None
-
-from .backend_exceptions import *
+from .backend_exceptions import (
+    BackendError,
+    InferenceError,
+    InvalidInputError,
+    ModelLoadingError,
+)
 from .base import BackendInfo, BaseClipBackend
 
 logger = logging.getLogger(__name__)
+
+_has_ort = importlib.util.find_spec("onnxruntime") is not None
+
+if TYPE_CHECKING:
+    import onnxruntime as ort
+else:
+    if _has_ort:
+        import onnxruntime as ort
+    else:
+        ort = None
 
 
 class ONNXRTBackendError(BackendError):
@@ -357,29 +368,14 @@ class ONNXRTBackend(BaseClipBackend):
             return tokenize_fn_transformers
 
         except Exception as e:
-            logger.warning(
-                f"Failed to load tokenizer via transformers: {e}. Falling back to SimpleTokenizer."
+            logger.error(
+                f"Failed to load tokenizer via transformers: {e}. No fallback available."
             )
-
-        # 3. Fallback to SimpleTokenizer (requires open_clip_torch)
-        try:
-            from open_clip.tokenizer import SimpleTokenizer
-
-            logger.info("Using SimpleTokenizer (fallback)")
-
-            simple_tokenizer = SimpleTokenizer()
-
-            def tokenize_fn_simple(texts: Sequence[str]) -> np.ndarray:
-                # SimpleTokenizer usually handles 77 context length internally
-                tokens = simple_tokenizer(list(texts), context_length=context_length)
-                return tokens.numpy().astype(np.int64)
-
-            return tokenize_fn_simple
-        except ImportError as exc:
             raise ONNXRTModelLoadingError(
-                "Tokenization failed: 'tokenizer.json' not found/valid, 'transformers' failed, and 'open_clip' not installed. "
-                "Install with `pip install lumen-clip[cpu]` (or other extras) to include open-clip-torch."
-            ) from exc
+                f"Could not load tokenizer from any source. "
+                f"Tried tokenizer.json and transformers AutoTokenizer. "
+                f"Last error: {e}"
+            ) from e
 
     def _create_image_preprocessor(self) -> Callable[[Image.Image], np.ndarray]:
         """Create image preprocessing function based on model config and input dtype."""

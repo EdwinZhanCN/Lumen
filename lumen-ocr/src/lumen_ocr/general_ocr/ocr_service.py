@@ -9,7 +9,7 @@ between the gRPC interface and the backend model logic.
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 import grpc
 from google.protobuf import empty_pb2

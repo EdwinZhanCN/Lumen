@@ -93,7 +93,7 @@ class ModelResources:
             This value is used to validate embedding outputs and configure
             downstream processing pipelines that depend on specific embedding dimensions.
         """
-        return self.model_info.embedding_dim
+        return self.model_info.embedding_dim or 0
 
 
 class ResourceLoader:
