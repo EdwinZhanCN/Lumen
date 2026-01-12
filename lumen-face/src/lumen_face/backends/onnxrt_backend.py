@@ -14,9 +14,11 @@ detection plus embedding extraction capabilities.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
@@ -33,11 +35,15 @@ from .backend_exceptions import (
 from .base import BackendInfo, FaceDetection, FaceRecognitionBackend
 from .insightface_specs import PACK_SPECS
 
-# onnxruntime is an external dependency; we import lazily to surface a clear error
-try:
+_has_ort = importlib.util.find_spec("onnxruntime") is not None
+
+if TYPE_CHECKING:
     import onnxruntime as ort
-except ImportError:  # pragma: no cover
-    ort = None
+else:
+    if _has_ort:
+        import onnxruntime as ort
+    else:
+        ort = None
 
 
 logger = __import__("logging").getLogger(__name__)
@@ -720,10 +726,12 @@ class ONNXRTBackend(FaceRecognitionBackend):
 
             assert self._sess_detection is not None
             input_name = self._sess_detection.get_inputs()[0].name
-            outputs = self._sess_detection.run(
+            raw_outputs = self._sess_detection.run(
                 None,
                 {input_name: det_input},
             )
+            # Cast ONNX Runtime outputs to list of numpy arrays
+            outputs: list[npt.NDArray] = [np.asarray(out) for out in raw_outputs]
 
             return self._postprocess_detection(
                 outputs,

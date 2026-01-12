@@ -16,8 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 from ..backends.backend_exceptions import (
     BackendNotInitializedError,
@@ -32,6 +31,7 @@ from ..backends.base import (
     GenerationResult,
 )
 from ..resources.loader import ModelResources
+from ..runtime_info import RuntimeModelInfo
 
 logger = logging.getLogger(__name__)
 
@@ -46,33 +46,6 @@ class CacheCorruptionError(Exception):
     """Raised when cached data is corrupted or incompatible."""
 
     pass
-
-
-@dataclass
-class ModelInfo:
-    """Type-safe model information for FastVLM models.
-
-    Provides a consistent interface for accessing model metadata and status.
-    Compatible with other Lumen services while supporting VLM-specific fields.
-    """
-
-    model_name: str
-    model_id: str
-    is_initialized: bool
-    backend_info: Optional[BackendInfo] = None
-    load_time: float = 0.0
-    extra_metadata: Optional[Dict[str, Any]] = None
-
-    def as_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for API responses."""
-        return {
-            "model_name": self.model_name,
-            "model_id": self.model_id,
-            "is_initialized": self.is_initialized,
-            "backend_info": self.backend_info.as_dict() if self.backend_info else None,
-            "load_time": self.load_time,
-            "extra_metadata": self.extra_metadata,
-        }
 
 
 class FastVLMModelManager:
@@ -134,7 +107,7 @@ class FastVLMModelManager:
         self._backend = backend
         self._resources = resources
         self._initialized = False
-        self._info: Optional[ModelInfo] = None
+        self._load_time: Optional[float] = None
         self._init_start_time: Optional[float] = None
 
         logger.debug(
@@ -180,22 +153,12 @@ class FastVLMModelManager:
             # Initialize the backend
             self._backend.initialize()
 
-            # Create model info
-            backend_info = self._backend.get_info()
-            self._info = ModelInfo(
-                model_name=self.model_name,
-                model_id=self.model_id,
-                is_initialized=True,
-                backend_info=backend_info,
-                load_time=time.time() - self._init_start_time,
-                extra_metadata=getattr(
-                    self._resources.model_info, "extra_metadata", None
-                ),
-            )
+            # Track load time
+            self._load_time = time.time() - self._init_start_time
 
             self._initialized = True
             logger.info(
-                f"✅ FastVLM Model Manager initialized successfully in {self._info.load_time:.2f}s"
+                f"✅ FastVLM Model Manager initialized successfully in {self._load_time:.2f}s"
             )
 
         except Exception as exc:
@@ -309,20 +272,44 @@ class FastVLMModelManager:
 
         raise InferenceError("Backend returned a non-streaming result in stream mode")
 
-    def get_info(self) -> ModelInfo:
-        """Get model information and status.
+    def info(self) -> RuntimeModelInfo:
+        """Get model runtime information and status.
 
         Returns:
-            ModelInfo: Current model status and metadata
-
-        Raises:
-            BackendNotInitializedError: If model is not initialized
+            RuntimeModelInfo: Comprehensive runtime information including
+                backend details, load time, and model capabilities.
         """
-        if not self._initialized or self._info is None:
-            raise BackendNotInitializedError(
-                "Model manager must be initialized before getting info"
+        if not self._initialized or not self._backend:
+            # Return minimal info if not initialized
+            return RuntimeModelInfo(
+                model_name=self.model_name,
+                model_id=self.model_id,
+                is_initialized=False,
+                load_time=self._load_time,
             )
-        return self._info
+
+        backend_info = self._backend.get_info()
+
+        # Extract extra metadata from resources if available
+        extra = None
+        if self._resources and self._resources.model_info.extra_metadata:
+            extra = self._resources.model_info.extra_metadata
+
+        return RuntimeModelInfo(
+            model_name=self.model_name,
+            model_id=self.model_id,
+            is_initialized=self._initialized,
+            load_time=self._load_time,
+            backend_info=backend_info,
+            max_new_tokens=backend_info.max_new_tokens,
+            max_context_length=backend_info.max_context_length,
+            vision_image_size=backend_info.vision_image_size,
+            vision_patch_size=backend_info.vision_patch_size,
+            vocab_size=backend_info.vocab_size,
+            supports_streaming=True,
+            supports_multimodal=True,
+            extra_metadata=extra,
+        )
 
     def get_backend_info(self) -> BackendInfo:
         """Get backend runtime information.

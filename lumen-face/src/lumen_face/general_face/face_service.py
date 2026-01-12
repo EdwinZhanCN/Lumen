@@ -17,7 +17,7 @@ from pathlib import Path
 import grpc
 from google.protobuf import empty_pb2
 from lumen_resources import EmbeddingV1, FaceV1
-from lumen_resources.lumen_config import BackendSettings, ModelConfig, Services
+from lumen_resources.lumen_config import BackendSettings, Services
 from lumen_resources.result_schemas.face_v1 import BboxItem, Face
 from typing_extensions import override
 

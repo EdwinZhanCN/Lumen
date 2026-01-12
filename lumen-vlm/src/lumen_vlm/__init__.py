@@ -6,5 +6,6 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 from .cli import main
+from .runtime_info import RuntimeModelInfo
 
-__all__ = ["main"]
+__all__ = ["main", "RuntimeModelInfo"]
