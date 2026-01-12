@@ -47,7 +47,7 @@ __author__ = "Edwin Zhan"
 __email__ = "support@lumilio.org"
 
 from .cli import main
-from .models import RuntimeModelInfo
+from .runtime_info import RuntimeModelInfo
 
 __all__ = [
     "main",
