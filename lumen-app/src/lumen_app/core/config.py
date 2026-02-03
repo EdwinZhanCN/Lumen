@@ -18,7 +18,44 @@ from lumen_resources.lumen_config import (
 
 
 @dataclass
+class DependencyMetadata:
+    """Python 依赖元数据（pip 管理的部分）。
+
+    用于描述特定平台的 Python 依赖安装要求，包括可选依赖标识符、
+    额外的 PyPI 索引 URL 等。
+
+    Attributes:
+        extra_index_url: 额外的 PyPI 索引 URL（如 CUDA PyTorch 索引）
+        extra_deps: 可选依赖标识符（对应 pyproject.toml 中的 [project.optional-dependencies]）
+        python_version: Python 版本要求
+        install_args: 额外的 pip 安装参数
+    """
+
+    extra_index_url: list[str] | None = None
+    extra_deps: list[str] | None = None
+    python_version: str = "3.11"
+    install_args: list[str] | None = None
+
+
+@dataclass
 class DeviceConfig:
+    """设备配置类。
+
+    定义特定硬件平台的推理配置，包括运行时、ONNX 提供者、
+    批处理大小、精度，以及相关的依赖元数据。
+
+    Attributes:
+        runtime: 推理运行时类型（torch/onnx/rknn）
+        onnx_providers: ONNX 执行提供者列表
+        rknn_device: RKNN 设备标识（如 "rk3588"）
+        batch_size: 设备硬编码批处理大小（如 CPU/NPU 固定为 1）
+        description: 设备描述
+        precision: 设备硬编码精度（根据设备支持情况自动选择）
+        env: mamba yaml 配置文件标识符（default/cuda/openvino/tensorrt）
+        os: 操作系统约束（linux/win/darwin）
+        dependency_metadata: Python 依赖元数据
+    """
+
     runtime: Runtime
     onnx_providers: list | None
     rknn_device: str | None = None  # 如 "rk3588"
@@ -29,6 +66,9 @@ class DeviceConfig:
     precision: str | None = (
         None  # 设备硬编码精度，根据设备的支持情况，自动选择最优的精度，将会覆盖LumenConfig中的precision字段。
     )
+    env: str = "default"  # mamba yaml 配置文件标识符
+    os: str | None = None  # 操作系统约束 (linux/win/darwin)
+    dependency_metadata: DependencyMetadata | None = None  # Python 依赖元数据
 
     @classmethod
     def rockchip(cls, rknn_device: str):
@@ -39,6 +79,8 @@ class DeviceConfig:
             batch_size=1,  # NPU fixed to 1 batch size
             description="Preset for Rockchip NPU",
             precision="int8",
+            env="default",
+            dependency_metadata=DependencyMetadata(extra_deps=["rknn"]),
         )
 
     @classmethod
@@ -61,6 +103,8 @@ class DeviceConfig:
             ],
             batch_size=1,  # NPU fixed to 1 batch size
             description="Preset for Apple Silicon",
+            env="default",
+            dependency_metadata=DependencyMetadata(extra_deps=["apple"]),
         )
 
     @classmethod
@@ -73,6 +117,10 @@ class DeviceConfig:
             ],
             batch_size=4,
             description="Preset for low RAM (< 12GB) Nvidia GPUs",
+            env="cuda",
+            dependency_metadata=DependencyMetadata(
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -93,6 +141,10 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for high RAM (>= 12GB) Nvidia GPUs",
+            env="tensorrt",
+            dependency_metadata=DependencyMetadata(
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -113,6 +165,8 @@ class DeviceConfig:
             ],
             description="Preset for Intel iGPU or Arc GPU",
             precision="fp16",
+            env="openvino",
+            dependency_metadata=DependencyMetadata(extra_deps=["openvino"]),
         )
 
     # ROCm Support is under evaluation.
@@ -147,6 +201,8 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for AMD Ryzen GPUs",
+            env="default",
+            dependency_metadata=DependencyMetadata(extra_deps=["cpu"]),
         )
 
     @classmethod
@@ -161,6 +217,8 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for AMD Ryzen NPUs",
+            env="default",
+            dependency_metadata=DependencyMetadata(extra_deps=["cpu"]),
         )
 
     @classmethod
@@ -172,6 +230,12 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for low RAM (< 12GB) Nvidia Jetson Devices",
+            env="default",
+            os="linux",
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -192,6 +256,12 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for high RAM (>= 12GB) Nvidia Jetson Devices",
+            env="default",
+            os="linux",
+            dependency_metadata=DependencyMetadata(
+                extra_index_url=["https://pypi.jetson-ai-lab.io/jp6/cu126"],
+                extra_deps=["cuda"],
+            ),
         )
 
     @classmethod
@@ -203,6 +273,8 @@ class DeviceConfig:
             ],
             batch_size=1,
             description="Preset General CPUs",
+            env="default",
+            dependency_metadata=DependencyMetadata(extra_deps=["cpu"]),
         )
 
 
@@ -257,7 +329,7 @@ class Config:
                             model="PP-OCRv5",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision="fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -306,7 +378,7 @@ class Config:
                             model="PP-OCRv5",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision="fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -329,7 +401,7 @@ class Config:
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
                             dataset="ImageNet_1k",
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                         )
                     },
                 ),
@@ -350,7 +422,7 @@ class Config:
                             model="buffalo_l",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },
@@ -423,7 +495,7 @@ class Config:
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
                             dataset="ImageNet_1k",
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                         )
                     },
                 ),
@@ -444,7 +516,7 @@ class Config:
                             model="antelopev2",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },
@@ -580,7 +652,7 @@ class Config:
                             model="FastVLM-0.5B",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            precision=self.device_config.precision or "fp16",
                             dataset=None,
                         )
                     },

@@ -26,7 +26,6 @@ from typing_extensions import override
 import lumen_clip.proto.ml_service_pb2 as pb
 import lumen_clip.proto.ml_service_pb2_grpc as rpc
 from lumen_clip.backends import create_backend
-from lumen_clip.backends.base import RuntimeKind
 from lumen_clip.registry import TaskRegistry
 from lumen_clip.resources.loader import ModelResources, ResourceLoader
 
@@ -111,9 +110,18 @@ class GeneralCLIPService(rpc.InferenceServicer):
                 device="cpu", batch_size=1, onnx_providers=None
             )
 
+        # Determine precision from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        precision = None
+        if model_config.runtime.value in ["onnx", "rknn"]:
+            precision = model_config.precision
+
         # Use factory to create backend
         backend = create_backend(
-            backend_settings, resources, RuntimeKind(model_config.runtime.value)
+            backend_settings,
+            resources,
+            model_config.runtime.value,
+            precision=precision,
         )
 
         # Create service
@@ -172,6 +180,14 @@ class GeneralCLIPService(rpc.InferenceServicer):
             )
         else:
             logger.info("Classification tasks not registered (no dataset available)")
+
+    def get_supported_tasks(self) -> list[str]:
+        """Get list of supported task names for routing.
+
+        Returns:
+            List of task keys registered in the task registry.
+        """
+        return self.registry.list_task_names()
 
     def initialize(self) -> None:
         """Loads the model and prepares it for inference."""

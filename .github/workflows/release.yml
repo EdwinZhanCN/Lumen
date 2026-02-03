@@ -26,6 +26,24 @@ jobs:
             - name: Set up Python
               run: uv python install 3.10
 
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "pnpm"
+                  cache-dependency-path: lumen-app/web-ui/pnpm-lock.yaml
+
+            - name: Build Web UI
+              run: |
+                  cd lumen-app/web-ui
+                  pnpm install --frozen-lockfile
+                  pnpm run build
+
             - name: Verify Version matches Tag
               run: |
                   cd lumen-resources
@@ -48,12 +66,16 @@ jobs:
             - name: Clean dist
               run: rm -rf dist/*
 
-            - name: 🕵️ Debug Why is git dirty?
+            - name: Build and Publish lumen-app
               run: |
-                  echo "=== Git Status ==="
-                  git status
-                  echo "=== Ignored files that might act up ==="
-                  git status --ignored
+                  echo "📦 Building lumen-app..."
+                  uv build --package lumen-app
+
+                  echo "🚀 Publishing to PyPI..."
+                  uvx twine upload dist/* --username __token__ --password ${{ secrets.PYPI_API_TOKEN }}
+
+            - name: Clean dist
+              run: rm -rf dist/*
 
             - name: Build Service Packages
               run: |
@@ -74,6 +96,7 @@ jobs:
 
                       **Published to PyPI:**
                       - `lumen-resources`
+                      - `lumen-app` (includes Web UI)
 
                       **Attached Binaries:**
                       - `lumen-clip`
@@ -83,11 +106,16 @@ jobs:
 
                       ### Installation Guide
 
-                      #### 1. Base Library
-                      The core resource manager is available on PyPI:
+                      #### 1. Base Library & Web UI
+                      The core resource manager and web application are available on PyPI:
                       ```bash
                       pip install lumen-resources==${{ env.VERSION }}
+                      pip install lumen-app==${{ env.VERSION }}
                       ```
+
+                      **Web UI Commands:**
+                      - `lumen --config <path>` - Start gRPC hub server
+                      - `lumen-webui --port 8000` - Start Web UI + API server
 
                       #### 2. Service Installation (from .whl)
                       Download the `.whl` file for the service you need (e.g., `lumen_clip`) from the assets below.

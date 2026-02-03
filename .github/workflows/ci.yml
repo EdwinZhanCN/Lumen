@@ -22,8 +22,26 @@ jobs:
             - name: Set up Python
               run: uv python install 3.10
 
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "pnpm"
+                  cache-dependency-path: lumen-app/web-ui/pnpm-lock.yaml
+
             - name: Install Dependencies
               run: uv sync
+
+            - name: Build Web UI
+              run: |
+                  cd lumen-app/web-ui
+                  pnpm install --frozen-lockfile
+                  pnpm run build
 
             - name: Test Imports & Functionality
               run: |
@@ -34,5 +52,6 @@ jobs:
                   import lumen_face
                   import lumen_clip
                   import lumen_vlm
+                  import lumen_app
                   print('✅ All modules imported successfully from Workspace!')
                   "

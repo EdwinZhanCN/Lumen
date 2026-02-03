@@ -8,7 +8,6 @@ eliminating hardcoded preset identifiers.
 from __future__ import annotations
 
 import inspect
-import logging
 from dataclasses import dataclass
 from typing import Callable
 
@@ -26,6 +25,7 @@ class PresetInfo:
     description: str
     factory_method: Callable[[], DeviceConfig]
     requires_drivers: bool = True
+    priority: int = 50  # Lower number = higher priority (0-100)
 
 
 class PresetRegistry:
@@ -37,6 +37,20 @@ class PresetRegistry:
     """
 
     _presets: dict[str, PresetInfo] | None = None
+
+    # Preset priority mapping (lower = higher priority)
+    _PRESET_PRIORITIES = {
+        "nvidia_gpu_high": 5,
+        "nvidia_gpu": 10,
+        "nvidia_jetson_high": 12,
+        "nvidia_jetson": 15,
+        "apple_silicon": 20,
+        "rockchip": 25,
+        "intel_gpu": 30,
+        "amd_gpu_win": 35,
+        "amd_npu": 40,
+        "cpu": 100,  # Lowest priority (fallback)
+    }
 
     @classmethod
     def _discover_presets(cls) -> dict[str, PresetInfo]:
@@ -84,14 +98,18 @@ class PresetRegistry:
                         docstring = inspect.getdoc(member) or ""
                         description = docstring.split("\n")[0] if docstring else name
 
+                    # Get priority from mapping, default to 50
+                    priority = cls._PRESET_PRIORITIES.get(name, 50)
+
                     presets[name] = PresetInfo(
                         name=name,
                         description=description,
                         factory_method=member,
                         requires_drivers=name
                         != "cpu",  # CPU preset requires no special drivers
+                        priority=priority,
                     )
-                    logger.debug(f"Discovered preset: {name}")
+                    logger.debug(f"Discovered preset: {name} (priority: {priority})")
             except Exception as e:
                 logger.debug(f"Skipping {name}: {e}")
                 continue
@@ -120,6 +138,19 @@ class PresetRegistry:
     def get_preset_names(cls) -> list[str]:
         """Get list of all preset names."""
         return list(cls._discover_presets().keys())
+
+    @classmethod
+    def get_detection_order(cls) -> list[str]:
+        """
+        Get preset names in detection order (highest to lowest priority).
+
+        Returns presets sorted by priority, with lower numbers checked first.
+        This ensures the best available hardware is detected first.
+        """
+        presets = cls._discover_presets()
+        # Sort by priority (lower number = higher priority)
+        sorted_presets = sorted(presets.values(), key=lambda p: p.priority)
+        return [p.name for p in sorted_presets]
 
     @classmethod
     def create_config(cls, preset_name: str) -> DeviceConfig:

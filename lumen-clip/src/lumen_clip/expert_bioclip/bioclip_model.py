@@ -18,7 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from lumen_clip.backends import BaseClipBackend
-from lumen_clip.models import BackendInfo, ModelInfo
+from lumen_clip.models import BackendInfo, RuntimeModelInfo
 from lumen_clip.resources.loader import ModelResources
 
 logger = logging.getLogger(__name__)
@@ -204,12 +204,13 @@ class BioCLIPModelManager:
         Returns:
             Preferred name string
         """
-        if (
-                isinstance(label_data, list)
-                and len(label_data) == 2
-        ):
+        if isinstance(label_data, list) and len(label_data) == 2:
             taxonomy, common_name = label_data
-            if isinstance(common_name, str) and common_name.strip() and common_name != "":
+            if (
+                isinstance(common_name, str)
+                and common_name.strip()
+                and common_name != ""
+            ):
                 return common_name
             if isinstance(taxonomy, list) and len(taxonomy) >= 2:
                 return f"{taxonomy[-2]} {taxonomy[-1]}"
@@ -256,44 +257,56 @@ class BioCLIPModelManager:
 
         # Get temperature scaling from model if available (for better calibration)
         temperature = 1.0
-        try:
-            # Try to get logit scale from OpenCLIP model (TorchBackend specific)
-            if hasattr(self.backend, '_openclip_model') and self.backend._openclip_model is not None:
-                raw_temp = self.backend._openclip_model.logit_scale.exp().item()
-                # Clamp temperature to reasonable range (CLIP models typically use 1-10)
-                temperature = max(0.1, min(10.0, raw_temp))
-                if raw_temp != temperature:
-                    logger.warning(f"Clamped model temperature from {raw_temp:.4f} to {temperature:.4f}")
-                else:
-                    logger.debug(f"Using model temperature: {temperature:.4f}")
-            elif hasattr(self.backend, '_hf_model') and hasattr(self.backend._hf_model, 'logit_scale'):
-                raw_temp = self.backend._hf_model.logit_scale.exp().item()
-                temperature = max(0.1, min(10.0, raw_temp))
-                if raw_temp != temperature:
-                    logger.warning(f"Clamped HF model temperature from {raw_temp:.4f} to {temperature:.4f}")
-                else:
-                    logger.debug(f"Using HF model temperature: {temperature:.4f}")
-        except Exception as e:
-            logger.debug(f"Could not get model temperature, using 1.0: {e}")
+        backend_temp = self.backend.get_temperature()
+        if backend_temp is not None:
+            # Clamp temperature to reasonable range (CLIP models typically use 1-10)
+            clamped_temp = max(0.1, min(10.0, backend_temp))
+            if backend_temp != clamped_temp:
+                logger.warning(
+                    f"Clamped model temperature from {backend_temp:.4f} to {clamped_temp:.4f}"
+                )
+            else:
+                logger.debug(f"Using model temperature: {clamped_temp:.4f}")
+            temperature = clamped_temp
+        else:
+            logger.debug("Backend does not provide temperature, using 1.0")
+
+        # Note: Temperature is extracted for potential future use with softmax-based
+        # classification. Currently using raw cosine similarities for large datasets.
+        logger.debug(f"Temperature value: {temperature:.4f} (not currently applied)")
 
         # Log embedding dimensions for debugging
         logger.debug(f"Image embedding dim: {img_embedding.shape}")
         logger.debug(f"Text embeddings shape: {text_embeddings_norm.shape}")
         logger.debug(f"Image embedding norm: {np.linalg.norm(img_embedding):.6f}")
-        logger.debug(f"Text embeddings avg norm: {np.mean(np.linalg.norm(text_embeddings_norm, axis=1)):.6f}")
+        logger.debug(
+            f"Text embeddings avg norm: {np.mean(np.linalg.norm(text_embeddings_norm, axis=1)):.6f}"
+        )
 
         # Auto-detect and fix text embedding axis order for robust compatibility
         # Text embeddings should be (num_classes, embedding_dim)
-        if self.text_embeddings.shape[0] == len(self.labels) and self.text_embeddings.shape[1] == img_embedding.shape[0]:
+        if (
+            self.text_embeddings.shape[0] == len(self.labels)
+            and self.text_embeddings.shape[1] == img_embedding.shape[0]
+        ):
             # Correct orientation: (num_classes, embedding_dim)
             text_embeddings_correct = self.text_embeddings
-        elif self.text_embeddings.shape[1] == len(self.labels) and self.text_embeddings.shape[0] == img_embedding.shape[0]:
+        elif (
+            self.text_embeddings.shape[1] == len(self.labels)
+            and self.text_embeddings.shape[0] == img_embedding.shape[0]
+        ):
             # Wrong orientation: (embedding_dim, num_classes) - transpose it
-            logger.warning(f"Text embeddings have wrong axis order {self.text_embeddings.shape}, transposing to ({self.text_embeddings.shape[1]}, {self.text_embeddings.shape[0]})")
+            logger.warning(
+                f"Text embeddings have wrong axis order {self.text_embeddings.shape}, transposing to ({self.text_embeddings.shape[1]}, {self.text_embeddings.shape[0]})"
+            )
             text_embeddings_correct = self.text_embeddings.T
         else:
-            logger.error(f"Unexpected text embeddings shape: {self.text_embeddings.shape}, expected ({len(self.labels)}, {img_embedding.shape[0]})")
-            raise RuntimeError(f"Text embeddings shape incompatible: {self.text_embeddings.shape}")
+            logger.error(
+                f"Unexpected text embeddings shape: {self.text_embeddings.shape}, expected ({len(self.labels)}, {img_embedding.shape[0]})"
+            )
+            raise RuntimeError(
+                f"Text embeddings shape incompatible: {self.text_embeddings.shape}"
+            )
 
         # Use cosine similarities directly (no softmax for large datasets)
         # Compute cosine similarities (already unit-normalized)
@@ -309,20 +322,24 @@ class BioCLIPModelManager:
         ]
 
         # Log similarity statistics for debugging
-        logger.debug(f"Similarity stats - max: {np.max(similarities):.6f}, min: {np.min(similarities):.6f}")
+        logger.debug(
+            f"Similarity stats - max: {np.max(similarities):.6f}, min: {np.min(similarities):.6f}"
+        )
 
         # Log top confidence for debugging
         if results:
-            logger.debug(f"Top result: {results[0][0]} with similarity {results[0][1]:.4f}")
+            logger.debug(
+                f"Top result: {results[0][0]} with similarity {results[0][1]:.4f}"
+            )
 
         return results
 
-    def info(self) -> ModelInfo:
+    def info(self) -> RuntimeModelInfo:
         """
         Return model manager information including fixed version and performance data.
 
         Returns:
-            ModelInfo containing model metadata and performance info
+            RuntimeModelInfo containing model metadata and performance info
         """
         backend_info = None
         if hasattr(self, "backend"):
@@ -332,13 +349,13 @@ class BioCLIPModelManager:
                 model_id=info.model_id,
                 model_name=info.model_name,
                 version=info.version,
-                text_embedding_dim=self.text_embeddings,
+                text_embedding_dim=info.text_embedding_dim,
                 image_embedding_dim=info.image_embedding_dim,
-                device=getattr(info, 'device', None),
-                precisions=getattr(info, 'precisions', None),
+                device=info.device,
+                precisions=info.precisions,
             )
 
-        return ModelInfo(
+        return RuntimeModelInfo(
             model_name=self.resources.model_name,
             model_id=self.model_id,
             model_version=self.model_version,

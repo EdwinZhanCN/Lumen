@@ -22,7 +22,6 @@ Notes:
 from __future__ import annotations
 
 import abc
-import enum
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -30,25 +29,19 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from .backend_exceptions import *
+from .backend_exceptions import (
+    BackendError,
+    InferenceError,
+)
 
 if TYPE_CHECKING:
     from lumen_clip.resources.loader import ModelResources
 
 
 __all__ = [
-    "RuntimeKind",
     "BackendInfo",
     "BaseClipBackend",
 ]
-
-
-class RuntimeKind(str, enum.Enum):
-    """Enumerates the primary runtime families for backends."""
-
-    TORCH = "torch"
-    ONNXRT = "onnx"
-    RKNN = "rknn"
 
 
 @dataclass
@@ -257,6 +250,24 @@ class BaseClipBackend(abc.ABC):
         embedding dimensions, precision supports, batchability, etc.
         """
         raise NotImplementedError
+
+    def get_temperature(self) -> float | None:
+        """
+        Get model temperature (logit scale) for classification calibration.
+
+        This is an optional method that backends can override to provide
+        their model's temperature/logit_scale parameter, which is used for
+        better probability calibration in classification tasks.
+
+        Returns:
+            Temperature value if supported by backend, None otherwise.
+            Typical CLIP models use values between 1.0 and 10.0.
+
+        Note:
+            Default implementation returns None. Concrete backends should
+            override this if they can expose the temperature parameter.
+        """
+        return None
 
     # ---------- Utilities (reusable across backends/managers) ----------
 

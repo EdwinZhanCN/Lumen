@@ -4,7 +4,7 @@
 metadata:
     version: "1.0.0"
     region: "cn" # "cn" for ModelScope, "other" for HuggingFace
-    cache_dir: "/Volumes/CodeBase/Lumen-Resources" # ~/.lumen by default
+    cache_dir: "~/.lumen" # ~/.lumen by default
 
 deployment:
     mode: "single"
@@ -22,12 +22,11 @@ services:
     clip:
         enabled: true
         package: "lumen_clip"
-        import:
-            registry_class: "lumen_clip.service_registry.CLIPService"
+        import_info:
+            registry_class: "lumen_clip.unified_smartclip.SmartCLIPService"
             add_to_server: "lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:
-            device: "mps"
-            batch_size: 8
+            device: null
         models:
             bioclip:
                 model: "bioclip-2"

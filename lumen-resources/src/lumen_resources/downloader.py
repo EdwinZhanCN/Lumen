@@ -139,18 +139,15 @@ class Downloader:
 
             for alias, model_config in service_config.models.items():
                 model_type = f"{service_name}:{alias}"
-                prefer_fp16 = False
-                if service_config.backend_settings:
-                    prefer_fp16 = service_config.backend_settings.prefer_fp16 or False
 
                 if self.verbose:
                     print(f"\n📦 Processing {model_type.upper()}")
                     print(f"    Model: {model_config.model}")
                     print(f"    Runtime: {model_config.runtime.value}")
+                    if model_config.precision:
+                        print(f"    Precision: {model_config.precision}")
 
-                result = self._download_model(
-                    model_type, model_config, force, prefer_fp16
-                )
+                result = self._download_model(model_type, model_config, force)
                 results[model_type] = result
 
                 # Print result
@@ -168,22 +165,25 @@ class Downloader:
 
         return results
 
-    def _get_runtime_patterns(self, runtime: Runtime, pref_fp16: bool) -> list[str]:
-        """Get file patterns to download based on runtime.
+    def _get_runtime_patterns(
+        self, runtime: Runtime, precision: str | None
+    ) -> list[str]:
+        """Get file patterns to download based on runtime and precision.
 
         Determines which file patterns to include in downloads based on the
-        model runtime. Always includes model_info.json and config files.
+        model runtime and precision configuration. Always includes model_info.json
+        and config files.
 
         Args:
             runtime: The model runtime (torch, onnx, rknn).
-            pref_fp16: Whether to prefer FP16 models over FP32.
+            precision: The precision variant (fp32, fp16, int8, q4fp16, etc.).
 
         Returns:
             List of file glob patterns for the download.
 
         Example:
-            >>> patterns = downloader._get_runtime_patterns(Runtime.torch, False)
-            >>> print("model_info.json" in patterns)
+            >>> patterns = downloader._get_runtime_patterns(Runtime.onnx, "fp16")
+            >>> print("*.fp16.onnx" in patterns)
             True
         """
         patterns = [
@@ -215,11 +215,12 @@ class Downloader:
                     "preprocessor_config.json",
                 ]
             )
-            # Only add one precision based on preference to save space
-            if pref_fp16:
-                patterns.extend(["*.fp16.onnx"])
+            # Add precision-specific ONNX model files if precision is specified
+            if precision:
+                patterns.extend([f"*.{precision}.onnx"])
             else:
-                patterns.extend(["*.fp32.onnx"])
+                # If no precision specified, include all common precisions
+                patterns.extend(["*.fp32.onnx", "*.fp16.onnx", "*.int8.onnx"])
         elif runtime == Runtime.rknn:
             patterns.extend(
                 [
@@ -230,79 +231,45 @@ class Downloader:
                     "preprocessor_config.json",
                 ]
             )
+            # RKNN files are already quantized, precision field may indicate variant
+            if precision:
+                patterns.extend([f"*.{precision}.rknn"])
+            else:
+                patterns.extend(["*.rknn"])
 
         return patterns
 
     def _download_model(
-        self, model_type: str, model_config: ModelConfig, force: bool, pref_fp16: bool
+        self, model_type: str, model_config: ModelConfig, force: bool
     ) -> DownloadResult:
-        """Download a single model with its runtime files using fallback strategy.
+        """Download a single model with its runtime files.
 
-        First attempts to download with the preferred precision (FP16/FP32),
-        and if that fails due to file mismatch, falls back to the other precision.
-        This ensures model availability while minimizing storage usage.
+        Uses the precision specified in model_config to download the appropriate
+        model variant. If no precision is specified for ONNX/RKNN runtimes, will
+        download all available precision variants.
 
         Args:
             model_type: Identifier for the model (e.g., "clip:default").
             model_config: Model configuration from LumenConfig.
             force: Whether to force re-download even if already cached.
-            pref_fp16: Whether to prefer FP16 models over FP32.
 
         Returns:
             DownloadResult with success status, file paths, and error details.
 
         Raises:
-            DownloadError: If platform download fails for both precisions.
+            DownloadError: If platform download fails.
             ModelInfoError: If model_info.json is missing or invalid.
             ValidationError: If model configuration is not supported.
         """
-        # First attempt with preferred precision
-        preferred_patterns = self._get_runtime_patterns(model_config.runtime, pref_fp16)
-        fallback_patterns = self._get_runtime_patterns(
-            model_config.runtime, not pref_fp16
+        # Get file patterns based on runtime and precision from ModelConfig
+        patterns = self._get_runtime_patterns(
+            model_config.runtime, model_config.precision
         )
 
-        # Try preferred precision first
-        try:
-            return self._download_model_with_patterns(
-                model_type, model_config, force, preferred_patterns, pref_fp16
-            )
-        except DownloadError as e:
-            # Check if this is a "no matching files" error that warrants fallback
-            if (
-                self._should_fallback_download(str(e))
-                and model_config.runtime == Runtime.onnx
-            ):
-                precision = "FP16" if pref_fp16 else "FP32"
-                fallback_precision = "FP32" if pref_fp16 else "FP16"
-                if self.verbose:
-                    print(
-                        f"   ⚠️ {precision} model not found, trying {fallback_precision}"
-                    )
-
-                try:
-                    return self._download_model_with_patterns(
-                        model_type,
-                        model_config,
-                        force,
-                        fallback_patterns,
-                        not pref_fp16,
-                    )
-                except DownloadError as fallback_error:
-                    # If fallback also fails, report both errors
-                    return DownloadResult(
-                        model_type=model_type,
-                        model_name=model_config.model,
-                        runtime=model_config.runtime.value
-                        if hasattr(model_config.runtime, "value")
-                        else str(model_config.runtime),
-                        success=False,
-                        error=f"Failed to download with {precision}: {e}. "
-                        f"Fallback with {fallback_precision} also failed: {fallback_error}",
-                    )
-
-            # Non-fallbackable error or non-ONNX runtime, just report original error
-            raise
+        # Download with the determined patterns
+        return self._download_model_with_patterns(
+            model_type, model_config, force, patterns
+        )
 
     def _download_model_with_patterns(
         self,
@@ -310,7 +277,6 @@ class Downloader:
         model_config: ModelConfig,
         force: bool,
         patterns: list[str],
-        is_fp16: bool | None = None,
     ) -> DownloadResult:
         """Download a model with specific file patterns.
 
@@ -381,9 +347,7 @@ class Downloader:
                                 )
 
             # Final: File integrity validation
-            missing = self._validate_files(
-                model_path, model_info, model_config, is_fp16
-            )
+            missing = self._validate_files(model_path, model_info, model_config)
             result.missing_files = missing
 
             if missing:
@@ -405,29 +369,6 @@ class Downloader:
                 self.platform.cleanup_model(model_config.model, cache_dir)
 
         return result
-
-    def _should_fallback_download(self, error_message: str) -> bool:
-        """Determine if a download error should trigger fallback to another precision.
-
-        Args:
-            error_message: The error message from the download attempt.
-
-        Returns:
-            True if the error suggests we should try the other precision, False otherwise.
-        """
-        # Common patterns that indicate file matching issues
-        fallback_indicators = [
-            "No matching files found",
-            "No files matched the pattern",
-            "Cannot find any files matching",
-            "File pattern matched no files",
-            "No such file or directory",  # Sometimes used for remote files
-        ]
-
-        error_lower = error_message.lower()
-        return any(
-            indicator.lower() in error_lower for indicator in fallback_indicators
-        )
 
     def _load_model_info(self, model_path: Path) -> ModelInfo:
         """Load and parse model_info.json using validator.
@@ -499,20 +440,16 @@ class Downloader:
         model_path: Path,
         model_info: ModelInfo,
         model_config: ModelConfig,
-        is_fp16: bool | None = None,
     ) -> list[str]:
         """Validate that all required files are present after download.
 
         Checks model files, tokenizer files, and dataset files against
-        the model_info.json metadata based on the actual precision
-        downloaded.
+        the model_info.json metadata based on the runtime configuration.
 
         Args:
             model_path: Local path where model files are located.
             model_info: Parsed model information.
             model_config: Model configuration to validate.
-            is_fp16: Whether FP16 files were downloaded (None for non-ONNX
-                runtimes).
 
         Returns:
             List of missing file paths. Empty list if all files present.
@@ -534,13 +471,14 @@ class Downloader:
                 runtime_files = runtime_config.files
 
                 # For ONNX runtime, filter by precision if specified
-                if runtime_str == "onnx" and is_fp16 is not None:
-                    precision_str = "fp16" if is_fp16 else "fp32"
+                if runtime_str == "onnx" and model_config.precision:
                     runtime_files = [
                         f
                         for f in runtime_files
-                        if not f.endswith((".fp16.onnx", ".fp32.onnx"))
-                        or f.endswith(f".{precision_str}.onnx")
+                        if not f.endswith(
+                            (".fp16.onnx", ".fp32.onnx", ".int8.onnx", ".q4fp16.onnx")
+                        )
+                        or f.endswith(f".{model_config.precision}.onnx")
                     ]
             elif isinstance(runtime_config.files, dict) and model_config.rknn_device:
                 # RKNN files are organized by device
