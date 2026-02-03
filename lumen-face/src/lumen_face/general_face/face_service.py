@@ -17,13 +17,13 @@ from pathlib import Path
 import grpc
 from google.protobuf import empty_pb2
 from lumen_resources import EmbeddingV1, FaceV1
-from lumen_resources.lumen_config import BackendSettings, ModelConfig, Services
+from lumen_resources.lumen_config import BackendSettings, Services
 from lumen_resources.result_schemas.face_v1 import BboxItem, Face
 from typing_extensions import override
 
 import lumen_face.proto.ml_service_pb2 as pb
 import lumen_face.proto.ml_service_pb2_grpc as rpc
-from lumen_face.backends import FaceRecognitionBackend, ONNXRTBackend
+from lumen_face.backends import FaceRecognitionBackend, create_backend
 from lumen_face.registry import TaskRegistry
 from lumen_face.resources.loader import ModelResources, ResourceLoader
 
@@ -180,19 +180,30 @@ class GeneralFaceService(rpc.InferenceServicer):
 
         # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
-        max_batch_size = getattr(backend_settings, "batch_size", 1) if backend_settings else 1
-        prefer_fp16 = getattr(backend_settings, "prefer_fp16", True) if backend_settings else True
+        device_pref = (
+            getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
+        )
+        max_batch_size = (
+            getattr(backend_settings, "batch_size", 1) if backend_settings else 1
+        )
 
-        if runtime == "onnx":
-            backend = ONNXRTBackend(
+        # Determine precision preference from ModelConfig
+        # Only applies to Runtime.onnx and Runtime.rknn
+        prefer_fp16 = False
+        if model_config.precision and runtime in ["onnx", "rknn"]:
+            prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
+
+        # Use factory to create backend
+        try:
+            backend = create_backend(
+                backend_config=backend_settings
+                or BackendSettings(device=device_pref, batch_size=max_batch_size),
                 resources=resources,
-                device_preference=device_pref,
-                max_batch_size=max_batch_size,
+                runtime=runtime,
                 prefer_fp16=prefer_fp16,
             )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
+        except ValueError as e:
+            raise ConfigError(f"Failed to create backend: {e}") from e
 
         # Create service
         service = cls(backend, resources)

@@ -5,7 +5,7 @@ channels:
     - defaults
 dependencies:
     - python=3.11
-    - uv
+    - pip
     - cuda-version=12.6
     - cuda-toolkit
     - cudnn

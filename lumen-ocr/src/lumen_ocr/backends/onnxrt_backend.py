@@ -7,14 +7,14 @@ PaddleOCR-style detection (DBNet) and recognition (SVTR/CRNN) models.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import math
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
-import onnxruntime as ort
 import pyclipper
 from shapely.geometry import Polygon
 
@@ -29,6 +29,17 @@ from ..resources.loader import ModelResources
 logger = logging.getLogger(__name__)
 
 
+_has_ort = importlib.util.find_spec("onnxruntime") is not None
+
+if TYPE_CHECKING:
+    import onnxruntime as ort
+else:
+    if _has_ort:
+        import onnxruntime as ort
+    else:
+        ort = None
+
+
 class OnnxOcrBackend(BaseOcrBackend):
     """
     OCR Backend implementation using ONNX Runtime.
@@ -40,7 +51,7 @@ class OnnxOcrBackend(BaseOcrBackend):
         resources: ModelResources,
         providers: list[str] | None = None,
         device_preference: str | None = None,
-        prefer_fp16: bool = True,
+        prefer_fp16: bool = False,
     ):
         """
         Initialize the ONNX backend.

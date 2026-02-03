@@ -118,4 +118,6 @@ lumen-resources = { workspace = true }
 [dependency-groups]
 dev = [
     "ruff>=0.14.2",
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
 ]

@@ -57,7 +57,7 @@ class ConfigValidator:
         if not schema_path.exists():
             raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
-        with open(schema_path, "r", encoding="utf-8") as f:
+        with open(schema_path, encoding="utf-8") as f:
             self.schema = yaml.safe_load(f)
 
         self.validator = Draft7Validator(self.schema)
@@ -93,7 +93,7 @@ class ConfigValidator:
             return False, [f"Configuration file not found: {config_path}"]
 
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)
         except yaml.YAMLError as e:
             return False, [f"Invalid YAML syntax: {e}"]
@@ -207,7 +207,7 @@ class ConfigValidator:
             raise ConfigError(error_msg)
 
         # Load and construct the validated configuration
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
         return LumenConfig(**config_data)

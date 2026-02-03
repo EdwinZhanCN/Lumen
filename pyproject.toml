@@ -22,3 +22,6 @@ lumen-face = { workspace = true }
 lumen-clip = { workspace = true }
 lumen-vlm = { workspace = true }
 lumen-app = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8.0.0", "pytest-mock>=3.14.0"]

@@ -21,7 +21,7 @@ services:
     vlm:
         enabled: true
         package: lumen_vlm
-        import:
+        import_info:
             registry_class: "lumen_vlm.fastvlm.GeneralFastVLMService"
             add_to_server: "lumen_vlm.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:
