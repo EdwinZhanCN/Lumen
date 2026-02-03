@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 
-export type Region = "cn" | "international";
+export type Region = "cn" | "other";
 
 export type Runtime = "onnx" | "rknn";
 
@@ -14,12 +14,13 @@ export interface WizardData {
   // Step 2: Hardware
   hardwarePreset: string | null;
   runtime: Runtime | null;
-  onnxProviders: any[] | null;
+  onnxProviders: string[] | null;
   rknnDevice: string | null;
 
   // Step 3: Config
   servicePreset: "minimal" | "light_weight" | "basic" | "brave" | null;
   selectedServices: string[];
+  configGenerated: boolean;
 
   // Step 4: Install
   installationComplete: boolean;
@@ -53,7 +54,7 @@ const WizardContext = createContext<WizardContextType | undefined>(undefined);
 
 const initialWizardData: WizardData = {
   installPath: "",
-  region: "cn",
+  region: "other",
   serviceName: "lumen-server",
   port: 50051,
   hardwarePreset: null,
@@ -62,6 +63,7 @@ const initialWizardData: WizardData = {
   rknnDevice: null,
   servicePreset: null,
   selectedServices: ["ocr"],
+  configGenerated: false,
   installationComplete: false,
   serverRunning: false,
 };
@@ -99,7 +101,9 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       case 1: // Hardware
         return wizardData.hardwarePreset !== null;
       case 2: // Config
-        return wizardData.selectedServices.length > 0;
+        return (
+          wizardData.selectedServices.length > 0 && wizardData.configGenerated
+        );
       case 3: // Install
         return wizardData.installationComplete;
       case 4: // Server

@@ -72,13 +72,6 @@ jobs:
             - name: Clean dist
               run: rm -rf dist/*
 
-            - name: 🕵️ Debug Why is git dirty?
-              run: |
-                  echo "=== Git Status ==="
-                  git status
-                  echo "=== Ignored files that might act up ==="
-                  git status --ignored
-
             - name: Build Service Packages
               run: |
                   for pkg in lumen-clip lumen-face lumen-ocr lumen-vlm; do

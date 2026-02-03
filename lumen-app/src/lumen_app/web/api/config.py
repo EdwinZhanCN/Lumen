@@ -9,6 +9,7 @@ import yaml
 from fastapi import APIRouter, HTTPException
 
 from lumen_app.core.config import Config
+from lumen_app.core.installer import CoreInstaller
 from lumen_app.utils.logger import get_logger
 from lumen_app.utils.preset_registry import PresetRegistry
 from lumen_app.web.core.state import app_state
@@ -72,13 +73,14 @@ async def generate_config(request: ConfigRequest):
             raise ValueError(f"Unknown config_type: {request.config_type}")
 
         # Save config to file
-        config_path = Path(request.cache_dir).expanduser() / "lumen-config.yaml"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_dict = lumen_config.model_dump(mode="json")
+        installer = CoreInstaller(cache_dir=request.cache_dir)
+        success, message = installer.save_config(lumen_config)
 
-        # Convert to dict and save
-        config_dict = lumen_config.model_dump()
-        with open(config_path, "w") as f:
-            yaml.dump(config_dict, f, default_flow_style=False)
+        if not success:
+            raise ValueError(message)
+
+        config_path = str(Path(request.cache_dir).expanduser() / "lumen-config.yaml")
 
         # Update app state
         app_state.set_config(config, device_config)

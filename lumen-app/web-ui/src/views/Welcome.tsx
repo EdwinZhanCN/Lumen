@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react";
-import { FolderOpen, Info, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import {
+  FolderOpen,
+  Info,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -18,19 +24,23 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard } from "@/context/WizardContext";
+import { useWizard, type Region } from "@/context/WizardContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import {useMutation} from "@tanstack/react-query";
-import { validatePath} from "@/lib/api.ts";
+import { useMutation } from "@tanstack/react-query";
+import { validatePath } from "@/lib/api.ts";
 
 export function Welcome() {
   const { wizardData, updateWizardData } = useWizard();
   const [installPath, setInstallPath] = useState(wizardData.installPath);
-  const [region, setRegion] = useState(wizardData.region);
+  const [region, setRegion] = useState<Region>(wizardData.region);
   const [serviceName, setServiceName] = useState(wizardData.serviceName);
   const [port, setPort] = useState(wizardData.port.toString());
 
-  const {mutate, data: pathValidation, isPending: validating} = useMutation({mutationFn: validatePath })
+  const {
+    mutate,
+    data: pathValidation,
+    isPending: validating,
+  } = useMutation({ mutationFn: validatePath });
 
   const debouncedPath = useDebounce(installPath, 500);
 
@@ -92,8 +102,8 @@ export function Welcome() {
                     pathValidation?.valid
                       ? "border-green-500"
                       : pathValidation?.error
-                      ? "border-red-500"
-                      : ""
+                        ? "border-red-500"
+                        : ""
                   }`}
                 />
                 {validating && (
@@ -128,8 +138,11 @@ export function Welcome() {
                 <Alert className="mt-2 border-green-500 bg-green-50">
                   <CheckCircle2 className="h-4 w-4 text-green-600" />
                   <AlertDescription className="text-green-800">
-                    路径有效 • 可用空间: {pathValidation.free_space_gb?.toFixed(1)} GB
-                    {pathValidation.exists ? " • 目录已存在" : " • 将创建新目录"}
+                    路径有效 • 可用空间:{" "}
+                    {pathValidation.free_space_gb?.toFixed(1)} GB
+                    {pathValidation.exists
+                      ? " • 目录已存在"
+                      : " • 将创建新目录"}
                   </AlertDescription>
                 </Alert>
               )}
@@ -152,13 +165,16 @@ export function Welcome() {
               {/* Region */}
               <div className="space-y-2">
                 <Label htmlFor="region">区域 *</Label>
-                <Select value={region} onValueChange={(value: string) => setRegion(value as "cn" | "international")}>
+                <Select
+                  value={region}
+                  onValueChange={(value: string) => setRegion(value as Region)}
+                >
                   <SelectTrigger id="region">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cn">中国 (CN)</SelectItem>
-                    <SelectItem value="international">国际 (International)</SelectItem>
+                    <SelectItem value="other">国际 (International)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
@@ -215,14 +231,12 @@ export function Welcome() {
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">区域:</dt>
                 <dd className="font-medium">
-                  {region === "cn" ? "中国" : "国际"}
+                  {region === "cn" ? "中国 (CN)" : "国际 (International)"}
                 </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">服务地址:</dt>
-                <dd className="font-mono font-medium">
-                  0.0.0.0:{port}
-                </dd>
+                <dd className="font-mono font-medium">0.0.0.0:{port}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">服务名称:</dt>

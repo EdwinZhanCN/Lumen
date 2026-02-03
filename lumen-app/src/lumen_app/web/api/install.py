@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from lumen_resources import LumenConfig, load_and_validate_config
 
+from lumen_app.core.installer import CoreInstaller
 from lumen_app.utils.env_checker import (
     DependencyInstaller,
     EnvironmentChecker,
@@ -35,9 +38,11 @@ async def get_install_status():
     logger.info("Checking installation status")
 
     # Check micromamba
-    micromamba_result = MicromambaChecker.check_micromamba()
+    cache_dir = Path("~/.lumen").expanduser()
+    micromamba_exe = MicromambaChecker.get_executable_path(cache_dir)
+    micromamba_result = MicromambaChecker.check_micromamba(micromamba_exe)
     micromamba_installed = micromamba_result.status.value == "available"
-    micromamba_path = micromamba_result.details if micromamba_installed else None
+    micromamba_path = micromamba_exe if micromamba_installed else None
 
     # Check environment (TODO: implement actual check)
     environment_exists = False
@@ -155,7 +160,9 @@ async def _plan_installation_steps(request: InstallSetupRequest) -> list[Install
     steps = []
 
     # Step 1: Check/install micromamba
-    micromamba_result = MicromambaChecker.check_micromamba()
+    resolved_cache_dir = Path(request.cache_dir).expanduser()
+    micromamba_exe = MicromambaChecker.get_executable_path(resolved_cache_dir)
+    micromamba_result = MicromambaChecker.check_micromamba(micromamba_exe)
     if micromamba_result.status.value != "available" or request.force_reinstall:
         steps.append(
             InstallStep(
@@ -204,7 +211,17 @@ async def _plan_installation_steps(request: InstallSetupRequest) -> list[Install
                     )
                 )
 
-    # Step 4: Verify installation
+    # Step 4: Install Lumen packages
+    steps.append(
+        InstallStep(
+            name="Install Lumen packages",
+            status="pending",
+            progress=0,
+            message="Install required Lumen packages",
+        )
+    )
+
+    # Step 5: Verify installation
     steps.append(
         InstallStep(
             name="Verify installation",
@@ -233,11 +250,12 @@ async def _run_installation(task_id: str, request: InstallSetupRequest):
 
         total_steps = len(task.steps)
         current_step_idx = 0
+        resolved_cache_dir = str(Path(request.cache_dir).expanduser())
 
         # Step 1: Check/Install micromamba
         if task.steps[current_step_idx].name.startswith("Install micromamba"):
             await _execute_step(task_id, current_step_idx, total_steps)
-            success = await _install_micromamba(task_id, request.cache_dir)
+            success = await _install_micromamba(task_id, resolved_cache_dir)
             if not success:
                 await _update_task(
                     task_id,
@@ -254,7 +272,9 @@ async def _run_installation(task_id: str, request: InstallSetupRequest):
         # Step 2: Create environment
         if current_step_idx < total_steps:
             await _execute_step(task_id, current_step_idx, total_steps)
-            success = await _create_environment(task_id, request.environment_name)
+            success = await _create_environment(
+                task_id, request.environment_name, resolved_cache_dir
+            )
             if not success:
                 await _update_task(
                     task_id,
@@ -272,7 +292,7 @@ async def _run_installation(task_id: str, request: InstallSetupRequest):
         ):
             await _execute_step(task_id, current_step_idx, total_steps)
             success = await _install_drivers(
-                task_id, request.preset, request.environment_name
+                task_id, request.preset, request.environment_name, resolved_cache_dir
             )
             if not success:
                 await _update_task(
@@ -284,9 +304,37 @@ async def _run_installation(task_id: str, request: InstallSetupRequest):
                 return
             current_step_idx += 1
 
-        # Step 4: Verify installation
+        # Step 4: Install Lumen packages
+        if (
+            current_step_idx < total_steps
+            and task.steps[current_step_idx].name == "Install Lumen packages"
+        ):
+            await _execute_step(task_id, current_step_idx, total_steps)
+            success = await _install_lumen_packages(task_id, resolved_cache_dir)
+            if not success:
+                await _update_task(
+                    task_id,
+                    status="failed",
+                    error="Failed to install Lumen packages",
+                    completed_at=time.time(),
+                )
+                return
+            current_step_idx += 1
+
+        # Step 5: Verify installation
         if current_step_idx < total_steps:
-            await _execute_step(task_id, current_step_idx, total_steps, quick=True)
+            await _execute_step(task_id, current_step_idx, total_steps)
+            success = await _verify_installation(
+                task_id, resolved_cache_dir, request.environment_name
+            )
+            if not success:
+                await _update_task(
+                    task_id,
+                    status="failed",
+                    error="Failed to verify installation",
+                    completed_at=time.time(),
+                )
+                return
             current_step_idx += 1
 
         # Complete
@@ -333,6 +381,7 @@ async def _execute_step(
     # Simulate quick check
     if quick:
         await asyncio.sleep(0.5)
+        await _complete_current_step(task_id)
 
 
 async def _install_micromamba(task_id: str, cache_dir: str) -> bool:
@@ -360,19 +409,34 @@ async def _install_micromamba(task_id: str, cache_dir: str) -> bool:
         return False
 
 
-async def _create_environment(task_id: str, env_name: str) -> bool:
+async def _create_environment(task_id: str, env_name: str, cache_dir: str) -> bool:
     """Create conda environment."""
     await _append_log(task_id, f"Creating environment: {env_name}")
 
-    # TODO: Implement actual environment creation
-    await asyncio.sleep(2)  # Placeholder
+    try:
+        installer = CoreInstaller(cache_dir=cache_dir, env_name=env_name)
+        success, message = installer.create_environment(
+            config_filename="default.yaml",
+            dry_run=False,
+        )
+        await _append_log(task_id, message)
 
-    await _append_log(task_id, f"Environment {env_name} created successfully")
-    await _complete_current_step(task_id)
-    return True
+        if success:
+            await _complete_current_step(task_id)
+            return True
+
+        await _fail_current_step(task_id, message)
+        return False
+    except Exception as e:
+        error_msg = f"Failed to create environment: {e}"
+        await _append_log(task_id, error_msg)
+        await _fail_current_step(task_id, error_msg)
+        return False
 
 
-async def _install_drivers(task_id: str, preset: str, env_name: str) -> bool:
+async def _install_drivers(
+    task_id: str, preset: str, env_name: str, cache_dir: str
+) -> bool:
     """Install required drivers for the preset."""
     await _append_log(task_id, f"Installing drivers for preset: {preset}")
 
@@ -390,7 +454,12 @@ async def _install_drivers(task_id: str, preset: str, env_name: str) -> bool:
             await _complete_current_step(task_id)
             return True
 
-        installer = DependencyInstaller()
+        micromamba_path = MicromambaChecker.get_executable_path(cache_dir)
+        root_prefix = str(Path(cache_dir).expanduser() / "micromamba")
+        installer = DependencyInstaller(
+            micromamba_path=micromamba_path,
+            root_prefix=root_prefix,
+        )
 
         for driver in missing_drivers:
             await _append_log(task_id, f"Installing {driver.name}...")
@@ -412,6 +481,59 @@ async def _install_drivers(task_id: str, preset: str, env_name: str) -> bool:
 
     except Exception as e:
         error_msg = f"Failed to install drivers: {e}"
+        await _append_log(task_id, error_msg)
+        await _fail_current_step(task_id, error_msg)
+        return False
+
+
+async def _install_lumen_packages(task_id: str, cache_dir: str) -> bool:
+    """Install Lumen packages derived from lumen-config.yaml."""
+    await _append_log(task_id, "Installing Lumen packages...")
+
+    try:
+        config_path = Path(cache_dir).expanduser() / "lumen-config.yaml"
+        if not config_path.exists():
+            message = f"Config file not found: {config_path}"
+            await _append_log(task_id, message)
+            await _fail_current_step(task_id, message)
+            return False
+
+        lumen_config: LumenConfig = load_and_validate_config(str(config_path))
+        installer = CoreInstaller(cache_dir=cache_dir)
+
+        success, message = installer.install_lumen_packages(lumen_config)
+        await _append_log(task_id, message)
+
+        if success:
+            await _complete_current_step(task_id)
+            return True
+
+        await _fail_current_step(task_id, message)
+        return False
+    except Exception as e:
+        error_msg = f"Failed to install Lumen packages: {e}"
+        await _append_log(task_id, error_msg)
+        await _fail_current_step(task_id, error_msg)
+        return False
+
+
+async def _verify_installation(task_id: str, cache_dir: str, env_name: str) -> bool:
+    """Verify installation status."""
+    await _append_log(task_id, "Verifying installation...")
+
+    try:
+        installer = CoreInstaller(cache_dir=cache_dir, env_name=env_name)
+        success, message = installer.verify_installation()
+        await _append_log(task_id, message)
+
+        if success:
+            await _complete_current_step(task_id)
+            return True
+
+        await _fail_current_step(task_id, message)
+        return False
+    except Exception as e:
+        error_msg = f"Failed to verify installation: {e}"
         await _append_log(task_id, error_msg)
         await _fail_current_step(task_id, error_msg)
         return False

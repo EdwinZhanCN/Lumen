@@ -90,8 +90,13 @@ export async function validateConfig(
   });
 }
 
-export type PathValidationResponse =
-  paths["/api/v1/config/validate-path"]["post"]["responses"]["200"]["content"]["application/json"];
+export type PathValidationResponse = {
+  valid: boolean;
+  error?: string;
+  warning?: string;
+  free_space_gb?: number;
+  exists?: boolean;
+};
 
 export async function validatePath(
   data: Record<string, unknown>,
@@ -163,6 +168,7 @@ export type InstallTaskResponse = components["schemas"]["InstallTaskResponse"];
 export type InstallTaskListResponse =
   components["schemas"]["InstallTaskListResponse"];
 export type InstallLogsResponse = components["schemas"]["InstallLogsResponse"];
+export type InstallStep = components["schemas"]["InstallStep"];
 
 export async function getInstallStatus(): Promise<InstallStatusResponse> {
   return fetchApi<InstallStatusResponse>(buildUrl("/api/v1/install/status"), {

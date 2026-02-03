@@ -72,7 +72,7 @@ class MicromambaChecker:
             logger.debug(
                 f"[MicromambaChecker] Using custom micromamba path: {micromamba_path}"
             )
-            exe_path = Path(micromamba_path)
+            exe_path = Path(micromamba_path).expanduser()
         else:
             logger.debug("[MicromambaChecker] Checking PATH for micromamba")
             exe_path = Path("micromamba")
@@ -133,7 +133,7 @@ class MicromambaChecker:
             f"[MicromambaChecker] Starting micromamba installation (dry_run={dry_run})"
         )
 
-        cache_dir = Path(cache_dir)
+        cache_dir = Path(cache_dir).expanduser()
         install_dir = cache_dir / target_name
         logger.debug(f"[MicromambaChecker] Install directory: {install_dir}")
 
@@ -407,7 +407,7 @@ class MicromambaChecker:
         Returns:
             Path to micromamba executable
         """
-        install_dir = Path(cache_dir) / target_name
+        install_dir = Path(cache_dir).expanduser() / target_name
 
         if platform.system() == "Windows":
             # Windows: bin/micromamba.exe
@@ -885,6 +885,7 @@ class DependencyInstaller:
         self,
         mamba_configs_dir: str | Path | None = None,
         micromamba_path: str | None = None,
+        root_prefix: str | Path | None = None,
     ):
         """
         Initialize installer with mamba config directory and micromamba path.
@@ -894,6 +895,8 @@ class DependencyInstaller:
                              Defaults to lumen_app/utils/mamba
             micromamba_path: Optional path to micromamba executable.
                             If None, uses 'micromamba' from PATH
+            root_prefix: Optional micromamba root prefix (MAMBA_ROOT_PREFIX).
+                         If None, micromamba default is used.
         """
         if mamba_configs_dir is None:
             current_file = Path(__file__)
@@ -901,9 +904,10 @@ class DependencyInstaller:
 
         self.configs_dir = Path(mamba_configs_dir)
         self.micromamba_path = micromamba_path or "micromamba"
+        self.root_prefix = Path(root_prefix).expanduser() if root_prefix else None
 
         logger.info(
-            f"[DependencyInstaller] Initialized with configs_dir={self.configs_dir}, micromamba_path={self.micromamba_path}"
+            f"[DependencyInstaller] Initialized with configs_dir={self.configs_dir}, micromamba_path={self.micromamba_path}, root_prefix={self.root_prefix}"
         )
 
     def install_driver(
@@ -955,6 +959,8 @@ class DependencyInstaller:
             "-f",
             str(config_file),
         ]
+        if self.root_prefix:
+            cmd.extend(["--root-prefix", str(self.root_prefix)])
 
         logger.debug(f"[DependencyInstaller] Installation command: {' '.join(cmd)}")
 

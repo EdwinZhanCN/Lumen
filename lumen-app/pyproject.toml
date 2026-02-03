@@ -46,6 +46,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "lumen_app.web" = ["static/**"]
+"lumen_app.utils" = ["mamba/*.yaml"]
 
 [dependency-groups]
 dev = ["ruff>=0.14.2", "pytest>=8.0.0", "pytest-asyncio>=0.24.0", "grpcio-tools>=1.76.0"]

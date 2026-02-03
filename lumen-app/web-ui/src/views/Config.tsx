@@ -1,5 +1,18 @@
 import { useState, useEffect } from "react";
-import { Bot, Feather, Image, Info, Package, Rocket, ScanFace, ScanText, StickyNote, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Bot,
+  Feather,
+  Image,
+  Info,
+  Package,
+  Rocket,
+  ScanFace,
+  ScanText,
+  StickyNote,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -111,8 +124,9 @@ const availableServices: Service[] = [
 export function Config() {
   const { wizardData, updateWizardData } = useWizard();
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
-    wizardData.servicePreset
+    wizardData.servicePreset,
   );
+  const [lastConfigKey, setLastConfigKey] = useState<string | null>(null);
 
   // Use generated schema types with custom hook
   const {
@@ -122,36 +136,74 @@ export function Config() {
     error: configError,
   } = useMutation({
     mutationFn: generateConfig,
+    onSuccess: () => {
+      updateWizardData({ configGenerated: true });
+    },
+    onError: () => {
+      updateWizardData({ configGenerated: false });
+    },
   });
-  const error = configError?.message || (configResult && !configResult.success ? configResult.message : null);
+  const error =
+    configError?.message ||
+    (configResult && !configResult.success ? configResult.message : null);
 
   // Auto-generate config when preset is selected
   useEffect(() => {
-    if (selectedPreset) {
-      const preset = servicePresets.find((p) => p.id === selectedPreset);
-      if (preset) {
-        updateWizardData({
-          servicePreset: preset.id,
-          selectedServices: preset.services,
-        });
-
-        // Generate config via API
-        if (!wizardData.hardwarePreset) {
-          return;
-        }
-
-        generateConfigMutate({
-          preset: wizardData.hardwarePreset,
-          region: wizardData.region,
-          cache_dir: wizardData.installPath || "~/.lumen",
-          port: wizardData.port,
-          service_name: wizardData.serviceName,
-          selected_services: preset.services,
-          clip_model: null,
-        });
-      }
+    if (!selectedPreset) {
+      return;
     }
-  }, [selectedPreset, wizardData.hardwarePreset, generateConfigMutate]);
+
+    const preset = servicePresets.find((p) => p.id === selectedPreset);
+    if (!preset) {
+      return;
+    }
+
+    if (!wizardData.hardwarePreset) {
+      return;
+    }
+
+    const nextConfigKey = [
+      selectedPreset,
+      wizardData.hardwarePreset,
+      wizardData.installPath || "~/.lumen",
+      wizardData.region,
+      String(wizardData.port),
+      wizardData.serviceName,
+    ].join("|");
+
+    if (nextConfigKey === lastConfigKey || generatingConfig) {
+      return;
+    }
+
+    setLastConfigKey(nextConfigKey);
+
+    updateWizardData({
+      servicePreset: preset.id,
+      selectedServices: preset.services,
+      configGenerated: false,
+    });
+
+    generateConfigMutate({
+      preset: wizardData.hardwarePreset,
+      region: wizardData.region,
+      cache_dir: wizardData.installPath || "~/.lumen",
+      port: wizardData.port,
+      service_name: wizardData.serviceName,
+      config_type: preset.id,
+      clip_model: null,
+    });
+  }, [
+    selectedPreset,
+    wizardData.hardwarePreset,
+    wizardData.installPath,
+    wizardData.region,
+    wizardData.port,
+    wizardData.serviceName,
+    generateConfigMutate,
+    updateWizardData,
+    lastConfigKey,
+    generatingConfig,
+  ]);
 
   const handleSelectPreset = (presetId: string) => {
     setSelectedPreset(presetId);
@@ -161,16 +213,14 @@ export function Config() {
   const otherPresets = servicePresets.filter((p) => !p.recommended);
 
   return (
-    <WizardLayout
-      title="配置服务"
-      description="选择您需要启用的 AI 服务"
-    >
+    <WizardLayout title="配置服务" description="选择您需要启用的 AI 服务">
       <div className="space-y-6">
         {/* Info Alert */}
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            选择适合您需求的服务预设配置。配置将基于您选择的硬件预设（{wizardData.hardwarePreset || "未选择"}）自动生成。
+            选择适合您需求的服务预设配置。配置将基于您选择的硬件预设（
+            {wizardData.hardwarePreset || "未选择"}）自动生成。
           </AlertDescription>
         </Alert>
 
@@ -178,9 +228,7 @@ export function Config() {
         {generatingConfig && (
           <Alert>
             <Loader2 className="h-4 w-4 animate-spin" />
-            <AlertDescription>
-              正在生成配置文件...
-            </AlertDescription>
+            <AlertDescription>正在生成配置文件...</AlertDescription>
           </Alert>
         )}
 
@@ -198,141 +246,139 @@ export function Config() {
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              {error}
-            </AlertDescription>
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
         <div className="space-y-6">
-            {/* Recommended Presets */}
-            {recommendedPresets.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold">推荐配置</h3>
-                  <Badge variant="default">优化推荐</Badge>
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {recommendedPresets.map((preset) => (
-                    <Card
-                      key={preset.id}
-                      className={`cursor-pointer transition-all hover:shadow-md ${
-                        selectedPreset === preset.id
-                          ? "border-primary bg-primary/5 shadow-md"
-                          : "hover:border-primary/50"
-                      }`}
-                      onClick={() => handleSelectPreset(preset.id)}
-                    >
-                      <CardHeader>
-                        <div className="flex items-start justify-between">
-                          <div className="text-4xl mb-2">{preset.icon}</div>
-                          {selectedPreset === preset.id && (
-                            <Badge variant="default" className="bg-primary">
-                              已选择
-                            </Badge>
-                          )}
-                        </div>
-                        <CardTitle className="text-lg">{preset.name}</CardTitle>
-                        <CardDescription className="text-sm">
-                          {preset.description}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-xs font-medium text-muted-foreground mb-2">
-                              包含服务:
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              {preset.services.map((serviceId) => {
-                                const service = availableServices.find(
-                                  (s) => s.id === serviceId
-                                );
-                                return (
-                                  <Badge
-                                    key={serviceId}
-                                    variant="secondary"
-                                    className="flex text-xs gap-2"
-                                  >
-                                    {service?.icon} {service?.name}
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {preset.requirements}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+          {/* Recommended Presets */}
+          {recommendedPresets.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold">推荐配置</h3>
+                <Badge variant="default">优化推荐</Badge>
               </div>
-            )}
+              <div className="grid gap-4 md:grid-cols-2">
+                {recommendedPresets.map((preset) => (
+                  <Card
+                    key={preset.id}
+                    className={`cursor-pointer transition-all hover:shadow-md ${
+                      selectedPreset === preset.id
+                        ? "border-primary bg-primary/5 shadow-md"
+                        : "hover:border-primary/50"
+                    }`}
+                    onClick={() => handleSelectPreset(preset.id)}
+                  >
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="text-4xl mb-2">{preset.icon}</div>
+                        {selectedPreset === preset.id && (
+                          <Badge variant="default" className="bg-primary">
+                            已选择
+                          </Badge>
+                        )}
+                      </div>
+                      <CardTitle className="text-lg">{preset.name}</CardTitle>
+                      <CardDescription className="text-sm">
+                        {preset.description}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                            包含服务:
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {preset.services.map((serviceId) => {
+                              const service = availableServices.find(
+                                (s) => s.id === serviceId,
+                              );
+                              return (
+                                <Badge
+                                  key={serviceId}
+                                  variant="secondary"
+                                  className="flex text-xs gap-2"
+                                >
+                                  {service?.icon} {service?.name}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {preset.requirements}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
 
-            {/* Other Presets */}
-            {otherPresets.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">其他配置</h3>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {otherPresets.map((preset) => (
-                    <Card
-                      key={preset.id}
-                      className={`cursor-pointer transition-all hover:shadow-md ${
-                        selectedPreset === preset.id
-                          ? "border-primary bg-primary/5 shadow-md"
-                          : "hover:border-primary/50"
-                      }`}
-                      onClick={() => handleSelectPreset(preset.id)}
-                    >
-                      <CardHeader>
-                        <div className="flex items-start justify-between">
-                          <div className="text-4xl mb-2">{preset.icon}</div>
-                          {selectedPreset === preset.id && (
-                            <Badge variant="default" className="bg-primary">
-                              已选择
-                            </Badge>
-                          )}
-                        </div>
-                        <CardTitle className="text-lg">{preset.name}</CardTitle>
-                        <CardDescription className="text-sm">
-                          {preset.description}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-xs font-medium text-muted-foreground mb-2">
-                              包含服务:
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              {preset.services.map((serviceId) => {
-                                const service = availableServices.find(
-                                  (s) => s.id === serviceId
-                                );
-                                return (
-                                  <Badge
-                                    key={serviceId}
-                                    variant="secondary"
-                                    className="flex text-xs gap-2"
-                                  >
-                                    {service?.icon} {service?.name}
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {preset.requirements}
+          {/* Other Presets */}
+          {otherPresets.length > 0 && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">其他配置</h3>
+              <div className="grid gap-4 md:grid-cols-2">
+                {otherPresets.map((preset) => (
+                  <Card
+                    key={preset.id}
+                    className={`cursor-pointer transition-all hover:shadow-md ${
+                      selectedPreset === preset.id
+                        ? "border-primary bg-primary/5 shadow-md"
+                        : "hover:border-primary/50"
+                    }`}
+                    onClick={() => handleSelectPreset(preset.id)}
+                  >
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="text-4xl mb-2">{preset.icon}</div>
+                        {selectedPreset === preset.id && (
+                          <Badge variant="default" className="bg-primary">
+                            已选择
+                          </Badge>
+                        )}
+                      </div>
+                      <CardTitle className="text-lg">{preset.name}</CardTitle>
+                      <CardDescription className="text-sm">
+                        {preset.description}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                            包含服务:
                           </p>
+                          <div className="flex flex-wrap gap-1">
+                            {preset.services.map((serviceId) => {
+                              const service = availableServices.find(
+                                (s) => s.id === serviceId,
+                              );
+                              return (
+                                <Badge
+                                  key={serviceId}
+                                  variant="secondary"
+                                  className="flex text-xs gap-2"
+                                >
+                                  {service?.icon} {service?.name}
+                                </Badge>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                        <p className="text-xs text-muted-foreground">
+                          {preset.requirements}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-            )}
+            </div>
+          )}
         </div>
 
         {/* Selected Services Summary */}
@@ -348,7 +394,7 @@ export function Config() {
               <div className="flex flex-wrap gap-2">
                 {wizardData.selectedServices.map((serviceId) => {
                   const service = availableServices.find(
-                    (s) => s.id === serviceId
+                    (s) => s.id === serviceId,
                   );
                   return (
                     <Badge
@@ -362,9 +408,7 @@ export function Config() {
                 })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                尚未选择任何服务
-              </p>
+              <p className="text-sm text-muted-foreground">尚未选择任何服务</p>
             )}
           </CardContent>
         </Card>
