@@ -5,7 +5,7 @@ import { WizardContext } from "./wizardContext";
 
 const initialWizardData: WizardData = {
   installPath: "",
-  region: "other",
+  region: "cn",
   serviceName: "lumen-server",
   port: 50051,
   hardwarePreset: null,
