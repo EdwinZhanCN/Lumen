@@ -5,15 +5,21 @@ description = "Desktop application for Lumen AI services"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [
-    { name = "EdwinZhanCN", email = "support@lumilio.org" }
-]
+authors = [{ name = "EdwinZhanCN", email = "support@lumilio.org" }]
 dependencies = [
-    "colorlog>=6.10.1",
-    "flet[all]>=0.28.3",
-    "lumen-resources",
-    "python-i18n>=0.3.9",
-    "pyyaml>=6.0.3",
+  "colorlog>=6.10.1",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "websockets>=14.0",
+  "pydantic>=2.10.0",
+  "lumen-resources",
+  "python-i18n>=0.3.9",
+  "pyyaml>=6.0.3",
+  "aiofiles>=24.1.0",
+  "psutil>=6.1.0",
+  "httpx>=0.28.0",
+  "grpcio>=1.68.0",
+  "protobuf>=6.30.0",
 ]
 
 [project.urls]
@@ -22,6 +28,7 @@ Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.scripts]
 lumen-app = "lumen_app.main:start_app"
+lumen-web = "lumen_app.web.main:start_server"
 
 [build-system]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
@@ -37,8 +44,9 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "ruff>=0.14.2",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
+ "pytest>=8.0.0",
+ "pytest-asyncio>=0.24.0",
+ "grpcio-tools>=1.76.0",
 ]
 
 [tool.uv.sources]
