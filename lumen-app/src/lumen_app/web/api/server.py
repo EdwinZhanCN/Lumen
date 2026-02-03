@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
-
 from fastapi import APIRouter, HTTPException
 
 from lumen_app.utils.logger import get_logger
 from lumen_app.web.core.state import app_state
 from lumen_app.web.models.server import (
-    ServerConfig,
     ServerLogs,
     ServerRestartRequest,
     ServerStartRequest,
@@ -21,132 +17,237 @@ from lumen_app.web.models.server import (
 logger = get_logger("lumen.web.api.server")
 router = APIRouter()
 
-# Track server start time for uptime calculation
-_server_start_time: float | None = None
-
 
 @router.get("/status", response_model=ServerStatus)
 async def get_server_status():
-    """Get the ML server status."""
-    status = app_state.server_status
+    """
+    Get the current ML server status.
 
-    uptime = None
-    if status.running and _server_start_time:
-        uptime = time.time() - _server_start_time
+    Returns detailed information about the running server including:
+    - Running state and PID
+    - Port and host configuration
+    - Uptime in seconds
+    - Health status
+    - Configuration path
+    """
+    manager = app_state.server_manager
+
+    # Get basic status
+    running = manager.is_running
+    pid = manager.pid
+    uptime = manager.uptime_seconds
+
+    # Perform health check if running
+    health = "unknown"
+    if running:
+        health = await manager.health_check()
 
     return ServerStatus(
-        running=status.running,
-        pid=status.pid,
-        port=status.port,
-        host="0.0.0.0",  # TODO: Get from actual config
+        running=running,
+        pid=pid,
+        port=manager.port or 50051,
+        host="0.0.0.0",
         uptime_seconds=uptime,
-        service_name="lumen-ai",
-        config_path=status.config_path,
-        environment="lumen_env",  # TODO: Get from actual config
-        health="healthy" if status.running else "unknown",
-        last_error=None,
+        service_name="lumen-ai",  # TODO: Get from config
+        config_path=manager.config_path,
+        environment="lumen_env",  # TODO: Get from config
+        health=health,
+        last_error=None,  # TODO: Track last error
     )
 
 
 @router.post("/start", response_model=ServerStatus)
 async def start_server(request: ServerStartRequest):
-    """Start the ML server."""
-    logger.info("Starting ML server")
+    """
+    Start the ML server with specified configuration.
 
-    if app_state.server_status.running:
-        raise HTTPException(status_code=400, detail="Server is already running")
+    Args:
+        request: Server start configuration including:
+            - config_path: Path to the Lumen YAML configuration
+            - port: Optional port override
+            - host: Host address (currently unused, always 0.0.0.0)
+            - environment: Conda environment name
 
-    # TODO: Implement actual server startup logic
-    # This would involve:
-    # 1. Loading the configuration
-    # 2. Creating the gRPC server subprocess
-    # 3. Monitoring the process
+    Returns:
+        Current server status after startup
 
-    # For now, simulate startup
-    await asyncio.sleep(1)
+    Raises:
+        HTTPException 400: If server is already running
+        HTTPException 404: If config file not found
+        HTTPException 500: If server fails to start
+    """
+    logger.info(f"Starting ML server with config: {request.config_path}")
 
-    success = await app_state.start_server(config_path=request.config_path)
+    manager = app_state.server_manager
 
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to start server")
+    # Check if already running
+    if manager.is_running:
+        raise HTTPException(
+            status_code=400,
+            detail="Server is already running. Stop it first or use restart.",
+        )
 
-    global _server_start_time
-    _server_start_time = time.time()
+    try:
+        # Start the server
+        success = await manager.start(
+            config_path=request.config_path,
+            port=request.port,
+            log_level="INFO",  # TODO: Make configurable
+            environment=request.environment,
+        )
 
-    return ServerStatus(
-        running=True,
-        pid=app_state.server_status.pid,
-        port=request.port or 50051,
-        host=request.host or "0.0.0.0",
-        uptime_seconds=0,
-        service_name=request.service_name or "lumen-ai",
-        config_path=request.config_path,
-        environment=request.environment,
-        health="healthy",
-    )
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Server failed to start. Check logs for details.",
+            )
+
+        logger.info("✓ ML server started successfully")
+
+        # Return current status
+        return await get_server_status()
+
+    except FileNotFoundError as e:
+        logger.error(f"Config file not found: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+
+    except RuntimeError as e:
+        logger.error(f"Runtime error starting server: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Unexpected error starting server: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start server: {str(e)}")
 
 
 @router.post("/stop", response_model=ServerStatus)
 async def stop_server(request: ServerStopRequest):
-    """Stop the ML server."""
+    """
+    Stop the running ML server.
+
+    Args:
+        request: Stop configuration including:
+            - force: If True, force kill immediately without graceful shutdown
+            - timeout: Maximum seconds to wait for graceful shutdown
+
+    Returns:
+        Current server status after shutdown
+
+    Raises:
+        HTTPException 400: If server is not running
+        HTTPException 500: If server fails to stop
+    """
     logger.info("Stopping ML server")
 
-    if not app_state.server_status.running:
-        raise HTTPException(status_code=400, detail="Server is not running")
+    manager = app_state.server_manager
 
-    # TODO: Implement graceful shutdown
-    # This would involve:
-    # 1. Sending shutdown signal to subprocess
-    # 2. Waiting for graceful shutdown
-    # 3. Force kill if necessary
+    # Check if running
+    if not manager.is_running:
+        raise HTTPException(
+            status_code=400, detail="Server is not running. Nothing to stop."
+        )
 
-    success = await app_state.stop_server()
+    try:
+        # Stop the server
+        success = await manager.stop(timeout=request.timeout, force=request.force)
 
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to stop server")
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Server failed to stop gracefully. Check logs for details.",
+            )
 
-    global _server_start_time
-    _server_start_time = None
+        logger.info("✓ ML server stopped successfully")
 
-    return ServerStatus(
-        running=False,
-        pid=None,
-        port=app_state.server_status.port,
-        host="0.0.0.0",
-        uptime_seconds=None,
-        service_name=app_state.server_status.service_name,
-        config_path=app_state.server_status.config_path,
-        environment="lumen_env",
-        health="unknown",
-    )
+        # Return current status
+        return await get_server_status()
+
+    except Exception as e:
+        logger.error(f"Error stopping server: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to stop server: {str(e)}")
 
 
 @router.post("/restart", response_model=ServerStatus)
 async def restart_server(request: ServerRestartRequest):
-    """Restart the ML server."""
+    """
+    Restart the ML server with optional new configuration.
+
+    This is equivalent to stop + start, but handles the sequencing automatically.
+
+    Args:
+        request: Restart configuration including:
+            - config_path: Optional new config path (uses existing if not provided)
+            - port: Optional new port (uses existing if not provided)
+            - host: Host address (currently unused)
+            - environment: Environment name
+            - force: If True, force kill during stop
+            - timeout: Maximum seconds to wait for graceful shutdown
+
+    Returns:
+        Current server status after restart
+
+    Raises:
+        HTTPException 400: If no config path available
+        HTTPException 500: If restart fails
+    """
     logger.info("Restarting ML server")
 
-    # Stop if running
-    if app_state.server_status.running:
-        stop_request = ServerStopRequest(force=request.force, timeout=request.timeout)
-        await stop_server(stop_request)
+    manager = app_state.server_manager
 
-    # Start with new config
-    start_request = ServerStartRequest(
-        config_path=request.config_path,
-        port=request.port,
-        host=request.host,
-        environment=request.environment,
-    )
-    return await start_server(start_request)
+    try:
+        # Restart the server
+        success = await manager.restart(
+            config_path=request.config_path,
+            port=request.port,
+            log_level="INFO",  # TODO: Make configurable
+            timeout=request.timeout,
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Server failed to restart. Check logs for details.",
+            )
+
+        logger.info("✓ ML server restarted successfully")
+
+        # Return current status
+        return await get_server_status()
+
+    except ValueError as e:
+        logger.error(f"Invalid restart configuration: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Error restarting server: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to restart server: {str(e)}"
+        )
 
 
 @router.get("/logs", response_model=ServerLogs)
 async def get_server_logs(lines: int = 100, since: float | None = None):
-    """Get server logs."""
-    # TODO: Implement log retrieval from file or buffer
+    """
+    Get recent server logs.
+
+    Args:
+        lines: Number of recent log lines to return (default: 100, 0 for all)
+        since: Unix timestamp to filter logs (currently unused)
+
+    Returns:
+        Server logs with metadata
+
+    Note:
+        The 'since' parameter is reserved for future filtering implementation.
+        Currently returns the most recent N lines from the log buffer.
+    """
+    manager = app_state.server_manager
+
+    # Get logs from manager
+    log_lines = manager.get_logs(tail=lines)
+
     return ServerLogs(
-        logs=[],
-        total_lines=0,
-        new_lines=0,
+        logs=log_lines,
+        total_lines=len(log_lines),
+        new_lines=0,  # TODO: Implement incremental log fetching
     )

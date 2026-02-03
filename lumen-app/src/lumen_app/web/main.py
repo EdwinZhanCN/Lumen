@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -30,6 +31,15 @@ async def lifespan(app: FastAPI):
     await app_state.cleanup()
 
 
+def get_webui_dist_paths() -> tuple[Path, Path, Path]:
+    """Resolve the Web UI build directory paths."""
+    module_dir = Path(__file__).resolve().parent
+    packaged_dist = module_dir / "static"
+    repo_dist = module_dir.parents[3] / "web-ui" / "dist"
+    selected = packaged_dist if packaged_dist.exists() else repo_dist
+    return selected, packaged_dist, repo_dist
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -55,20 +65,29 @@ def create_app() -> FastAPI:
     app.include_router(server_router, prefix="/api/v1/server", tags=["server"])
     app.include_router(logs_ws_router, prefix="/ws", tags=["websocket"])
 
-    # Static files for React frontend (in production)
-    # app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
         return {"status": "ok", "version": "0.1.0"}
+
+    # Static files for Web UI (production build)
+    webui_dist, packaged_dist, repo_dist = get_webui_dist_paths()
+    if webui_dist.exists():
+        app.mount("/", StaticFiles(directory=str(webui_dist), html=True), name="static")
+    else:
+        raise RuntimeError(
+            "Web UI build not found. Looked in:\n"
+            f"  - packaged: {packaged_dist}\n"
+            f"  - repo: {repo_dist}\n"
+            "Run the web-ui build to enable static hosting."
+        )
 
     return app
 
 
 def start_server(
     host: str = "0.0.0.0",
-    port: int = 8000,
+    port: int = 6658,
     reload: bool = False,
     workers: int = 1,
 ):
@@ -84,11 +103,11 @@ def start_server(
     )
 
 
-def start_app():
-    """Entry point for lumen-web command."""
+def start_webui():
+    """Entry point for lumen-webui command."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Lumen Web API Server")
+    parser = argparse.ArgumentParser(description="Lumen Web UI Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
@@ -103,5 +122,10 @@ def start_app():
     )
 
 
+def start_app():
+    """Legacy entry point (kept for compatibility)."""
+    start_webui()
+
+
 if __name__ == "__main__":
-    start_app()
+    start_webui()

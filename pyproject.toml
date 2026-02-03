@@ -4,24 +4,16 @@ version = "0.0.0"
 description = "Monorepo root for Lumen AI services"
 requires-python = ">=3.10"
 dependencies = [
-    "lumen-resources",
-    "lumen-ocr",
-    "lumen-face",
-    "lumen-clip",
-    "lumen-vlm",
-    "lumen-app",
-    "colorlog",
+  "lumen-resources",
+  "lumen-ocr",
+  "lumen-face",
+  "lumen-clip",
+  "lumen-vlm",
+  "lumen-app",
 ]
 
 [tool.uv.workspace]
-members = [
-    "lumen-resources",
-    "lumen-ocr",
-    "lumen-face",
-    "lumen-clip",
-    "lumen-vlm",
-    "lumen-app",
-]
+members = ["lumen-resources", "lumen-ocr", "lumen-face", "lumen-clip", "lumen-vlm", "lumen-app"]
 
 [tool.uv.sources]
 lumen-resources = { workspace = true }

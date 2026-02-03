@@ -3,28 +3,25 @@
 from __future__ import annotations
 
 import platform
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
-from lumen_app.core.config import DeviceConfig
-from lumen_app.utils.env_checker import (
-    DriverChecker,
-    EnvironmentChecker,
-)
+from lumen_app.utils.env_checker import EnvironmentChecker
 from lumen_app.utils.logger import get_logger
 from lumen_app.utils.preset_registry import PresetRegistry
 from lumen_app.web.models.hardware import (
-    DriverStatus,
-    HardwareInfo,
-    HardwarePreset,
+    DriverCheckResponse,
+    HardwareInfoResponse,
+    HardwarePresetResponse,
 )
 
 logger = get_logger("lumen.web.api.hardware")
 router = APIRouter()
 
 
-def _map_driver_status(status) -> str:
-    """Map internal DriverStatus to API string."""
+def _map_driver_status(status) -> Literal["available", "missing", "incompatible"]:
+    """Map internal DriverStatus enum to API status string."""
     from lumen_app.utils.env_checker import DriverStatus as InternalDriverStatus
 
     if status == InternalDriverStatus.AVAILABLE:
@@ -35,13 +32,13 @@ def _map_driver_status(status) -> str:
         return "missing"
 
 
-@router.get("/info", response_model=HardwareInfo)
+@router.get("/info", response_model=HardwareInfoResponse)
 async def get_hardware_info():
     """Get comprehensive hardware information."""
     logger.info("Getting hardware info")
 
     # Get system info
-    info = HardwareInfo(
+    info = HardwareInfoResponse(
         platform=platform.system(),
         machine=platform.machine(),
         processor=platform.processor(),
@@ -55,7 +52,7 @@ async def get_hardware_info():
         if preset_info:
             try:
                 device_config = preset_info.factory_method()
-                preset = HardwarePreset(
+                preset = HardwarePresetResponse(
                     name=name,
                     description=preset_info.description,
                     runtime=device_config.runtime.value,
@@ -71,26 +68,18 @@ async def get_hardware_info():
 
     info.presets = presets
 
-    # Detect recommended preset
-    # Try common presets in order of preference
-    preferred_order = [
-        "nvidia_gpu_high",
-        "nvidia_gpu",
-        "apple_silicon",
-        "intel_gpu",
-        "amd_gpu_win",
-        "cpu",
-    ]
+    # Detect recommended preset using priority-based detection order
+    detection_order = PresetRegistry.get_detection_order()
 
     detected_drivers = []
-    for preset_name in preferred_order:
+    for preset_name in detection_order:
         if PresetRegistry.preset_exists(preset_name):
             try:
                 report = EnvironmentChecker.check_preset(preset_name)
                 if report.ready:
                     info.recommended_preset = preset_name
                     info.drivers = [
-                        DriverStatus(
+                        DriverCheckResponse(
                             name=d.name,
                             status=_map_driver_status(d.status),
                             details=d.details,
@@ -115,7 +104,7 @@ async def get_hardware_info():
     return info
 
 
-@router.get("/presets", response_model=list[HardwarePreset])
+@router.get("/presets", response_model=list[HardwarePresetResponse])
 async def list_hardware_presets():
     """List all available hardware presets."""
     logger.info("Listing hardware presets")
@@ -126,7 +115,7 @@ async def list_hardware_presets():
         if preset_info:
             try:
                 device_config = preset_info.factory_method()
-                preset = HardwarePreset(
+                preset = HardwarePresetResponse(
                     name=name,
                     description=preset_info.description,
                     runtime=device_config.runtime.value,
@@ -143,7 +132,7 @@ async def list_hardware_presets():
     return presets
 
 
-@router.get("/presets/{preset_name}/check", response_model=list[DriverStatus])
+@router.get("/presets/{preset_name}/check", response_model=list[DriverCheckResponse])
 async def check_preset_drivers(preset_name: str):
     """Check driver status for a specific preset."""
     logger.info(f"Checking drivers for preset: {preset_name}")
@@ -154,7 +143,7 @@ async def check_preset_drivers(preset_name: str):
     try:
         report = EnvironmentChecker.check_preset(preset_name)
         return [
-            DriverStatus(
+            DriverCheckResponse(
                 name=d.name,
                 status=_map_driver_status(d.status),
                 details=d.details,
@@ -175,20 +164,13 @@ async def detect_hardware():
     """Detect available hardware and recommended preset."""
     logger.info("Detecting hardware")
 
-    # Check each preset
-    preferred_order = [
-        "nvidia_gpu_high",
-        "nvidia_gpu",
-        "apple_silicon",
-        "intel_gpu",
-        "amd_gpu_win",
-        "cpu",
-    ]
+    # Check each preset in priority order
+    detection_order = PresetRegistry.get_detection_order()
 
     detected = []
     recommended = None
 
-    for preset_name in preferred_order:
+    for preset_name in detection_order:
         if not PresetRegistry.preset_exists(preset_name):
             continue
 

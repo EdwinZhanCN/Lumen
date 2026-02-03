@@ -2,6 +2,9 @@
 import grpc
 
 from lumen_app.proto import ml_service_pb2, ml_service_pb2_grpc
+from lumen_app.utils.logger import get_logger
+
+logger = get_logger("lumen.router")
 
 
 class HubRouter(ml_service_pb2_grpc.InferenceServicer):
@@ -49,3 +52,19 @@ class HubRouter(ml_service_pb2_grpc.InferenceServicer):
             caps = await svc.GetCapabilities(request, context)
             all_tasks.extend(caps.tasks)
         return ml_service_pb2.Capability(tasks=all_tasks)
+
+    def attach_to_server(self, server: grpc.Server):
+        """
+        Attach the hub router to the gRPC server.
+
+        This registers the router as the single InferenceServicer that handles
+        all incoming requests and routes them to appropriate services.
+
+        Args:
+            server: The gRPC server instance to attach to
+        """
+        ml_service_pb2_grpc.add_InferenceServicer_to_server(self, server)
+        logger.info(
+            f"HubRouter attached to server with {len(self.services)} service(s)"
+        )
+        logger.debug(f"Route table: {list(self._route_table.keys())}")

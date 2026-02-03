@@ -1,4 +1,4 @@
-"""Hardware detection and driver models."""
+"""Hardware detection and driver response models."""
 
 from __future__ import annotations
 
@@ -7,8 +7,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class DriverStatus(BaseModel):
-    """Driver check result."""
+class DriverCheckResponse(BaseModel):
+    """Driver check result for API responses.
+
+    Note: This is different from the internal DriverStatus enum in env_checker.py
+    """
 
     name: str
     status: Literal["available", "missing", "incompatible"] = "missing"
@@ -17,8 +20,8 @@ class DriverStatus(BaseModel):
     mamba_config_path: str | None = None
 
 
-class HardwarePreset(BaseModel):
-    """Hardware preset information."""
+class HardwarePresetResponse(BaseModel):
+    """Hardware preset information for API responses."""
 
     name: str
     description: str
@@ -27,20 +30,21 @@ class HardwarePreset(BaseModel):
     providers: list[str] = Field(default_factory=list)
 
 
-class HardwareInfo(BaseModel):
-    """Complete hardware detection report."""
+class HardwareInfoResponse(BaseModel):
+    """Complete hardware detection report for API responses."""
 
+    # System information
     platform: str
     machine: str
     processor: str
     python_version: str
 
-    # Detected hardware
-    presets: list[HardwarePreset] = Field(default_factory=list)
+    # Detected hardware presets
+    presets: list[HardwarePresetResponse] = Field(default_factory=list)
     recommended_preset: str | None = None
 
-    # Driver status
-    drivers: list[DriverStatus] = Field(default_factory=list)
+    # Driver status for recommended preset
+    drivers: list[DriverCheckResponse] = Field(default_factory=list)
     all_drivers_available: bool = False
     missing_installable: list[str] = Field(default_factory=list)
 
@@ -51,7 +55,10 @@ class HardwareInfo(BaseModel):
                 "machine": "x86_64",
                 "processor": "x86_64",
                 "python_version": "3.11.0",
+                "presets": [],
                 "recommended_preset": "nvidia_gpu",
+                "drivers": [],
                 "all_drivers_available": False,
+                "missing_installable": [],
             }
         }

@@ -9,6 +9,7 @@ from typing import Any
 from lumen_app.core.config import Config, DeviceConfig
 from lumen_app.utils.env_checker import EnvironmentReport
 from lumen_app.utils.logger import get_logger
+from lumen_app.web.core.server_manager import ServerManager
 
 # Optional import - AppService may not be available if gRPC is not installed
 try:
@@ -53,9 +54,17 @@ class AppState:
         self.server_status = ServerStatus()
         self.app_service: AppService | None = None
 
-        # Installation tasks
+        # Server manager for gRPC ML server
+        self.server_manager = ServerManager()
+
+        # Installation tasks (old format - to be deprecated)
         self._tasks: dict[str, InstallationTask] = {}
         self._task_lock = asyncio.Lock()
+
+        # New installation tasks
+        self._install_tasks: dict[str, Any] = {}  # task_id -> InstallTaskResponse
+        self._install_logs: dict[str, list[str]] = {}  # task_id -> logs
+        self._install_lock = asyncio.Lock()
 
         # Log subscribers
         self._log_queues: list[asyncio.Queue] = []
@@ -72,7 +81,7 @@ class AppState:
         try:
             # Start with CPU preset as default
             self.device_config = DeviceConfig.cpu()
-            logger.info(f"Loaded default CPU configuration")
+            logger.info("Loaded default CPU configuration")
         except Exception as e:
             logger.error(f"Failed to load default configuration: {e}")
 
@@ -156,6 +165,36 @@ class AppState:
         """Get all tasks."""
         async with self._task_lock:
             return list(self._tasks.values())
+
+    # New install task management
+    async def store_install_task(self, task_id: str, task: Any):
+        """Store or update an installation task."""
+        async with self._install_lock:
+            self._install_tasks[task_id] = task
+            if task_id not in self._install_logs:
+                self._install_logs[task_id] = []
+
+    async def get_install_task(self, task_id: str) -> Any | None:
+        """Get installation task by ID."""
+        async with self._install_lock:
+            return self._install_tasks.get(task_id)
+
+    async def get_all_install_tasks(self) -> list[Any]:
+        """Get all installation tasks."""
+        async with self._install_lock:
+            return list(self._install_tasks.values())
+
+    async def append_install_log(self, task_id: str, log_line: str):
+        """Append a log line to installation task."""
+        async with self._install_lock:
+            if task_id not in self._install_logs:
+                self._install_logs[task_id] = []
+            self._install_logs[task_id].append(log_line)
+
+    async def get_install_task_logs(self, task_id: str) -> list[str]:
+        """Get installation task logs."""
+        async with self._install_lock:
+            return self._install_logs.get(task_id, [])
 
     # Log streaming
     async def subscribe_logs(self) -> asyncio.Queue:

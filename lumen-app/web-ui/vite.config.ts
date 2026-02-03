@@ -9,6 +9,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    outDir: path.resolve(__dirname, "../src/lumen_app/web/static"),
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     proxy: {

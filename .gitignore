@@ -14,3 +14,6 @@ examples/**/*.yaml
 !examples/**/*.example.yaml
 
 .ruff_cache
+
+# Web UI build output (built into Python package)
+lumen-app/src/lumen_app/web/static/

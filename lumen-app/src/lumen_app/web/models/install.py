@@ -1,4 +1,4 @@
-"""Installation task models."""
+"""Installation models - simplified one-click setup."""
 
 from __future__ import annotations
 
@@ -7,56 +7,128 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class InstallRequest(BaseModel):
-    """Request to start an installation task."""
+class InstallSetupRequest(BaseModel):
+    """Request to start a complete installation setup.
 
-    task_type: Literal["micromamba", "environment", "drivers", "packages"]
-    options: dict = Field(default_factory=dict)
-    # For driver installation
-    drivers: list[str] = Field(default_factory=list)
-    # For package installation
-    packages: list[str] = Field(default_factory=list)
-    environment: str = "lumen_env"
+    This will automatically install all required components for the selected preset:
+    - micromamba (if not present)
+    - conda environment (if not exists)
+    - required drivers for the preset
+    """
+
+    preset: str
+    cache_dir: str = "~/.lumen"
+    environment_name: str = "lumen_env"
+    force_reinstall: bool = False
 
     class Config:
         json_schema_extra = {
             "example": {
-                "task_type": "drivers",
-                "drivers": ["cuda", "openvino"],
-                "environment": "lumen_env",
+                "preset": "nvidia_gpu",
+                "cache_dir": "~/.lumen",
+                "environment_name": "lumen_env",
+                "force_reinstall": False,
             }
         }
 
 
-class InstallStatus(BaseModel):
-    """Installation task status."""
+class InstallStep(BaseModel):
+    """A single step in the installation process."""
 
-    task_id: str
-    task_type: str
-    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    name: str
+    status: Literal["pending", "running", "completed", "failed", "skipped"] = "pending"
     progress: int = Field(0, ge=0, le=100)
     message: str = ""
-    created_at: float = 0
-    updated_at: float | None = None
+    started_at: float | None = None
     completed_at: float | None = None
-    error_details: str | None = None
 
 
-class InstallTask(BaseModel):
-    """Detailed installation task information."""
+class InstallTaskResponse(BaseModel):
+    """Installation task status and progress."""
 
     task_id: str
-    task_type: str
-    status: str
-    progress: int
-    message: str
-    logs: list[str] = Field(default_factory=list)
+    preset: str
+    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    progress: int = Field(0, ge=0, le=100)
+    current_step: str = ""
+    steps: list[InstallStep] = Field(default_factory=list)
     created_at: float
-    updated_at: float | None = None
+    updated_at: float
+    completed_at: float | None = None
+    error: str | None = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "task_id": "abc-123",
+                "preset": "nvidia_gpu",
+                "status": "running",
+                "progress": 45,
+                "current_step": "Installing CUDA drivers",
+                "steps": [
+                    {
+                        "name": "Check micromamba",
+                        "status": "completed",
+                        "progress": 100,
+                        "message": "micromamba already installed",
+                    },
+                    {
+                        "name": "Create environment",
+                        "status": "running",
+                        "progress": 60,
+                        "message": "Creating lumen_env...",
+                    },
+                ],
+                "created_at": 1234567890.0,
+                "updated_at": 1234567895.0,
+                "completed_at": None,
+                "error": None,
+            }
+        }
 
 
-class InstallListResponse(BaseModel):
+class InstallTaskListResponse(BaseModel):
     """List of installation tasks."""
 
-    tasks: list[InstallStatus]
+    tasks: list[InstallTaskResponse]
     total: int
+
+
+class InstallStatusResponse(BaseModel):
+    """Current installation status of the system."""
+
+    micromamba_installed: bool
+    micromamba_path: str | None = None
+    environment_exists: bool
+    environment_name: str | None = None
+    environment_path: str | None = None
+    drivers_checked: bool = False
+    drivers: dict[str, str] = Field(default_factory=dict)  # driver_name -> status
+    ready_for_preset: str | None = None
+    missing_components: list[str] = Field(default_factory=list)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "micromamba_installed": True,
+                "micromamba_path": "/usr/local/bin/micromamba",
+                "environment_exists": True,
+                "environment_name": "lumen_env",
+                "environment_path": "~/.lumen/envs/lumen_env",
+                "drivers_checked": True,
+                "drivers": {
+                    "cuda": "available",
+                    "cudnn": "missing",
+                },
+                "ready_for_preset": "nvidia_gpu",
+                "missing_components": ["cudnn"],
+            }
+        }
+
+
+class InstallLogsResponse(BaseModel):
+    """Installation task logs."""
+
+    task_id: str
+    logs: list[str] = Field(default_factory=list)
+    total_lines: int = 0

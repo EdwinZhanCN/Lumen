@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException
@@ -46,18 +47,29 @@ async def generate_config(request: ConfigRequest):
             port=request.port,
         )
 
-        # Generate config based on selected services
-        if len(request.selected_services) == 1 and "ocr" in request.selected_services:
-            # Minimal config with just OCR
+        # Generate config based on config_type
+        if request.config_type == "minimal":
             lumen_config = config.minimal()
-        elif set(request.selected_services) <= {"ocr", "clip", "face"}:
-            # Light weight config
-            clip_model = request.clip_model or "MobileCLIP2-S2"
-            lumen_config = config.light_weight(clip_model=clip_model)
+        elif request.config_type == "light_weight":
+            # Ensure clip_model is one of the valid types for light_weight
+            light_clip_model: Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"] = (
+                request.clip_model  # type: ignore
+                if request.clip_model in ["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"]
+                else "MobileCLIP2-S2"
+            )
+            lumen_config = config.light_weight(clip_model=light_clip_model)
+        elif request.config_type == "basic":
+            # Ensure clip_model is one of the valid types for basic
+            basic_clip_model: Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"] = (
+                request.clip_model  # type: ignore
+                if request.clip_model in ["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"]
+                else "MobileCLIP2-S4"
+            )
+            lumen_config = config.basic(clip_model=basic_clip_model)
+        elif request.config_type == "brave":
+            lumen_config = config.brave()
         else:
-            # Basic config with all services
-            clip_model = request.clip_model or "MobileCLIP2-S4"
-            lumen_config = config.basic(clip_model=clip_model)
+            raise ValueError(f"Unknown config_type: {request.config_type}")
 
         # Save config to file
         config_path = Path(request.cache_dir).expanduser() / "lumen-config.yaml"
@@ -132,7 +144,7 @@ async def validate_path(request: dict):
             "valid": False,
             "exists": False,
             "writable": False,
-            "error": "路径不能为空"
+            "error": "路径不能为空",
         }
 
     try:
@@ -176,7 +188,9 @@ async def validate_path(request: dict):
             "writable": writable,
             "free_space_gb": round(free_space_gb, 2),
             "error": error,
-            "warning": "磁盘空间不足 (建议至少 10GB)" if writable and free_space_gb < 10 else None
+            "warning": "磁盘空间不足 (建议至少 10GB)"
+            if writable and free_space_gb < 10
+            else None,
         }
 
     except Exception as e:
@@ -185,7 +199,7 @@ async def validate_path(request: dict):
             "valid": False,
             "exists": False,
             "writable": False,
-            "error": f"路径验证失败: {str(e)}"
+            "error": f"路径验证失败: {str(e)}",
         }
 
 

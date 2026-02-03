@@ -2,62 +2,52 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal, Union
 
+from lumen_resources.lumen_config import Region
 from pydantic import BaseModel, Field
 
 
-class ConfigPreset(BaseModel):
-    """Configuration preset for a specific hardware."""
-
-    name: str
-    description: str
-    runtime: Literal["onnx", "rknn", "pytorch"]
-    onnx_providers: list[str | dict[str, Any]] = Field(default_factory=list)
-    batch_size: int | None = None
-    precision: str | None = None
-    requires_drivers: bool = True
-
-
-class ServiceConfig(BaseModel):
-    """Individual service configuration."""
-
-    name: str
-    enabled: bool = True
-    package: str
-    model: str
-    batch_size: int = 1
-    precision: str = "fp16"
-
-
-class ServerSettings(BaseModel):
-    """Server configuration settings."""
-
-    port: int = 50051
-    host: str = "0.0.0.0"
-    enable_mdns: bool = True
-    service_name: str = "lumen-ai"
-
-
 class ConfigRequest(BaseModel):
-    """Request to generate configuration."""
+    """Request to generate configuration.
 
-    preset: str
-    region: str = "en"
+    This matches the Config class constructor parameters:
+    - cache_dir: str
+    - device_config: DeviceConfig (created from preset)
+    - region: Region
+    - service_name: str
+    - port: int | None
+
+    Plus config generation method selection:
+    - config_type: Literal["minimal", "light_weight", "basic", "brave"]
+    - clip_model: Optional clip model for light_weight and basic configs
+    """
+
+    # Config constructor parameters
     cache_dir: str = "~/.lumen"
-    port: int = 50051
+    preset: str  # Used to create device_config via PresetRegistry
+    region: Region = Region.other
     service_name: str = "lumen-ai"
-    selected_services: list[str] = Field(default_factory=lambda: ["ocr"])
-    clip_model: str | None = None
+    port: int | None = 50051
+
+    # Config generation method selection
+    config_type: Literal["minimal", "light_weight", "basic", "brave"] = "minimal"
+    clip_model: Union[
+        Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"],  # For light_weight
+        Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"],  # For basic
+        None,
+    ] = None
 
     class Config:
         json_schema_extra = {
             "example": {
-                "preset": "nvidia_gpu",
-                "region": "en",
                 "cache_dir": "~/.lumen",
+                "preset": "nvidia_gpu",
+                "region": "other",
+                "service_name": "lumen-ai",
                 "port": 50051,
-                "selected_services": ["ocr", "clip"],
+                "config_type": "light_weight",
+                "clip_model": "MobileCLIP2-S2",
             }
         }
 

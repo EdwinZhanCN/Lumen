@@ -489,7 +489,7 @@ class DriverChecker:
         logger.debug(f"[DriverChecker] Checking for {dll_path}")
 
         if not dll_path.exists():
-            logger.debug(f"[DriverChecker] amdipu.dll not found")
+            logger.debug("[DriverChecker] amdipu.dll not found")
             return DriverCheckResult(
                 name="AMD Ryzen AI NPU",
                 status=DriverStatus.MISSING,
@@ -963,7 +963,7 @@ class DependencyInstaller:
             return True, f"Would run: {' '.join(cmd)}"
 
         try:
-            logger.info(f"[DependencyInstaller] Executing installation (timeout=600s)")
+            logger.info("[DependencyInstaller] Executing installation (timeout=600s)")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -983,7 +983,7 @@ class DependencyInstaller:
                 return False, f"Installation failed: {result.stderr}"
 
         except subprocess.TimeoutExpired:
-            logger.error(f"[DependencyInstaller] Installation timed out after 600s")
+            logger.error("[DependencyInstaller] Installation timed out after 600s")
             return False, "Installation timed out"
         except FileNotFoundError:
             logger.error(

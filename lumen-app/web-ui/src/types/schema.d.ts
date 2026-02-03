@@ -184,6 +184,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/install/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Install Status
+         * @description Get current installation status of the system.
+         */
+        get: operations["get_install_status_api_v1_install_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/install/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Installation
+         * @description Start a complete installation setup for the selected preset.
+         *
+         *     This will automatically install all required components:
+         *     1. micromamba (if not present)
+         *     2. conda environment (if not exists)
+         *     3. required drivers for the preset
+         */
+        post: operations["start_installation_api_v1_install_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/install/tasks": {
         parameters: {
             query?: never;
@@ -192,16 +237,12 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Tasks
+         * List Install Tasks
          * @description List all installation tasks.
          */
-        get: operations["list_tasks_api_v1_install_tasks_get"];
+        get: operations["list_install_tasks_api_v1_install_tasks_get"];
         put?: never;
-        /**
-         * Create Install Task
-         * @description Create a new installation task.
-         */
-        post: operations["create_install_task_api_v1_install_tasks_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -216,17 +257,33 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Task Status
-         * @description Get installation task status.
+         * Get Install Task
+         * @description Get installation task status and progress.
          */
-        get: operations["get_task_status_api_v1_install_tasks__task_id__get"];
+        get: operations["get_install_task_api_v1_install_tasks__task_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/install/tasks/{task_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         /**
-         * Cancel Task
-         * @description Cancel a running installation task.
+         * Get Install Logs
+         * @description Get installation task logs.
          */
-        delete: operations["cancel_task_api_v1_install_tasks__task_id__delete"];
+        get: operations["get_install_logs_api_v1_install_tasks__task_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -241,7 +298,14 @@ export interface paths {
         };
         /**
          * Get Server Status
-         * @description Get the ML server status.
+         * @description Get the current ML server status.
+         *
+         *     Returns detailed information about the running server including:
+         *     - Running state and PID
+         *     - Port and host configuration
+         *     - Uptime in seconds
+         *     - Health status
+         *     - Configuration path
          */
         get: operations["get_server_status_api_v1_server_status_get"];
         put?: never;
@@ -263,7 +327,22 @@ export interface paths {
         put?: never;
         /**
          * Start Server
-         * @description Start the ML server.
+         * @description Start the ML server with specified configuration.
+         *
+         *     Args:
+         *         request: Server start configuration including:
+         *             - config_path: Path to the Lumen YAML configuration
+         *             - port: Optional port override
+         *             - host: Host address (currently unused, always 0.0.0.0)
+         *             - environment: Conda environment name
+         *
+         *     Returns:
+         *         Current server status after startup
+         *
+         *     Raises:
+         *         HTTPException 400: If server is already running
+         *         HTTPException 404: If config file not found
+         *         HTTPException 500: If server fails to start
          */
         post: operations["start_server_api_v1_server_start_post"];
         delete?: never;
@@ -283,7 +362,19 @@ export interface paths {
         put?: never;
         /**
          * Stop Server
-         * @description Stop the ML server.
+         * @description Stop the running ML server.
+         *
+         *     Args:
+         *         request: Stop configuration including:
+         *             - force: If True, force kill immediately without graceful shutdown
+         *             - timeout: Maximum seconds to wait for graceful shutdown
+         *
+         *     Returns:
+         *         Current server status after shutdown
+         *
+         *     Raises:
+         *         HTTPException 400: If server is not running
+         *         HTTPException 500: If server fails to stop
          */
         post: operations["stop_server_api_v1_server_stop_post"];
         delete?: never;
@@ -303,7 +394,25 @@ export interface paths {
         put?: never;
         /**
          * Restart Server
-         * @description Restart the ML server.
+         * @description Restart the ML server with optional new configuration.
+         *
+         *     This is equivalent to stop + start, but handles the sequencing automatically.
+         *
+         *     Args:
+         *         request: Restart configuration including:
+         *             - config_path: Optional new config path (uses existing if not provided)
+         *             - port: Optional new port (uses existing if not provided)
+         *             - host: Host address (currently unused)
+         *             - environment: Environment name
+         *             - force: If True, force kill during stop
+         *             - timeout: Maximum seconds to wait for graceful shutdown
+         *
+         *     Returns:
+         *         Current server status after restart
+         *
+         *     Raises:
+         *         HTTPException 400: If no config path available
+         *         HTTPException 500: If restart fails
          */
         post: operations["restart_server_api_v1_server_restart_post"];
         delete?: never;
@@ -321,7 +430,18 @@ export interface paths {
         };
         /**
          * Get Server Logs
-         * @description Get server logs.
+         * @description Get recent server logs.
+         *
+         *     Args:
+         *         lines: Number of recent log lines to return (default: 100, 0 for all)
+         *         since: Unix timestamp to filter logs (currently unused)
+         *
+         *     Returns:
+         *         Server logs with metadata
+         *
+         *     Note:
+         *         The 'since' parameter is reserved for future filtering implementation.
+         *         Currently returns the most recent N lines from the log buffer.
          */
         get: operations["get_server_logs_api_v1_server_logs_get"];
         put?: never;
@@ -359,44 +479,55 @@ export interface components {
         /**
          * ConfigRequest
          * @description Request to generate configuration.
+         *
+         *     This matches the Config class constructor parameters:
+         *     - cache_dir: str
+         *     - device_config: DeviceConfig (created from preset)
+         *     - region: Region
+         *     - service_name: str
+         *     - port: int | None
+         *
+         *     Plus config generation method selection:
+         *     - config_type: Literal["minimal", "light_weight", "basic", "brave"]
+         *     - clip_model: Optional clip model for light_weight and basic configs
          * @example {
          *       "cache_dir": "~/.lumen",
+         *       "clip_model": "MobileCLIP2-S2",
+         *       "config_type": "light_weight",
          *       "port": 50051,
          *       "preset": "nvidia_gpu",
-         *       "region": "en",
-         *       "selected_services": [
-         *         "ocr",
-         *         "clip"
-         *       ]
+         *       "region": "other",
+         *       "service_name": "lumen-ai"
          *     }
          */
         ConfigRequest: {
-            /** Preset */
-            preset: string;
-            /**
-             * Region
-             * @default en
-             */
-            region: string;
             /**
              * Cache Dir
              * @default ~/.lumen
              */
             cache_dir: string;
-            /**
-             * Port
-             * @default 50051
-             */
-            port: number;
+            /** Preset */
+            preset: string;
+            /** @default other */
+            region: components["schemas"]["Region"];
             /**
              * Service Name
              * @default lumen-ai
              */
             service_name: string;
-            /** Selected Services */
-            selected_services?: string[];
+            /**
+             * Port
+             * @default 50051
+             */
+            port: number | null;
+            /**
+             * Config Type
+             * @default minimal
+             * @enum {string}
+             */
+            config_type: "minimal" | "light_weight" | "basic" | "brave";
             /** Clip Model */
-            clip_model?: string | null;
+            clip_model?: ("MobileCLIP2-S2" | "CN-CLIP_ViT-B-16") | ("MobileCLIP2-S4" | "CN-CLIP_ViT-L-14") | null;
         };
         /**
          * ConfigResponse
@@ -422,10 +553,12 @@ export interface components {
             warnings?: string[];
         };
         /**
-         * DriverStatus
-         * @description Driver check result.
+         * DriverCheckResponse
+         * @description Driver check result for API responses.
+         *
+         *     Note: This is different from the internal DriverStatus enum in env_checker.py
          */
-        DriverStatus: {
+        DriverCheckResponse: {
             /** Name */
             name: string;
             /**
@@ -453,18 +586,21 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
-         * HardwareInfo
-         * @description Complete hardware detection report.
+         * HardwareInfoResponse
+         * @description Complete hardware detection report for API responses.
          * @example {
          *       "all_drivers_available": false,
+         *       "drivers": [],
          *       "machine": "x86_64",
+         *       "missing_installable": [],
          *       "platform": "Linux",
+         *       "presets": [],
          *       "processor": "x86_64",
          *       "python_version": "3.11.0",
          *       "recommended_preset": "nvidia_gpu"
          *     }
          */
-        HardwareInfo: {
+        HardwareInfoResponse: {
             /** Platform */
             platform: string;
             /** Machine */
@@ -474,11 +610,11 @@ export interface components {
             /** Python Version */
             python_version: string;
             /** Presets */
-            presets?: components["schemas"]["HardwarePreset"][];
+            presets?: components["schemas"]["HardwarePresetResponse"][];
             /** Recommended Preset */
             recommended_preset?: string | null;
             /** Drivers */
-            drivers?: components["schemas"]["DriverStatus"][];
+            drivers?: components["schemas"]["DriverCheckResponse"][];
             /**
              * All Drivers Available
              * @default false
@@ -488,10 +624,10 @@ export interface components {
             missing_installable?: string[];
         };
         /**
-         * HardwarePreset
-         * @description Hardware preset information.
+         * HardwarePresetResponse
+         * @description Hardware preset information for API responses.
          */
-        HardwarePreset: {
+        HardwarePresetResponse: {
             /** Name */
             name: string;
             /** Description */
@@ -507,61 +643,112 @@ export interface components {
             providers?: string[];
         };
         /**
-         * InstallListResponse
-         * @description List of installation tasks.
+         * InstallLogsResponse
+         * @description Installation task logs.
          */
-        InstallListResponse: {
-            /** Tasks */
-            tasks: components["schemas"]["InstallStatus"][];
-            /** Total */
-            total: number;
-        };
-        /**
-         * InstallRequest
-         * @description Request to start an installation task.
-         * @example {
-         *       "drivers": [
-         *         "cuda",
-         *         "openvino"
-         *       ],
-         *       "environment": "lumen_env",
-         *       "task_type": "drivers"
-         *     }
-         */
-        InstallRequest: {
-            /**
-             * Task Type
-             * @enum {string}
-             */
-            task_type: "micromamba" | "environment" | "drivers" | "packages";
-            /** Options */
-            options?: {
-                [key: string]: unknown;
-            };
-            /** Drivers */
-            drivers?: string[];
-            /** Packages */
-            packages?: string[];
-            /**
-             * Environment
-             * @default lumen_env
-             */
-            environment: string;
-        };
-        /**
-         * InstallStatus
-         * @description Installation task status.
-         */
-        InstallStatus: {
+        InstallLogsResponse: {
             /** Task Id */
             task_id: string;
-            /** Task Type */
-            task_type: string;
+            /** Logs */
+            logs?: string[];
+            /**
+             * Total Lines
+             * @default 0
+             */
+            total_lines: number;
+        };
+        /**
+         * InstallSetupRequest
+         * @description Request to start a complete installation setup.
+         *
+         *     This will automatically install all required components for the selected preset:
+         *     - micromamba (if not present)
+         *     - conda environment (if not exists)
+         *     - required drivers for the preset
+         * @example {
+         *       "cache_dir": "~/.lumen",
+         *       "environment_name": "lumen_env",
+         *       "force_reinstall": false,
+         *       "preset": "nvidia_gpu"
+         *     }
+         */
+        InstallSetupRequest: {
+            /** Preset */
+            preset: string;
+            /**
+             * Cache Dir
+             * @default ~/.lumen
+             */
+            cache_dir: string;
+            /**
+             * Environment Name
+             * @default lumen_env
+             */
+            environment_name: string;
+            /**
+             * Force Reinstall
+             * @default false
+             */
+            force_reinstall: boolean;
+        };
+        /**
+         * InstallStatusResponse
+         * @description Current installation status of the system.
+         * @example {
+         *       "drivers": {
+         *         "cuda": "available",
+         *         "cudnn": "missing"
+         *       },
+         *       "drivers_checked": true,
+         *       "environment_exists": true,
+         *       "environment_name": "lumen_env",
+         *       "environment_path": "~/.lumen/envs/lumen_env",
+         *       "micromamba_installed": true,
+         *       "micromamba_path": "/usr/local/bin/micromamba",
+         *       "missing_components": [
+         *         "cudnn"
+         *       ],
+         *       "ready_for_preset": "nvidia_gpu"
+         *     }
+         */
+        InstallStatusResponse: {
+            /** Micromamba Installed */
+            micromamba_installed: boolean;
+            /** Micromamba Path */
+            micromamba_path?: string | null;
+            /** Environment Exists */
+            environment_exists: boolean;
+            /** Environment Name */
+            environment_name?: string | null;
+            /** Environment Path */
+            environment_path?: string | null;
+            /**
+             * Drivers Checked
+             * @default false
+             */
+            drivers_checked: boolean;
+            /** Drivers */
+            drivers?: {
+                [key: string]: string;
+            };
+            /** Ready For Preset */
+            ready_for_preset?: string | null;
+            /** Missing Components */
+            missing_components?: string[];
+        };
+        /**
+         * InstallStep
+         * @description A single step in the installation process.
+         */
+        InstallStep: {
+            /** Name */
+            name: string;
             /**
              * Status
+             * @default pending
              * @enum {string}
              */
-            status: "pending" | "running" | "completed" | "failed" | "cancelled";
+            status: "pending" | "running" | "completed" | "failed" | "skipped";
             /**
              * Progress
              * @default 0
@@ -572,18 +759,86 @@ export interface components {
              * @default
              */
             message: string;
-            /**
-             * Created At
-             * @default 0
-             */
-            created_at: number;
-            /** Updated At */
-            updated_at?: number | null;
+            /** Started At */
+            started_at?: number | null;
             /** Completed At */
             completed_at?: number | null;
-            /** Error Details */
-            error_details?: string | null;
         };
+        /**
+         * InstallTaskListResponse
+         * @description List of installation tasks.
+         */
+        InstallTaskListResponse: {
+            /** Tasks */
+            tasks: components["schemas"]["InstallTaskResponse"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * InstallTaskResponse
+         * @description Installation task status and progress.
+         * @example {
+         *       "created_at": 1234567890,
+         *       "current_step": "Installing CUDA drivers",
+         *       "preset": "nvidia_gpu",
+         *       "progress": 45,
+         *       "status": "running",
+         *       "steps": [
+         *         {
+         *           "message": "micromamba already installed",
+         *           "name": "Check micromamba",
+         *           "progress": 100,
+         *           "status": "completed"
+         *         },
+         *         {
+         *           "message": "Creating lumen_env...",
+         *           "name": "Create environment",
+         *           "progress": 60,
+         *           "status": "running"
+         *         }
+         *       ],
+         *       "task_id": "abc-123",
+         *       "updated_at": 1234567895
+         *     }
+         */
+        InstallTaskResponse: {
+            /** Task Id */
+            task_id: string;
+            /** Preset */
+            preset: string;
+            /**
+             * Status
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "running" | "completed" | "failed";
+            /**
+             * Progress
+             * @default 0
+             */
+            progress: number;
+            /**
+             * Current Step
+             * @default
+             */
+            current_step: string;
+            /** Steps */
+            steps?: components["schemas"]["InstallStep"][];
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /** Completed At */
+            completed_at?: number | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * Region
+         * @description Platform region selection (cn=ModelScope, other=HuggingFace)
+         * @enum {string}
+         */
+        Region: "cn" | "other";
         /**
          * ServerLogs
          * @description Server logs.
@@ -903,7 +1158,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HardwareInfo"];
+                    "application/json": components["schemas"]["HardwareInfoResponse"];
                 };
             };
         };
@@ -923,7 +1178,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HardwarePreset"][];
+                    "application/json": components["schemas"]["HardwarePresetResponse"][];
                 };
             };
         };
@@ -945,7 +1200,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DriverStatus"][];
+                    "application/json": components["schemas"]["DriverCheckResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -981,7 +1236,7 @@ export interface operations {
             };
         };
     };
-    list_tasks_api_v1_install_tasks_get: {
+    get_install_status_api_v1_install_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -996,12 +1251,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstallListResponse"];
+                    "application/json": components["schemas"]["InstallStatusResponse"];
                 };
             };
         };
     };
-    create_install_task_api_v1_install_tasks_post: {
+    start_installation_api_v1_install_setup_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1010,7 +1265,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InstallRequest"];
+                "application/json": components["schemas"]["InstallSetupRequest"];
             };
         };
         responses: {
@@ -1020,7 +1275,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstallStatus"];
+                    "application/json": components["schemas"]["InstallTaskResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1034,7 +1289,27 @@ export interface operations {
             };
         };
     };
-    get_task_status_api_v1_install_tasks__task_id__get: {
+    list_install_tasks_api_v1_install_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallTaskListResponse"];
+                };
+            };
+        };
+    };
+    get_install_task_api_v1_install_tasks__task_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1051,7 +1326,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstallStatus"];
+                    "application/json": components["schemas"]["InstallTaskResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1065,9 +1340,11 @@ export interface operations {
             };
         };
     };
-    cancel_task_api_v1_install_tasks__task_id__delete: {
+    get_install_logs_api_v1_install_tasks__task_id__logs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                tail?: number;
+            };
             header?: never;
             path: {
                 task_id: string;
@@ -1082,7 +1359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["InstallLogsResponse"];
                 };
             };
             /** @description Validation Error */

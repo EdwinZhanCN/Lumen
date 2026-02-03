@@ -1,20 +1,27 @@
 """Pydantic models for API requests and responses."""
 
-from .config import ConfigPreset, ConfigRequest, ConfigResponse
-from .hardware import DriverStatus, HardwareInfo, HardwarePreset
-from .install import InstallRequest, InstallStatus, InstallTask
+from .config import ConfigRequest, ConfigResponse
+from .hardware import DriverCheckResponse, HardwareInfoResponse, HardwarePresetResponse
+from .install import (
+    InstallLogsResponse,
+    InstallSetupRequest,
+    InstallStatusResponse,
+    InstallTaskListResponse,
+    InstallTaskResponse,
+)
 from .server import ServerConfig, ServerLogs, ServerStatus
 
 __all__ = [
-    "ConfigPreset",
     "ConfigRequest",
     "ConfigResponse",
-    "DriverStatus",
-    "HardwareInfo",
-    "HardwarePreset",
-    "InstallRequest",
-    "InstallStatus",
-    "InstallTask",
+    "DriverCheckResponse",
+    "HardwareInfoResponse",
+    "HardwarePresetResponse",
+    "InstallLogsResponse",
+    "InstallSetupRequest",
+    "InstallStatusResponse",
+    "InstallTaskListResponse",
+    "InstallTaskResponse",
     "ServerConfig",
     "ServerLogs",
     "ServerStatus",
