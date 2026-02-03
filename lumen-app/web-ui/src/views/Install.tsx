@@ -17,7 +17,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   getInstallStatus,
@@ -139,7 +139,6 @@ export function Install() {
     <WizardLayout
       title="安装依赖"
       description="下载并安装所需的运行环境和模型文件"
-      hideNextButton={!allCompleted}
     >
       <div className="space-y-6">
         {/* Installation Summary */}

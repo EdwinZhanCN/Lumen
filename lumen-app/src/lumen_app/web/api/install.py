@@ -14,8 +14,8 @@ from lumen_app.core.installer import CoreInstaller
 from lumen_app.utils.env_checker import (
     DependencyInstaller,
     EnvironmentChecker,
-    MicromambaChecker,
 )
+from lumen_app.utils.installation import MicromambaInstaller, MicromambaStatus
 from lumen_app.utils.logger import get_logger
 from lumen_app.utils.preset_registry import PresetRegistry
 from lumen_app.web.core.state import app_state
@@ -39,10 +39,12 @@ async def get_install_status():
 
     # Check micromamba
     cache_dir = Path("~/.lumen").expanduser()
-    micromamba_exe = MicromambaChecker.get_executable_path(cache_dir)
-    micromamba_result = MicromambaChecker.check_micromamba(micromamba_exe)
-    micromamba_installed = micromamba_result.status.value == "available"
-    micromamba_path = micromamba_exe if micromamba_installed else None
+    micromamba_installer = MicromambaInstaller(cache_dir)
+    micromamba_result = micromamba_installer.check()
+    micromamba_installed = micromamba_result.status == MicromambaStatus.INSTALLED
+    micromamba_path = (
+        micromamba_result.executable_path if micromamba_installed else None
+    )
 
     # Check environment (TODO: implement actual check)
     environment_exists = False
@@ -161,9 +163,12 @@ async def _plan_installation_steps(request: InstallSetupRequest) -> list[Install
 
     # Step 1: Check/install micromamba
     resolved_cache_dir = Path(request.cache_dir).expanduser()
-    micromamba_exe = MicromambaChecker.get_executable_path(resolved_cache_dir)
-    micromamba_result = MicromambaChecker.check_micromamba(micromamba_exe)
-    if micromamba_result.status.value != "available" or request.force_reinstall:
+    micromamba_installer = MicromambaInstaller(resolved_cache_dir)
+    micromamba_result = micromamba_installer.check()
+    if (
+        micromamba_result.status != MicromambaStatus.INSTALLED
+        or request.force_reinstall
+    ):
         steps.append(
             InstallStep(
                 name="Install micromamba",
@@ -310,7 +315,9 @@ async def _run_installation(task_id: str, request: InstallSetupRequest):
             and task.steps[current_step_idx].name == "Install Lumen packages"
         ):
             await _execute_step(task_id, current_step_idx, total_steps)
-            success = await _install_lumen_packages(task_id, resolved_cache_dir)
+            success = await _install_lumen_packages(
+                task_id, resolved_cache_dir, request.preset
+            )
             if not success:
                 await _update_task(
                     task_id,
@@ -389,18 +396,13 @@ async def _install_micromamba(task_id: str, cache_dir: str) -> bool:
     await _append_log(task_id, "Installing micromamba...")
 
     try:
-        success, message = MicromambaChecker.install_micromamba(
-            cache_dir=cache_dir, dry_run=False
-        )
+        micromamba_installer = MicromambaInstaller(cache_dir)
+        exe_path = micromamba_installer.install(dry_run=False)
 
+        message = f"Micromamba installed successfully at {exe_path}"
         await _append_log(task_id, message)
-
-        if success:
-            await _complete_current_step(task_id)
-            return True
-        else:
-            await _fail_current_step(task_id, message)
-            return False
+        await _complete_current_step(task_id)
+        return True
 
     except Exception as e:
         error_msg = f"Failed to install micromamba: {e}"
@@ -454,7 +456,8 @@ async def _install_drivers(
             await _complete_current_step(task_id)
             return True
 
-        micromamba_path = MicromambaChecker.get_executable_path(cache_dir)
+        micromamba_installer = MicromambaInstaller(cache_dir)
+        micromamba_path = str(micromamba_installer.get_executable())
         root_prefix = str(Path(cache_dir).expanduser() / "micromamba")
         installer = DependencyInstaller(
             micromamba_path=micromamba_path,
@@ -486,9 +489,12 @@ async def _install_drivers(
         return False
 
 
-async def _install_lumen_packages(task_id: str, cache_dir: str) -> bool:
-    """Install Lumen packages derived from lumen-config.yaml."""
-    await _append_log(task_id, "Installing Lumen packages...")
+async def _install_lumen_packages(task_id: str, cache_dir: str, preset: str) -> bool:
+    """Install Lumen packages derived from lumen-config.yaml.
+
+    Downloads wheels from GitHub Releases and installs with device-specific extras.
+    """
+    await _append_log(task_id, "Installing Lumen packages from GitHub Releases...")
 
     try:
         config_path = Path(cache_dir).expanduser() / "lumen-config.yaml"
@@ -499,9 +505,18 @@ async def _install_lumen_packages(task_id: str, cache_dir: str) -> bool:
             return False
 
         lumen_config: LumenConfig = load_and_validate_config(str(config_path))
-        installer = CoreInstaller(cache_dir=cache_dir)
 
-        success, message = installer.install_lumen_packages(lumen_config)
+        # Get device config for the preset
+        device_config = PresetRegistry.create_config(preset)
+        await _append_log(task_id, f"Using preset: {preset}")
+
+        # Read region from config
+        region = lumen_config.metadata.region
+        await _append_log(task_id, f"Using region: {region.value}")
+
+        installer = CoreInstaller(cache_dir=cache_dir, region=region)
+
+        success, message = installer.install_lumen_packages(lumen_config, device_config)
         await _append_log(task_id, message)
 
         if success:

@@ -24,9 +24,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
 import * as React from "react";
-import { getHardwareInfo, type HardwareInfo, type HardwarePreset } from "@/lib/api";
+import {
+  getHardwareInfo,
+  type HardwareInfo,
+  type HardwarePreset,
+} from "@/lib/api";
 
 interface HardwarePresetWithIcon extends HardwarePreset {
   icon: React.ReactElement;
@@ -50,10 +54,12 @@ const presetIcons: Record<string, React.ReactElement> = {
 export function Hardware() {
   const { wizardData, updateWizardData } = useWizard();
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
-    wizardData.hardwarePreset
+    wizardData.hardwarePreset,
   );
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
-  const [hardwarePresets, setHardwarePresets] = useState<HardwarePresetWithIcon[]>([]);
+  const [hardwarePresets, setHardwarePresets] = useState<
+    HardwarePresetWithIcon[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +73,9 @@ export function Hardware() {
         setHardwareInfo(info);
 
         // Transform API presets to UI presets with icons
-        const presetsWithIcons: HardwarePresetWithIcon[] = (info.presets || []).map((preset) => ({
+        const presetsWithIcons: HardwarePresetWithIcon[] = (
+          info.presets || []
+        ).map((preset) => ({
           ...preset,
           icon: presetIcons[preset.name] || <Cpu />,
           recommended: preset.name === info.recommended_preset,
@@ -81,7 +89,11 @@ export function Hardware() {
         }
       } catch (err) {
         console.error("Failed to fetch hardware info:", err);
-        setError(err instanceof Error ? err.message : "Failed to load hardware information");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load hardware information",
+        );
       } finally {
         setLoading(false);
       }
@@ -97,7 +109,10 @@ export function Hardware() {
         updateWizardData({
           hardwarePreset: preset.name,
           runtime: preset.runtime as "onnx" | "rknn",
-          onnxProviders: preset.providers && preset.providers.length > 0 ? preset.providers : null,
+          onnxProviders:
+            preset.providers && preset.providers.length > 0
+              ? preset.providers
+              : null,
           rknnDevice: preset.runtime === "rknn" ? "rk3588" : null,
         });
       }
@@ -137,9 +152,7 @@ export function Hardware() {
       >
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            {error}
-          </AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       </WizardLayout>
     );
@@ -172,7 +185,9 @@ export function Hardware() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">处理器</p>
-                  <p className="font-medium">{hardwareInfo.processor || 'N/A'}</p>
+                  <p className="font-medium">
+                    {hardwareInfo.processor || "N/A"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Python版本</p>
@@ -186,10 +201,15 @@ export function Hardware() {
                       推荐配置
                     </Badge>
                     <span className="text-sm font-medium">
-                      {hardwarePresets.find(p => p.name === hardwareInfo.recommended_preset)?.name || hardwareInfo.recommended_preset}
+                      {hardwarePresets.find(
+                        (p) => p.name === hardwareInfo.recommended_preset,
+                      )?.name || hardwareInfo.recommended_preset}
                     </span>
                     {hardwareInfo.all_drivers_available && (
-                      <Badge variant="outline" className="text-xs text-green-600 border-green-600">
+                      <Badge
+                        variant="outline"
+                        className="text-xs text-green-600 border-green-600"
+                      >
                         ✓ 驱动就绪
                       </Badge>
                     )}
@@ -251,9 +271,11 @@ export function Hardware() {
                         <p className="font-medium mb-1">提供商:</p>
                         <ul className="space-y-0.5">
                           {preset.providers && preset.providers.length > 0 ? (
-                            preset.providers.map((provider: string, idx: number) => (
-                              <li key={idx}>• {provider}</li>
-                            ))
+                            preset.providers.map(
+                              (provider: string, idx: number) => (
+                                <li key={idx}>• {provider}</li>
+                              ),
+                            )
                           ) : (
                             <li>• 默认配置</li>
                           )}
@@ -307,9 +329,11 @@ export function Hardware() {
                         <p className="font-medium mb-1">提供商:</p>
                         <ul className="space-y-0.5">
                           {preset.providers && preset.providers.length > 0 ? (
-                            preset.providers.map((provider: string, idx: number) => (
-                              <li key={idx}>• {provider}</li>
-                            ))
+                            preset.providers.map(
+                              (provider: string, idx: number) => (
+                                <li key={idx}>• {provider}</li>
+                              ),
+                            )
                           ) : (
                             <li>• 默认配置</li>
                           )}
@@ -339,7 +363,10 @@ export function Hardware() {
                 </div>
                 <div className="flex-1">
                   <p className="font-semibold">
-                    {hardwarePresets.find((p) => p.name === selectedPreset)?.name}
+                    {
+                      hardwarePresets.find((p) => p.name === selectedPreset)
+                        ?.name
+                    }
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {

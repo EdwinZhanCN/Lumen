@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { WIZARD_STEPS } from "@/context/WizardContext";
+import { WIZARD_STEPS } from "@/context/wizardConfig";
 
 interface StepIndicatorProps {
   currentStep: number;

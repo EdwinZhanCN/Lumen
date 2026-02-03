@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "./StepIndicator";
-import { useWizard, WIZARD_STEPS } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
+import { WIZARD_STEPS } from "@/context/wizardConfig";
 
 interface WizardLayoutProps {
   children: ReactNode;
@@ -28,8 +29,7 @@ export function WizardLayout({
   nextButtonText = "下一步",
   nextButtonDisabled = false,
 }: WizardLayoutProps) {
-  const { currentStep, nextStep, prevStep, canGoNext, canGoPrev } =
-    useWizard();
+  const { currentStep, nextStep, prevStep, canGoNext, canGoPrev } = useWizard();
   const navigate = useNavigate();
 
   const handleNext = async () => {

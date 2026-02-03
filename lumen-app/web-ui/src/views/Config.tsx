@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Bot,
   Feather,
@@ -23,7 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
 import { generateConfig } from "@/lib/api";
@@ -126,7 +126,7 @@ export function Config() {
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
     wizardData.servicePreset,
   );
-  const [lastConfigKey, setLastConfigKey] = useState<string | null>(null);
+  const lastConfigKeyRef = useRef<string | null>(null);
 
   // Use generated schema types with custom hook
   const {
@@ -136,8 +136,11 @@ export function Config() {
     error: configError,
   } = useMutation({
     mutationFn: generateConfig,
-    onSuccess: () => {
-      updateWizardData({ configGenerated: true });
+    onSuccess: (data) => {
+      updateWizardData({
+        configGenerated: true,
+        configPath: data.config_path || undefined,
+      });
     },
     onError: () => {
       updateWizardData({ configGenerated: false });
@@ -171,11 +174,11 @@ export function Config() {
       wizardData.serviceName,
     ].join("|");
 
-    if (nextConfigKey === lastConfigKey || generatingConfig) {
+    if (nextConfigKey === lastConfigKeyRef.current || generatingConfig) {
       return;
     }
 
-    setLastConfigKey(nextConfigKey);
+    lastConfigKeyRef.current = nextConfigKey;
 
     updateWizardData({
       servicePreset: preset.id,
@@ -201,7 +204,6 @@ export function Config() {
     wizardData.serviceName,
     generateConfigMutate,
     updateWizardData,
-    lastConfigKey,
     generatingConfig,
   ]);
 

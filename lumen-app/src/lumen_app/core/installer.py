@@ -15,9 +15,16 @@ from typing import Iterable
 
 import yaml
 from lumen_resources import LumenConfig
+from lumen_resources.lumen_config import Region
 
-from lumen_app.utils.env_checker import DependencyInstaller, MicromambaChecker
+from lumen_app.core.config import DeviceConfig
+from lumen_app.utils.env_checker import DependencyInstaller
+from lumen_app.utils.installation import MicromambaInstaller, PythonEnvManager
 from lumen_app.utils.logger import get_logger
+from lumen_app.utils.package_resolver import (
+    GitHubPackageResolver,
+    LumenPackageResolver,
+)
 
 logger = get_logger("lumen.core.installer")
 
@@ -31,17 +38,18 @@ class CoreInstaller:
         env_name: str = "lumen_env",
         mamba_configs_dir: str | Path | None = None,
         micromamba_target: str = "micromamba",
+        region: Region = Region.other,
     ) -> None:
         self.cache_dir = Path(cache_dir).expanduser()
         self.env_name = env_name
         self.mamba_configs_dir = Path(mamba_configs_dir) if mamba_configs_dir else None
         self.micromamba_target = micromamba_target
+        self.region = region
 
     @property
     def micromamba_exe(self) -> str:
-        return MicromambaChecker.get_executable_path(
-            self.cache_dir, target_name=self.micromamba_target
-        )
+        installer = MicromambaInstaller(self.cache_dir)
+        return str(installer.get_executable())
 
     @property
     def root_prefix(self) -> str:
@@ -50,11 +58,13 @@ class CoreInstaller:
     def install_micromamba(self, dry_run: bool = False) -> tuple[bool, str]:
         """Install micromamba into cache_dir."""
         logger.info("Installing micromamba...")
-        return MicromambaChecker.install_micromamba(
-            cache_dir=self.cache_dir,
-            target_name=self.micromamba_target,
-            dry_run=dry_run,
-        )
+        try:
+            installer = MicromambaInstaller(self.cache_dir)
+            exe_path = installer.install(dry_run=dry_run)
+            return True, f"Micromamba installed successfully at {exe_path}"
+        except Exception as e:
+            logger.error("Failed to install micromamba: %s", e)
+            return False, f"Failed to install micromamba: {e}"
 
     def create_environment(
         self,
@@ -68,155 +78,158 @@ class CoreInstaller:
             config_filename,
         )
 
-        configs_dir = self.mamba_configs_dir
-        if configs_dir is None:
-            configs_dir = Path(__file__).resolve().parent.parent / "utils" / "mamba"
-
-        config_file = Path(configs_dir) / config_filename
-        logger.debug("Environment config file path: %s", config_file)
-
-        if not config_file.exists():
-            logger.error("Config file not found: %s", config_file)
-            return False, f"Config file not found: {config_file}"
-
-        cmd = [
-            self.micromamba_exe,
-            "create",
-            "-y",
-            "-n",
-            self.env_name,
-            "-f",
-            str(config_file),
-        ]
-        if self.root_prefix:
-            cmd.extend(["--root-prefix", self.root_prefix])
-
-        logger.debug("Environment command: %s", " ".join(cmd))
-
         if dry_run:
             logger.info("Dry run mode - skipping execution")
-            return True, f"Would run: {' '.join(cmd)}"
+            return True, f"Would create environment {self.env_name}"
 
         try:
-            logger.info("Executing environment creation (timeout=600s)")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,
+            # Extract yaml_config name from filename (e.g., "default.yaml" -> "default")
+            yaml_config = config_filename.replace(".yaml", "")
+
+            env_manager = PythonEnvManager(
+                cache_dir=self.cache_dir,
+                micromamba_exe=self.micromamba_exe,
             )
-
-            if result.returncode == 0:
-                logger.info("Successfully created environment %s", self.env_name)
-                return True, f"Successfully created environment {self.env_name}"
-
-            logger.error(
-                "Environment creation failed: returncode=%s, stderr=%s",
-                result.returncode,
-                result.stderr,
+            env_path = env_manager.create_env(yaml_config=yaml_config)
+            logger.info(
+                "Successfully created environment %s at %s", self.env_name, env_path
             )
-            return False, f"Environment creation failed: {result.stderr}"
+            return True, f"Successfully created environment {self.env_name}"
 
-        except subprocess.TimeoutExpired:
-            logger.error("Environment creation timed out after 600s")
-            return False, "Environment creation timed out"
-        except FileNotFoundError:
-            logger.error("micromamba not found at %s", self.micromamba_exe)
-            return False, f"micromamba not found at {self.micromamba_exe}"
         except Exception as e:
             logger.error("Environment creation error: %s: %s", type(e).__name__, e)
             return False, f"Environment creation error: {str(e)}"
 
     def install_lumen_packages(
-        self, lumen_config: LumenConfig, quiet: bool = True
+        self,
+        lumen_config: LumenConfig,
+        device_config: DeviceConfig,
+        quiet: bool = True,
     ) -> tuple[bool, str]:
-        """Install Lumen packages derived from LumenConfig."""
-        env_path = self.cache_dir / self.micromamba_target / "envs" / self.env_name
+        """Install Lumen packages derived from LumenConfig.
 
-        packages: list[str] = []
-        deployment = getattr(lumen_config, "deployment", None)
-        services = getattr(deployment, "services", None) if deployment else None
-        if services:
-            for service in services:
-                root = getattr(service, "root", None)
-                if root:
-                    packages.append(f"lumen-{root}")
+        Downloads wheels from GitHub Releases and installs them with proper
+        dependencies based on device configuration.
 
-        package_list = list(dict.fromkeys(packages))
+        Args:
+            lumen_config: Lumen configuration with deployment services
+            device_config: Device configuration with dependency metadata
+            quiet: Whether to suppress pip output
 
-        if not package_list:
-            logger.info("No packages to install.")
-            return True, "No packages to install"
+        Returns:
+            Tuple of (success, message)
+        """
+        logger.info("Installing Lumen packages from GitHub Releases")
 
-        if not env_path.exists():
-            return False, f"Environment not found at {env_path}"
+        # Check environment exists
+        env_manager = PythonEnvManager(
+            cache_dir=self.cache_dir,
+            micromamba_exe=self.micromamba_exe,
+        )
 
-        base_cmd = [
-            self.micromamba_exe,
-            "run",
-            "-p",
-            str(env_path),
-            "pip",
-            "install",
-        ]
-
-        cmd = base_cmd + package_list
-        if quiet:
-            cmd += ["--quiet", "--no-warn-script-location"]
-
-        logger.info("Installing packages: %s", ", ".join(package_list))
+        if not env_manager.env_exists():
+            return False, f"Environment not found at {env_manager.get_env_path()}"
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0:
-                return True, "All packages installed successfully"
+            # Resolve package names from config
+            package_list = LumenPackageResolver.resolve_packages(lumen_config)
 
-            logger.warning(
-                "Batch installation failed, trying one by one: %s", result.stderr
-            )
+            if not package_list:
+                logger.info("No packages to install.")
+                return True, "No packages to install"
+
+            logger.info("Packages to install: %s", ", ".join(package_list))
+
+            # Create wheel download directory
+            wheel_dir = self.cache_dir / "wheels"
+            wheel_dir.mkdir(parents=True, exist_ok=True)
+
+            # Initialize GitHub resolver
+            github_resolver = GitHubPackageResolver(region=self.region)
+
+            # Download all wheels first
+            wheel_paths = {}
             for package in package_list:
-                single_cmd = base_cmd + [package]
-                if quiet:
-                    single_cmd.append("--quiet")
+                logger.info("Downloading wheel for %s...", package)
+                try:
+                    url, version = github_resolver.resolve_package_url(package)
+                    wheel_path = github_resolver.download_wheel(url, wheel_dir)
+                    wheel_paths[package] = wheel_path
+                    logger.info("Downloaded %s version %s", package, version)
+                except Exception as e:
+                    logger.error("Failed to download %s: %s", package, e)
+                    return False, f"Failed to download {package}: {e}"
 
-                single_result = subprocess.run(
-                    single_cmd, capture_output=True, text=True, timeout=180
-                )
-                if single_result.returncode != 0:
-                    return False, f"Failed to install {package}: {single_result.stderr}"
+            # Build pip install command with device-specific extras
+            pip_args = LumenPackageResolver.build_pip_install_args(
+                packages=package_list,
+                device_config=device_config,
+                region=self.region,
+                wheel_paths=wheel_paths,
+            )
 
-            return True, "All packages installed successfully (single installs)"
+            if quiet:
+                pip_args.extend(["--quiet", "--no-warn-script-location"])
+
+            # Run pip install
+            logger.info("Running pip install with device-specific extras")
+            result = env_manager.run_pip(*pip_args)
+
+            if result.returncode == 0:
+                logger.info("All packages installed successfully")
+                return True, "All packages installed successfully"
+            else:
+                error_msg = result.stderr or result.stdout
+                logger.error("Package installation failed: %s", error_msg)
+                return False, f"Package installation failed: {error_msg}"
+
         except subprocess.TimeoutExpired:
+            logger.error("Package installation timed out")
             return False, "Package installation timed out"
+        except Exception as e:
+            logger.error("Package installation error: %s", e)
+            return False, f"Package installation error: {e}"
 
     def verify_installation(self) -> tuple[bool, str]:
         """Verify micromamba and environment are installed."""
-        micromamba_exe = Path(self.micromamba_exe)
-        env_path = self.cache_dir / self.micromamba_target / "envs" / self.env_name
-
-        if not micromamba_exe.exists():
-            return False, "Micromamba not found"
-
-        if not env_path.exists():
-            return False, "Python environment not found"
-
-        # Optional: check uv availability
-        cmd = [
-            str(micromamba_exe),
-            "run",
-            "-p",
-            str(env_path),
-            "uv",
-            "--version",
-        ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                logger.info("uv installed: %s", result.stdout.strip())
-        except subprocess.TimeoutExpired:
-            logger.warning("uv check timed out")
+            # Check micromamba
+            installer = MicromambaInstaller(self.cache_dir)
+            check_result = installer.check()
 
-        return True, "Installation verified"
+            if check_result.status.value != "installed":
+                return False, "Micromamba not found"
+
+            # Check environment
+            env_manager = PythonEnvManager(
+                cache_dir=self.cache_dir,
+                micromamba_exe=self.micromamba_exe,
+            )
+
+            if not env_manager.env_exists():
+                return False, "Python environment not found"
+
+            # Optional: check uv availability
+            env_path = env_manager.get_env_path()
+            cmd = [
+                str(self.micromamba_exe),
+                "run",
+                "-p",
+                str(env_path),
+                "uv",
+                "--version",
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    logger.info("uv installed: %s", result.stdout.strip())
+            except subprocess.TimeoutExpired:
+                logger.warning("uv check timed out")
+
+            return True, "Installation verified"
+        except Exception as e:
+            logger.error("Verification error: %s", e)
+            return False, f"Verification error: {e}"
 
     def save_config(
         self, lumen_config: LumenConfig, config_filename: str = "lumen-config.yaml"

@@ -18,7 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   getServerStatus,
@@ -103,7 +103,7 @@ export function Server() {
 
   const handleStartServer = () => {
     startServerMutation({
-      config_path: undefined, // Use default or previously generated config
+      config_path: wizardData.configPath,
       port: wizardData.port,
       host: "0.0.0.0",
       environment: "lumen_env",
@@ -119,7 +119,7 @@ export function Server() {
 
   const handleRestartServer = () => {
     restartServerMutation({
-      config_path: undefined,
+      config_path: wizardData.configPath,
       port: wizardData.port,
       host: "0.0.0.0",
       environment: "lumen_env",

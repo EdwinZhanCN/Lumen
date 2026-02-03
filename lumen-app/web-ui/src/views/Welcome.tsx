@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
-import { useWizard, type Region } from "@/context/WizardContext";
+import { useWizard } from "@/context/useWizard";
+import type { Region } from "@/context/wizardConfig";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useMutation } from "@tanstack/react-query";
 import { validatePath } from "@/lib/api.ts";
@@ -61,7 +62,7 @@ export function Welcome() {
       serviceName,
       port: parseInt(port) || 50051,
     });
-  }, [installPath, region, serviceName, port]);
+  }, [installPath, region, serviceName, port, updateWizardData]);
 
   return (
     <WizardLayout

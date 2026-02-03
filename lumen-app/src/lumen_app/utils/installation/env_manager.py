@@ -65,7 +65,7 @@ class PythonEnvManager:
         # Create environment from yaml config file
         cmd = [
             str(self.micromamba_exe),
-            "install",
+            "create",
             "-y",
             "-p",  # Use path instead of name
             str(env_path),
