@@ -12,6 +12,7 @@ interface WizardLayoutProps {
   description?: string;
   onNext?: () => void | Promise<void>;
   onPrev?: () => void | Promise<void>;
+  onFinish?: () => void | Promise<void>;
   hideNextButton?: boolean;
   hidePrevButton?: boolean;
   nextButtonText?: string;
@@ -24,6 +25,7 @@ export function WizardLayout({
   description,
   onNext,
   onPrev,
+  onFinish,
   hideNextButton = false,
   hidePrevButton = false,
   nextButtonText = "下一步",
@@ -32,9 +34,17 @@ export function WizardLayout({
   const { currentStep, nextStep, prevStep, canGoNext, canGoPrev } = useWizard();
   const navigate = useNavigate();
 
+  const isLastStep = currentStep === WIZARD_STEPS.length - 1;
+
   const handleNext = async () => {
     if (onNext) {
       await onNext();
+    }
+    if (isLastStep) {
+      if (onFinish) {
+        await onFinish();
+      }
+      return;
     }
     if (currentStep < WIZARD_STEPS.length - 1) {
       nextStep();
@@ -51,8 +61,6 @@ export function WizardLayout({
       navigate(WIZARD_STEPS[currentStep - 1].path);
     }
   };
-
-  const isLastStep = currentStep === WIZARD_STEPS.length - 1;
 
   return (
     <div className="min-h-screen bg-background">

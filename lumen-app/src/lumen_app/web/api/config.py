@@ -133,12 +133,14 @@ async def get_current_config():
 
     return {
         "loaded": True,
+        "config_path": app_state.config_path,
         "cache_dir": lumen_config.metadata.cache_dir,
         "region": lumen_config.metadata.region.value,
         "port": lumen_config.server.port,
         "service_name": lumen_config.server.mdns.service_name
         if lumen_config.server.mdns
         else "lumen-server",
+        "env_name": "lumen_env",
         "device": device_info,
     }
 
@@ -240,7 +242,7 @@ async def load_config(config_path: str):
             )
 
         # Store LumenConfig directly in app_state
-        app_state.set_lumen_config(lumen_config)
+        app_state.set_lumen_config(lumen_config, config_path=str(path))
 
         logger.info(f"Configuration loaded successfully from {path}")
 
@@ -253,6 +255,7 @@ async def load_config(config_path: str):
             "service_name": lumen_config.server.mdns.service_name
             if lumen_config.server.mdns
             else "lumen-server",
+            "env_name": "lumen_env",
         }
 
     except HTTPException:

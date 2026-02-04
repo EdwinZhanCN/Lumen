@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Download,
   CheckCircle,
@@ -24,13 +25,17 @@ import {
   startInstallation,
   getInstallTask,
   getInstallLogs,
+  loadConfig,
   type InstallTaskResponse,
   type InstallStep,
 } from "@/lib/api";
 
 export function Install() {
   const { wizardData, updateWizardData } = useWizard();
+  const navigate = useNavigate();
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   // Query install status
   const { data: installStatus } = useQuery({
@@ -95,6 +100,32 @@ export function Install() {
     });
   };
 
+  const handleFinishInstall = async () => {
+    setFinishError(null);
+    setIsFinishing(true);
+    try {
+      const configPath =
+        wizardData.configPath ||
+        (wizardData.installPath
+          ? `${wizardData.installPath}/lumen-config.yaml`
+          : undefined);
+
+      if (!configPath) {
+        setFinishError("未找到配置文件路径，请返回上一步重新生成配置。");
+        return;
+      }
+
+      await loadConfig(configPath);
+      navigate("/server");
+    } catch (error) {
+      setFinishError(
+        error instanceof Error ? error.message : "完成步骤失败，请重试。",
+      );
+    } finally {
+      setIsFinishing(false);
+    }
+  };
+
   const getStatusIcon = (status: InstallStep["status"]) => {
     switch (status) {
       case "completed":
@@ -139,6 +170,8 @@ export function Install() {
     <WizardLayout
       title="安装依赖"
       description="下载并安装所需的运行环境和模型文件"
+      onFinish={handleFinishInstall}
+      nextButtonDisabled={isFinishing || !allCompleted}
     >
       <div className="space-y-6">
         {/* Installation Summary */}
@@ -253,6 +286,13 @@ export function Install() {
                 <AlertDescription className="text-green-800">
                   安装成功！您可以继续下一步启动服务。
                 </AlertDescription>
+              </Alert>
+            )}
+
+            {finishError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{finishError}</AlertDescription>
               </Alert>
             )}
           </CardContent>

@@ -77,10 +77,12 @@ export type CurrentConfigResponse =
     }
   | {
       loaded: true;
+      config_path: string | null;
       cache_dir: string;
       region: string;
       port: number;
       service_name: string;
+      env_name: string;
       device: {
         runtime: string;
         batch_size: number;
@@ -103,6 +105,7 @@ export async function loadConfig(configPath: string): Promise<{
   region?: string;
   port?: number;
   service_name?: string;
+  env_name?: string;
 }> {
   return fetchApi(
     buildUrl("/api/v1/config/load", { config_path: configPath }),

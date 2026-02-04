@@ -53,6 +53,8 @@ class AppState:
         self.current_config: Config | None = None
         self.device_config: DeviceConfig | None = None
         self.lumen_config: LumenConfig | None = None
+        self.config_path: str | None = None
+        self.cache_dir: str | None = None
         self.environment_report: EnvironmentReport | None = None
         self.server_status = ServerStatus()
         self.app_service: AppService | None = None
@@ -123,9 +125,12 @@ class AppState:
         """Get current configuration."""
         return self.current_config, self.device_config
 
-    def set_lumen_config(self, config: LumenConfig):
+    def set_lumen_config(self, config: LumenConfig, config_path: str | None = None):
         """Set LumenConfig directly."""
         self.lumen_config = config
+        self.config_path = config_path
+        self.cache_dir = config.metadata.cache_dir
+        self.server_manager.update_cache_dir(config.metadata.cache_dir)
         logger.info(f"LumenConfig loaded: {config.metadata.cache_dir}")
 
     def get_lumen_config(self) -> LumenConfig | None:

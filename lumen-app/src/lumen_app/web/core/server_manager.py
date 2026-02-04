@@ -13,6 +13,7 @@ from collections import deque
 from pathlib import Path
 from typing import Literal
 
+from lumen_app.utils.installation import MicromambaInstaller
 from lumen_app.utils.logger import get_logger
 
 logger = get_logger("lumen.web.server_manager")
@@ -29,11 +30,18 @@ class ServerManager:
     - Graceful shutdown with timeout handling
     """
 
-    def __init__(self, max_log_lines: int = 1000):
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        env_name: str = "lumen_env",
+        max_log_lines: int = 1000,
+    ):
         """
         Initialize the server manager.
 
         Args:
+            cache_dir: Cache directory containing micromamba installation
+            env_name: Micromamba environment name
             max_log_lines: Maximum number of log lines to keep in memory
         """
         self.process: asyncio.subprocess.Process | None = None
@@ -41,8 +49,19 @@ class ServerManager:
         self.port: int | None = None
         self.start_time: float | None = None
         self.log_buffer: deque[str] = deque(maxlen=max_log_lines)
+        self.cache_dir = Path(cache_dir).expanduser() if cache_dir else None
+        self.env_name = env_name
+        self.environment: str | None = None
         self._log_task: asyncio.Task | None = None
         self._shutdown_event = asyncio.Event()
+
+    def update_cache_dir(
+        self, cache_dir: str | Path, env_name: str | None = None
+    ) -> None:
+        """Update cache_dir (and optionally env_name) for micromamba resolution."""
+        self.cache_dir = Path(cache_dir).expanduser()
+        if env_name is not None:
+            self.env_name = env_name
 
     @property
     def is_running(self) -> bool:
@@ -99,8 +118,10 @@ class ServerManager:
 
         logger.info(f"Starting ML server with config: {config_path}")
 
-        # Build command
-        # We'll use python -m to run the server module
+        if self.cache_dir is None:
+            raise RuntimeError("cache_dir is required to start the server")
+        self.environment = environment or self.env_name
+
         cmd = [
             "python",
             "-m",
@@ -113,6 +134,18 @@ class ServerManager:
 
         if port:
             cmd.extend(["--port", str(port)])
+
+        env_name = self.environment or self.env_name
+        installer = MicromambaInstaller(self.cache_dir)
+        micromamba_exe = installer.get_executable()
+        env_path = self.cache_dir / "micromamba" / "envs" / env_name
+        cmd = [
+            str(micromamba_exe),
+            "run",
+            "-p",
+            str(env_path),
+            *cmd,
+        ]
 
         logger.debug(f"Server command: {' '.join(cmd)}")
 
@@ -241,7 +274,12 @@ class ServerManager:
             await asyncio.sleep(1.0)
 
         # Start with new/existing config
-        return await self.start(config_path=config_path, port=port, log_level=log_level)
+        return await self.start(
+            config_path=config_path,
+            port=port,
+            log_level=log_level,
+            environment=self.environment,
+        )
 
     async def health_check(self) -> Literal["healthy", "unhealthy", "unknown"]:
         """

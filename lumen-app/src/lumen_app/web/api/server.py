@@ -50,7 +50,7 @@ async def get_server_status():
         uptime_seconds=uptime,
         service_name="lumen-ai",  # TODO: Get from config
         config_path=manager.config_path,
-        environment="lumen_env",  # TODO: Get from config
+        environment=manager.environment or "lumen_env",
         health=health,
         last_error=None,  # TODO: Track last error
     )
