@@ -8,6 +8,8 @@ export interface WizardData {
   region: Region;
   serviceName: string;
   port: number;
+  useExistingInstallation?: boolean;
+  existingInstallationPath?: string;
 
   // Step 2: Hardware
   hardwarePreset: string | null;
@@ -29,7 +31,7 @@ export interface WizardData {
 }
 
 export type WizardStep = {
-  id: "welcome" | "hardware" | "config" | "install" | "server";
+  id: "welcome" | "hardware" | "config" | "install";
   name: string;
   path: string;
 };
@@ -39,5 +41,4 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: "hardware", name: "硬件配置", path: "/hardware" },
   { id: "config", name: "服务配置", path: "/config" },
   { id: "install", name: "安装下载", path: "/install" },
-  { id: "server", name: "启动服务", path: "/server" },
 ];

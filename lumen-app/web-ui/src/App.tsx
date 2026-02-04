@@ -12,16 +12,52 @@ const queryClient = new QueryClient();
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <WizardProvider>
-        <Routes>
-          <Route path="/" element={<Navigate to="/welcome" replace />} />
-          <Route path="/welcome" element={<Welcome />} />
-          <Route path="/hardware" element={<Hardware />} />
-          <Route path="/config" element={<Config />} />
-          <Route path="/install" element={<Install />} />
-          <Route path="/server" element={<Server />} />
-        </Routes>
-      </WizardProvider>
+      <Routes>
+        {/* Wizard routes - wrapped in WizardProvider */}
+        <Route
+          path="/"
+          element={
+            <WizardProvider>
+              <Navigate to="/welcome" replace />
+            </WizardProvider>
+          }
+        />
+        <Route
+          path="/welcome"
+          element={
+            <WizardProvider>
+              <Welcome />
+            </WizardProvider>
+          }
+        />
+        <Route
+          path="/hardware"
+          element={
+            <WizardProvider>
+              <Hardware />
+            </WizardProvider>
+          }
+        />
+        <Route
+          path="/config"
+          element={
+            <WizardProvider>
+              <Config />
+            </WizardProvider>
+          }
+        />
+        <Route
+          path="/install"
+          element={
+            <WizardProvider>
+              <Install />
+            </WizardProvider>
+          }
+        />
+
+        {/* Server page - independent, no WizardProvider */}
+        <Route path="/server" element={<Server />} />
+      </Routes>
     </QueryClientProvider>
   );
 }

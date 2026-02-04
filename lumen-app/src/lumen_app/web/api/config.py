@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from fastapi import APIRouter, HTTPException
+from lumen_resources.exceptions import ConfigError
+from lumen_resources.lumen_config_validator import load_and_validate_config
 
 from lumen_app.core.config import Config
 from lumen_app.core.installer import CoreInstaller
@@ -105,27 +106,40 @@ async def generate_config(request: ConfigRequest):
 @router.get("/current")
 async def get_current_config():
     """Get the currently loaded configuration."""
-    config, device_config = app_state.get_config()
+    lumen_config = app_state.get_lumen_config()
 
-    if not config or not device_config:
+    if not lumen_config:
         return {"loaded": False, "message": "No configuration loaded"}
+
+    # Extract first enabled service's backend settings for device info
+    device_info = None
+    for service_config in lumen_config.services.values():
+        if service_config.enabled and service_config.backend_settings:
+            backend = service_config.backend_settings
+            # Get runtime from first model
+            runtime = "onnx"
+            for model_cfg in service_config.models.values():
+                runtime = model_cfg.runtime.value
+                break
+
+            device_info = {
+                "runtime": runtime,
+                "batch_size": backend.batch_size or 1,
+                "precision": "fp32",
+                "rknn_device": None,
+                "onnx_providers": backend.onnx_providers or [],
+            }
+            break
 
     return {
         "loaded": True,
-        "cache_dir": config.cache_dir,
-        "region": config.region,
-        "port": config.port,
-        "service_name": config.service_name,
-        "device": {
-            "runtime": device_config.runtime.value,
-            "batch_size": device_config.batch_size,
-            "precision": device_config.precision,
-            "rknn_device": device_config.rknn_device,
-            "onnx_providers": [
-                p if isinstance(p, str) else p[0]
-                for p in (device_config.onnx_providers or [])
-            ],
-        },
+        "cache_dir": lumen_config.metadata.cache_dir,
+        "region": lumen_config.metadata.region.value,
+        "port": lumen_config.server.port,
+        "service_name": lumen_config.server.mdns.service_name
+        if lumen_config.server.mdns
+        else "lumen-server",
+        "device": device_info,
     }
 
 
@@ -207,23 +221,70 @@ async def validate_path(request: dict):
 
 @router.post("/load")
 async def load_config(config_path: str):
-    """Load a configuration from file."""
+    """Load and validate a configuration from file, then set it in app_state."""
     try:
-        path = Path(config_path).expanduser()
+        path = Path(config_path).expanduser().resolve()
+
         if not path.exists():
             raise HTTPException(
                 status_code=404, detail=f"Config file not found: {config_path}"
             )
 
-        with open(path) as f:
-            config_content = yaml.safe_load(f)
+        # Validate and load using lumen-resources
+        try:
+            lumen_config = load_and_validate_config(path)
+        except ConfigError as e:
+            logger.error(f"Configuration validation failed: {e}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid configuration: {str(e)}"
+            )
 
-        # TODO: Parse and validate the config, then set app_state
+        # Store LumenConfig directly in app_state
+        app_state.set_lumen_config(lumen_config)
 
-        return {"loaded": True, "config_path": str(path), "config": config_content}
+        logger.info(f"Configuration loaded successfully from {path}")
+
+        return {
+            "loaded": True,
+            "config_path": str(path),
+            "cache_dir": lumen_config.metadata.cache_dir,
+            "region": lumen_config.metadata.region.value,
+            "port": lumen_config.server.port,
+            "service_name": lumen_config.server.mdns.service_name
+            if lumen_config.server.mdns
+            else "lumen-server",
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to load config: {e}")
+        logger.error(f"Failed to load config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to load config: {str(e)}")
+
+
+@router.get("/yaml")
+async def get_config_yaml():
+    """Get the current configuration as raw YAML string."""
+    lumen_config = app_state.get_lumen_config()
+
+    if not lumen_config:
+        raise HTTPException(status_code=404, detail="No configuration loaded")
+
+    try:
+        import yaml
+
+        # Convert Pydantic model to dict and then to YAML
+        config_dict = lumen_config.model_dump(mode="json")
+        yaml_str = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
+
+        return {
+            "loaded": True,
+            "yaml": yaml_str,
+            "cache_dir": lumen_config.metadata.cache_dir,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to serialize config to YAML: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to serialize config: {str(e)}"
+        )

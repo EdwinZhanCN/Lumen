@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from pathlib import Path
@@ -20,16 +21,139 @@ from lumen_app.utils.logger import get_logger
 from lumen_app.utils.preset_registry import PresetRegistry
 from lumen_app.web.core.state import app_state
 from lumen_app.web.models.install import (
+    CheckInstallationPathResponse,
     InstallLogsResponse,
     InstallSetupRequest,
     InstallStatusResponse,
     InstallStep,
     InstallTaskListResponse,
     InstallTaskResponse,
+    ServiceStatus,
 )
 
 logger = get_logger("lumen.web.api.install")
 router = APIRouter()
+
+
+def _check_installation_components(cache_dir: Path) -> dict[str, bool]:
+    """Check which installation components exist at the given path.
+
+    Returns a dict with keys: micromamba, environment, config, drivers.
+    """
+    from lumen_app.utils.installation import MicromambaInstaller, MicromambaStatus
+
+    components = {
+        "micromamba": False,
+        "environment": False,
+        "config": False,
+        "drivers": False,
+    }
+
+    # Check micromamba
+    micromamba_installer = MicromambaInstaller(cache_dir)
+    micromamba_result = micromamba_installer.check()
+    components["micromamba"] = micromamba_result.status == MicromambaStatus.INSTALLED
+
+    # Check environment exists
+    # Micromamba installs to cache_dir/micromamba/, so envs are at cache_dir/micromamba/envs/
+    envs_dir = cache_dir / "micromamba" / "envs"
+    if envs_dir.exists():
+        # Look for any conda environment directories
+        components["environment"] = (
+            any(
+                (envs_dir / d).is_dir()
+                for d in os.listdir(envs_dir)
+                if (envs_dir / d).is_dir()
+            )
+            if os.path.exists(envs_dir)
+            else False
+        )
+
+    # Check config file
+    config_path = cache_dir / "lumen-config.yaml"
+    components["config"] = config_path.exists()
+
+    # Check drivers (placeholder - in a full implementation, this would check
+    # if required drivers are installed for the selected preset)
+    # For now, assume drivers are OK if micromamba and environment exist
+    components["drivers"] = components["micromamba"] and components["environment"]
+
+    return components
+
+
+@router.get("/check-path", response_model=CheckInstallationPathResponse)
+async def check_installation_path(path: str) -> CheckInstallationPathResponse:
+    """Check if an existing installation exists at the given path.
+
+    Returns detailed information about what components are installed,
+    whether the installation is complete, and the recommended action.
+    """
+    import os
+
+    if not path or not path.strip():
+        return CheckInstallationPathResponse(
+            has_existing_service=False,
+            ready_to_start=False,
+            recommended_action="configure_new",
+            message="路径为空",
+        )
+
+    try:
+        # Expand and resolve path
+        cache_dir = Path(path).expanduser().resolve()
+
+        # Check if path is valid
+        if not str(cache_dir).startswith(("/", "~")) and os.name != "nt":
+            # On non-Windows, paths must be absolute
+            if not cache_dir.is_absolute():
+                return CheckInstallationPathResponse(
+                    has_existing_service=False,
+                    ready_to_start=False,
+                    recommended_action="configure_new",
+                    message="请使用绝对路径",
+                )
+
+        # Check components
+        components = _check_installation_components(cache_dir)
+
+        # Determine if there's an existing service
+        has_existing_service = components["micromamba"] and components["environment"]
+
+        # Determine if it's ready to start
+        # For MVP: need micromamba + environment + config
+        ready_to_start = (
+            components["micromamba"]
+            and components["environment"]
+            and components["config"]
+        )
+
+        # Determine recommended action
+        if ready_to_start:
+            recommended_action = "start_existing"
+            message = "检测到完整现有安装，可以直接启动服务"
+        elif has_existing_service:
+            recommended_action = "configure_new"
+            message = "检测到部分安装，建议重新配置"
+        else:
+            recommended_action = "configure_new"
+            message = "未检测到现有安装，将进行全新配置"
+
+        return CheckInstallationPathResponse(
+            has_existing_service=has_existing_service,
+            service_status=ServiceStatus(**components),
+            ready_to_start=ready_to_start,
+            recommended_action=recommended_action,
+            message=message,
+        )
+
+    except Exception as e:
+        logger.error(f"Error checking installation path: {e}", exc_info=True)
+        return CheckInstallationPathResponse(
+            has_existing_service=False,
+            ready_to_start=False,
+            recommended_action="configure_new",
+            message=f"检查路径时出错: {str(e)}",
+        )
 
 
 @router.get("/status", response_model=InstallStatusResponse)

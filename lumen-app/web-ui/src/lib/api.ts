@@ -69,16 +69,57 @@ export async function generateConfig(
   });
 }
 
-export type GetCurrentConfigResponse =
-  paths["/api/v1/config/current"]["get"]["responses"]["200"]["content"]["application/json"];
+// Current config response - matches actual backend response structure
+export type CurrentConfigResponse =
+  | {
+      loaded: false;
+      message: string;
+    }
+  | {
+      loaded: true;
+      cache_dir: string;
+      region: string;
+      port: number;
+      service_name: string;
+      device: {
+        runtime: string;
+        batch_size: number;
+        precision: string;
+        rknn_device: string | null;
+        onnx_providers: string[];
+      };
+    };
 
-export async function getCurrentConfig(): Promise<GetCurrentConfigResponse> {
-  return fetchApi<GetCurrentConfigResponse>(
-    buildUrl("/api/v1/config/current"),
+export async function getCurrentConfig(): Promise<CurrentConfigResponse> {
+  return fetchApi<CurrentConfigResponse>(buildUrl("/api/v1/config/current"), {
+    method: "GET",
+  });
+}
+
+export async function loadConfig(configPath: string): Promise<{
+  loaded: boolean;
+  config_path?: string;
+  cache_dir?: string;
+  region?: string;
+  port?: number;
+  service_name?: string;
+}> {
+  return fetchApi(
+    buildUrl("/api/v1/config/load", { config_path: configPath }),
     {
-      method: "GET",
+      method: "POST",
     },
   );
+}
+
+export async function getConfigYaml(): Promise<{
+  loaded: boolean;
+  yaml?: string;
+  cache_dir?: string;
+}> {
+  return fetchApi(buildUrl("/api/v1/config/yaml"), {
+    method: "GET",
+  });
 }
 
 export async function validateConfig(
@@ -106,15 +147,6 @@ export async function validatePath(
     {
       method: "POST",
       body: JSON.stringify(data),
-    },
-  );
-}
-
-export async function loadConfig(configPath: string): Promise<unknown> {
-  return fetchApi<unknown>(
-    buildUrl("/api/v1/config/load", { config_path: configPath }),
-    {
-      method: "POST",
     },
   );
 }
@@ -170,10 +202,37 @@ export type InstallTaskListResponse =
 export type InstallLogsResponse = components["schemas"]["InstallLogsResponse"];
 export type InstallStep = components["schemas"]["InstallStep"];
 
+// New types for check-path endpoint
+export type ServiceStatus = {
+  micromamba: boolean;
+  environment: boolean;
+  config: boolean;
+  drivers: boolean;
+};
+
+export type CheckInstallationPathResponse = {
+  has_existing_service: boolean;
+  service_status: ServiceStatus;
+  ready_to_start: boolean;
+  recommended_action: "start_existing" | "configure_new" | "repair";
+  message: string;
+};
+
 export async function getInstallStatus(): Promise<InstallStatusResponse> {
   return fetchApi<InstallStatusResponse>(buildUrl("/api/v1/install/status"), {
     method: "GET",
   });
+}
+
+export async function checkInstallationPath(
+  path: string,
+): Promise<CheckInstallationPathResponse> {
+  return fetchApi<CheckInstallationPathResponse>(
+    buildUrl("/api/v1/install/check-path", { path }),
+    {
+      method: "GET",
+    },
+  );
 }
 
 export async function startInstallation(
