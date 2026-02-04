@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { WIZARD_STEPS, type WizardData } from "./wizardConfig";
 import { WizardContext } from "./wizardContext";
 
@@ -22,6 +22,7 @@ const initialWizardData: WizardData = {
 
 export function WizardProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [wizardData, setWizardData] = useState<WizardData>(initialWizardData);
 
   // Compute currentStep from current route
@@ -36,11 +37,27 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     setWizardData((prev) => ({ ...prev, ...data }));
   }, []);
 
-  // These functions are kept for API compatibility
-  // Actual step changes are handled by navigation in WizardLayout
-  const goToStep = () => {};
-  const nextStep = () => {};
-  const prevStep = () => {};
+  // Navigation functions using React Router
+  const goToStep = useCallback(
+    (step: number) => {
+      if (step >= 0 && step < WIZARD_STEPS.length) {
+        navigate(WIZARD_STEPS[step].path);
+      }
+    },
+    [navigate],
+  );
+
+  const nextStep = useCallback(() => {
+    if (currentStep < WIZARD_STEPS.length - 1) {
+      navigate(WIZARD_STEPS[currentStep + 1].path);
+    }
+  }, [currentStep, navigate]);
+
+  const prevStep = useCallback(() => {
+    if (currentStep > 0) {
+      navigate(WIZARD_STEPS[currentStep - 1].path);
+    }
+  }, [currentStep, navigate]);
 
   const canGoNext = useCallback((): boolean => {
     switch (currentStep) {

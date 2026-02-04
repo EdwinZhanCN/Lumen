@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from lumen_resources.lumen_config import LumenConfig
+
 from lumen_app.core.config import Config, DeviceConfig
 from lumen_app.utils.env_checker import EnvironmentReport
 from lumen_app.utils.logger import get_logger
@@ -50,6 +52,7 @@ class AppState:
         self._initialized = False
         self.current_config: Config | None = None
         self.device_config: DeviceConfig | None = None
+        self.lumen_config: LumenConfig | None = None
         self.environment_report: EnvironmentReport | None = None
         self.server_status = ServerStatus()
         self.app_service: AppService | None = None
@@ -119,6 +122,15 @@ class AppState:
     def get_config(self) -> tuple[Config | None, DeviceConfig | None]:
         """Get current configuration."""
         return self.current_config, self.device_config
+
+    def set_lumen_config(self, config: LumenConfig):
+        """Set LumenConfig directly."""
+        self.lumen_config = config
+        logger.info(f"LumenConfig loaded: {config.metadata.cache_dir}")
+
+    def get_lumen_config(self) -> LumenConfig | None:
+        """Get current LumenConfig."""
+        return self.lumen_config
 
     # Task management
     async def create_task(self, task_type: str) -> InstallationTask:

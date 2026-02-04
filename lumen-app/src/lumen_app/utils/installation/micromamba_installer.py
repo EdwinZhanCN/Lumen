@@ -276,7 +276,7 @@ class MicromambaInstaller:
             return install_dir / "bin" / "micromamba"
 
     def _install_windows(self, install_dir: Path, dry_run: bool) -> tuple[bool, str]:
-        """Install micromamba on Windows.
+        """Install micromamba on Windows using direct binary download.
 
         Args:
             install_dir: Installation directory
@@ -287,30 +287,75 @@ class MicromambaInstaller:
         """
         logger.debug("[MicromambaInstaller] Installing on Windows")
 
-        install_script = install_dir / "install.ps1"
-        cmd = [
-            "powershell",
-            "-Command",
-            f"Invoke-WebRequest -Uri https://micro.mamba.pm/install.ps1 -OutFile {install_script}; "
-            f"& {install_script} -prefix {install_dir} -batch",
-        ]
+        # Get executable path
+        exe_path = self._get_executable_path(install_dir)
+        bin_dir = exe_path.parent
+        bin_dir.mkdir(parents=True, exist_ok=True)
 
-        if dry_run:
-            logger.info(f"[MicromambaInstaller] Would run: {' '.join(cmd)}")
-            return True, f"Would run: {' '.join(cmd)}"
+        # Build download URL (Windows is always win-64)
+        base_url = "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-win-64"
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=400)
+        # Get URLs with mirror fallback
+        download_urls = self.mirror_selector.get_micromamba_urls(base_url, self.region)
 
-            if result.returncode == 0:
-                return True, f"Installed to {self._get_executable_path(install_dir)}"
-            else:
-                return False, f"Installation failed: {result.stderr}"
+        logger.debug(f"[MicromambaInstaller] Platform: win-64, URLs: {download_urls}")
 
-        except subprocess.TimeoutExpired:
-            return False, "Installation timed out"
-        except Exception as e:
-            return False, f"Installation error: {str(e)}"
+        # Try each URL
+        for download_url in download_urls:
+            logger.debug(f"[MicromambaInstaller] Trying URL: {download_url}")
+
+            # Method 1: Try using curl.exe (available on Windows 10+)
+            download_cmd = ["curl", "-fsSL", download_url, "-o", str(exe_path)]
+
+            if dry_run:
+                logger.info(
+                    f"[MicromambaInstaller] Would run: {' '.join(download_cmd)}"
+                )
+                return True, f"Would download from {download_url}"
+
+            try:
+                # Try curl first
+                logger.info("[MicromambaInstaller] Downloading micromamba with curl...")
+                download_result = subprocess.run(
+                    download_cmd, capture_output=True, text=True, timeout=120
+                )
+
+                if download_result.returncode != 0:
+                    # Fallback to PowerShell
+                    logger.debug(
+                        "[MicromambaInstaller] curl failed, trying PowerShell..."
+                    )
+                    ps_cmd = [
+                        "powershell",
+                        "-Command",
+                        f"Invoke-WebRequest -Uri '{download_url}' -OutFile '{exe_path}' -UseBasicParsing",
+                    ]
+                    download_result = subprocess.run(
+                        ps_cmd, capture_output=True, text=True, timeout=120
+                    )
+
+                    if download_result.returncode != 0:
+                        logger.warning(
+                            f"[MicromambaInstaller] PowerShell download failed: {download_result.stderr}"
+                        )
+                        continue
+
+                # Configure conda-forge channels
+                self._configure_channels(exe_path)
+
+                logger.info(f"[MicromambaInstaller] Successfully installed: {exe_path}")
+                return True, f"Installed to {exe_path}"
+
+            except subprocess.TimeoutExpired:
+                logger.warning("[MicromambaInstaller] Download timed out")
+                continue
+            except Exception as e:
+                logger.warning(
+                    f"[MicromambaInstaller] Install error: {type(e).__name__}: {e}"
+                )
+                continue
+
+        return False, "Failed to download from all sources"
 
     def _install_unix(
         self, install_dir: Path, exe_path: Path, dry_run: bool

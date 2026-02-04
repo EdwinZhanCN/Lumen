@@ -7,6 +7,27 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ServiceStatus(BaseModel):
+    """Service component status."""
+
+    micromamba: bool = False
+    environment: bool = False
+    config: bool = False
+    drivers: bool = False
+
+
+class CheckInstallationPathResponse(BaseModel):
+    """Response for checking installation path."""
+
+    has_existing_service: bool = False
+    service_status: ServiceStatus = Field(default_factory=ServiceStatus)
+    ready_to_start: bool = False
+    recommended_action: Literal["start_existing", "configure_new", "repair"] = (
+        "configure_new"
+    )
+    message: str = ""
+
+
 class InstallSetupRequest(BaseModel):
     """Request to start a complete installation setup.
 
