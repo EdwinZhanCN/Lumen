@@ -240,7 +240,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
         # Determine port: CLI override > config file > default
         preferred_port = port_override or config.server.port or 50051
-        requested_addr = f"[::]:{preferred_port}"
+        requested_addr = f"0.0.0.0::{preferred_port}"
         try:
             bound_port = server.add_insecure_port(requested_addr)
         except RuntimeError as exc:
@@ -251,7 +251,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
         if bound_port == 0:
             try:
-                bound_port = server.add_insecure_port("[::]:0")
+                bound_port = server.add_insecure_port("0.0.0.0:0")
             except RuntimeError as exc:
                 logger.error(f"Unable to bind gRPC server to any port: {exc}")
                 sys.exit(1)
@@ -261,7 +261,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
             sys.exit(1)
 
         port = bound_port
-        listen_addr = f"[::]:{port}"
+        listen_addr = f"0.0.0.0:{port}"
         server.start()
 
         # Log server startup info
