@@ -11,7 +11,7 @@ from typing import Callable
 
 from lumen_resources.lumen_config import LumenConfig, Region
 
-from ..core.config import DeviceConfig
+from ..services.config import DeviceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +232,10 @@ class LumenPackageResolver:
                     package_name = f"lumen_{root}"
                     packages.append(package_name)
 
-        logger.info(f"[LumenPackageResolver] Resolved packages: {packages}")
-        return list(set(packages))  # Remove duplicates
+        packages.append("lumen")
+        unique_packages = sorted(set(packages))
+        logger.info(f"[LumenPackageResolver] Resolved packages: {unique_packages}")
+        return unique_packages
 
     @staticmethod
     def build_pip_install_args(

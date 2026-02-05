@@ -11,7 +11,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Callable
 
-from lumen_app.core.config import DeviceConfig
+from lumen_app.services.config import DeviceConfig
 from lumen_app.utils.logger import get_logger
 
 logger = get_logger("lumen.preset_registry")

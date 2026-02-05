@@ -35,7 +35,7 @@ jobs:
                   cache-dependency-path: lumen-app/web-ui/pnpm-lock.yaml
 
             - name: Install Dependencies
-              run: uv sync
+              run: uv sync extra --all
 
             - name: Build Web UI
               run: |
@@ -47,6 +47,7 @@ jobs:
               run: |
                   echo "🔍 Verifying imports..."
                   uv run python -c "
+                  import lumen
                   import lumen_resources
                   import lumen_ocr
                   import lumen_face

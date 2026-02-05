@@ -14,7 +14,7 @@ from pathlib import Path
 
 from lumen_resources.lumen_config import Runtime
 
-from lumen_app.core.config import DeviceConfig
+from lumen_app.services.config import DeviceConfig
 from lumen_app.utils.logger import get_logger
 from lumen_app.utils.preset_registry import PresetRegistry
 

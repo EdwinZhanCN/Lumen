@@ -79,7 +79,7 @@ jobs:
 
             - name: Build Service Packages
               run: |
-                  for pkg in lumen-clip lumen-face lumen-ocr lumen-vlm; do
+                  for pkg in lumen lumen-clip lumen-face lumen-ocr lumen-vlm; do
                     echo "📦 Building $pkg..."
                     uv build --package $pkg
                   done
@@ -99,6 +99,7 @@ jobs:
                       - `lumen-app` (includes Web UI)
 
                       **Attached Binaries:**
+                      - `lumen`
                       - `lumen-clip`
                       - `lumen-face`
                       - `lumen-ocr`
