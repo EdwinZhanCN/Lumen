@@ -860,14 +860,21 @@ wheels = [
 
 [[package]]
 name = "lumen"
-version = "0.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "colorlog" },
+    { name = "grpcio" },
+    { name = "lumen-resources" },
+    { name = "protobuf" },
+    { name = "zeroconf" },
+]
+
+[package.optional-dependencies]
+all = [
     { name = "lumen-app" },
     { name = "lumen-clip" },
     { name = "lumen-face" },
     { name = "lumen-ocr" },
-    { name = "lumen-resources" },
     { name = "lumen-vlm" },
 ]
 
@@ -879,13 +886,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lumen-app", editable = "lumen-app" },
-    { name = "lumen-clip", editable = "lumen-clip" },
-    { name = "lumen-face", editable = "lumen-face" },
-    { name = "lumen-ocr", editable = "lumen-ocr" },
-    { name = "lumen-resources", editable = "lumen-resources" },
-    { name = "lumen-vlm", editable = "lumen-vlm" },
+    { name = "colorlog", specifier = ">=6.10.1" },
+    { name = "grpcio", specifier = ">=1.68.0" },
+    { name = "lumen-app", marker = "extra == 'all'", editable = "lumen-app" },
+    { name = "lumen-clip", marker = "extra == 'all'", editable = "packages/lumen-clip" },
+    { name = "lumen-face", marker = "extra == 'all'", editable = "packages/lumen-face" },
+    { name = "lumen-ocr", marker = "extra == 'all'", editable = "packages/lumen-ocr" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
+    { name = "lumen-vlm", marker = "extra == 'all'", editable = "packages/lumen-vlm" },
+    { name = "protobuf", specifier = ">=6.30.0" },
+    { name = "zeroconf", specifier = ">=0.148.0" },
 ]
+provides-extras = ["all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -927,7 +939,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "grpcio", specifier = ">=1.68.0" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "lumen-resources", editable = "lumen-resources" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
     { name = "protobuf", specifier = ">=6.30.0" },
     { name = "psutil", specifier = ">=6.1.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
@@ -947,7 +959,7 @@ dev = [
 
 [[package]]
 name = "lumen-clip"
-source = { editable = "lumen-clip" }
+source = { editable = "packages/lumen-clip" }
 dependencies = [
     { name = "colorlog" },
     { name = "grpcio" },
@@ -995,7 +1007,7 @@ dev = [
 requires-dist = [
     { name = "colorlog", specifier = ">=6.10.1" },
     { name = "grpcio", specifier = ">=1.76.0" },
-    { name = "lumen-resources", editable = "lumen-resources" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnx", specifier = ">=1.20.0" },
     { name = "onnxruntime", marker = "extra == 'apple'", specifier = ">=1.16.0" },
@@ -1024,7 +1036,7 @@ dev = [
 
 [[package]]
 name = "lumen-face"
-source = { editable = "lumen-face" }
+source = { editable = "packages/lumen-face" }
 dependencies = [
     { name = "colorlog" },
     { name = "grpcio" },
@@ -1064,7 +1076,7 @@ requires-dist = [
     { name = "colorlog", specifier = ">=6.10.1" },
     { name = "grpcio" },
     { name = "grpcio-tools" },
-    { name = "lumen-resources", editable = "lumen-resources" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", marker = "extra == 'apple'", specifier = ">=1.16.0" },
     { name = "onnxruntime", marker = "extra == 'cpu'", specifier = ">=1.16.0" },
@@ -1083,7 +1095,7 @@ dev = [{ name = "ruff", specifier = ">=0.14.2" }]
 
 [[package]]
 name = "lumen-ocr"
-source = { editable = "lumen-ocr" }
+source = { editable = "packages/lumen-ocr" }
 dependencies = [
     { name = "colorlog" },
     { name = "grpcio" },
@@ -1119,7 +1131,7 @@ dev = [
 requires-dist = [
     { name = "colorlog", specifier = ">=6.7.0" },
     { name = "grpcio", specifier = ">=1.59.0" },
-    { name = "lumen-resources", editable = "lumen-resources" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", marker = "extra == 'apple'", specifier = ">=1.16.0" },
     { name = "onnxruntime", marker = "extra == 'cpu'", specifier = ">=1.16.0" },
@@ -1138,7 +1150,7 @@ dev = [{ name = "ruff", specifier = ">=0.14.2" }]
 
 [[package]]
 name = "lumen-resources"
-source = { editable = "lumen-resources" }
+source = { editable = "packages/lumen-resources" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "jsonschema" },
@@ -1185,7 +1197,7 @@ dev = [{ name = "ruff", specifier = ">=0.14.2" }]
 
 [[package]]
 name = "lumen-vlm"
-source = { editable = "lumen-vlm" }
+source = { editable = "packages/lumen-vlm" }
 dependencies = [
     { name = "colorlog" },
     { name = "grpcio" },
@@ -1222,7 +1234,7 @@ requires-dist = [
     { name = "colorlog", specifier = ">=6.7.0" },
     { name = "grpcio", specifier = ">=1.59.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "lumen-resources", editable = "lumen-resources" },
+    { name = "lumen-resources", editable = "packages/lumen-resources" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", marker = "extra == 'apple'", specifier = ">=1.16.0" },
     { name = "onnxruntime", marker = "extra == 'cpu'", specifier = ">=1.16.0" },

@@ -83,17 +83,13 @@ export function Server() {
   const loadedConfig = currentConfig?.loaded ? currentConfig : null;
   const installPath =
     installPathFromUrl || loadedConfig?.cache_dir || "~/.lumen";
-  // Config path: prefer URL param path, fallback to API config
-  const configPath = installPathFromUrl
-    ? `${installPathFromUrl}/lumen-config.yaml`
-    : loadedConfig?.cache_dir
-      ? `${loadedConfig.cache_dir}/lumen-config.yaml`
-      : undefined;
+  const configPath = loadedConfig?.config_path || undefined;
+  const envName = loadedConfig?.env_name || "lumen_env";
   const port = loadedConfig?.port || 50051;
 
   // Check if we have a valid configuration to start the server
-  // Valid if we have either URL path param or loaded config from API
-  const hasValidConfig = !!(installPathFromUrl || loadedConfig);
+  // Valid if we have a resolved config path from the backend
+  const hasValidConfig = !!configPath;
   const isConfigLoaded = !configLoading && loadedConfig !== null;
 
   // Query server status
@@ -160,7 +156,7 @@ export function Server() {
       config_path: configPath,
       port: port,
       host: "0.0.0.0",
-      environment: "lumen_env",
+      environment: envName,
     });
   };
 
@@ -176,7 +172,7 @@ export function Server() {
       config_path: configPath,
       port: port,
       host: "0.0.0.0",
-      environment: "lumen_env",
+      environment: envName,
       force: false,
       timeout: 30,
     });

@@ -12,7 +12,6 @@ dependencies = [
   "uvicorn[standard]>=0.32.0",
   "websockets>=14.0",
   "pydantic>=2.10.0",
-  "lumen-resources",
   "pyyaml>=6.0.3",
   "aiofiles>=24.1.0",
   "psutil>=6.1.0",
@@ -20,6 +19,7 @@ dependencies = [
   "grpcio>=1.68.0",
   "protobuf>=6.30.0",
   "zeroconf>=0.148.0",
+  "lumen-resources",
 ]
 
 [project.urls]
@@ -27,8 +27,7 @@ Homepage = "https://github.com/EdwinZhanCN/Lumen"
 Issues = "https://github.com/EdwinZhanCN/Lumen/issues"
 
 [project.scripts]
-lumen = "lumen_app.core.server:main"
-lumen-webui = "lumen_app.web.main:start_webui"
+lumen-webui = "lumen_app.main:start_webui"
 
 [build-system]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
@@ -45,7 +44,7 @@ where = ["src"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-"lumen_app.web" = ["static/**"]
+"lumen_app" = ["static/**"]
 "lumen_app.utils" = ["mamba/*.yaml"]
 
 [dependency-groups]

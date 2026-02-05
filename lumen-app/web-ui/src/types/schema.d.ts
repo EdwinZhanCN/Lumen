@@ -95,9 +95,29 @@ export interface paths {
         put?: never;
         /**
          * Load Config
-         * @description Load a configuration from file.
+         * @description Load and validate a configuration from file, then set it in app_state.
          */
         post: operations["load_config_api_v1_config_load_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Config Yaml
+         * @description Get the current configuration as raw YAML string.
+         */
+        get: operations["get_config_yaml_api_v1_config_yaml_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -178,6 +198,29 @@ export interface paths {
          * @description Detect available hardware and recommended preset.
          */
         post: operations["detect_hardware_api_v1_hardware_detect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/install/check-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check Installation Path
+         * @description Check if an existing installation exists at the given path.
+         *
+         *     Returns detailed information about what components are installed,
+         *     whether the installation is complete, and the recommended action.
+         */
+        get: operations["check_installation_path_api_v1_install_check_path_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -496,6 +539,34 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * CheckInstallationPathResponse
+         * @description Response for checking installation path.
+         */
+        CheckInstallationPathResponse: {
+            /**
+             * Has Existing Service
+             * @default false
+             */
+            has_existing_service: boolean;
+            service_status?: components["schemas"]["ServiceStatus"];
+            /**
+             * Ready To Start
+             * @default false
+             */
+            ready_to_start: boolean;
+            /**
+             * Recommended Action
+             * @default configure_new
+             * @enum {string}
+             */
+            recommended_action: "start_existing" | "configure_new" | "repair";
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+        };
         /**
          * ConfigRequest
          * @description Request to generate configuration.
@@ -991,6 +1062,32 @@ export interface components {
              */
             timeout: number;
         };
+        /**
+         * ServiceStatus
+         * @description Service component status.
+         */
+        ServiceStatus: {
+            /**
+             * Micromamba
+             * @default false
+             */
+            micromamba: boolean;
+            /**
+             * Environment
+             * @default false
+             */
+            environment: boolean;
+            /**
+             * Config
+             * @default false
+             */
+            config: boolean;
+            /**
+             * Drivers
+             * @default false
+             */
+            drivers: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1163,6 +1260,26 @@ export interface operations {
             };
         };
     };
+    get_config_yaml_api_v1_config_yaml_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_hardware_info_api_v1_hardware_info_get: {
         parameters: {
             query?: never;
@@ -1252,6 +1369,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    check_installation_path_api_v1_install_check_path_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckInstallationPathResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

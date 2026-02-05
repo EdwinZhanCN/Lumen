@@ -1,19 +1,31 @@
 [project]
 name = "lumen"
-version = "0.0.0"
-description = "Monorepo root for Lumen AI services"
+dynamic = ["version"]
+description = "Router for all Lumen package services"
 requires-python = ">=3.10"
 dependencies = [
   "lumen-resources",
-  "lumen-ocr",
-  "lumen-face",
-  "lumen-clip",
-  "lumen-vlm",
-  "lumen-app",
+  "grpcio>=1.68.0",
+  "protobuf>=6.30.0",
+  "colorlog>=6.10.1",
+  "zeroconf>=0.148.0",
 ]
 
+[project.optional-dependencies]
+all = ["lumen-ocr", "lumen-face", "lumen-clip", "lumen-vlm", "lumen-app"]
+
+[project.scripts]
+lumen = "lumen.server:main"
+
 [tool.uv.workspace]
-members = ["lumen-resources", "lumen-ocr", "lumen-face", "lumen-clip", "lumen-vlm", "lumen-app"]
+members = [
+  "packages/lumen-resources",
+  "packages/lumen-ocr",
+  "packages/lumen-face",
+  "packages/lumen-clip",
+  "packages/lumen-vlm",
+  "lumen-app",
+]
 
 [tool.uv.sources]
 lumen-resources = { workspace = true }
@@ -25,3 +37,17 @@ lumen-app = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8.0.0", "pytest-mock>=3.14.0"]
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+search_parent_directories = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+include-package-data = true
