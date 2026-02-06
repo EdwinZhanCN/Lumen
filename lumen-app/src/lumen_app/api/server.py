@@ -87,6 +87,11 @@ async def start_server(request: ServerStartRequest):
             detail="Server is already running. Stop it first or use restart.",
         )
 
+    if request.config_path is None:
+        raise HTTPException(
+            status_code=400, detail="config_path is required to start the server."
+        )
+
     try:
         # Start the server
         success = await manager.start(

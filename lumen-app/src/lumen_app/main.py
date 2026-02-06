@@ -2,12 +2,14 @@
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware import Middleware
 
 from lumen_app.utils.logger import get_logger
 
@@ -47,15 +49,15 @@ def create_app() -> FastAPI:
         description="Control plane API for managing Lumen AI services",
         version="0.1.0",
         lifespan=lifespan,
-    )
-
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # Configure for production
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        middleware=[
+            Middleware(
+                cast(Any, CORSMiddleware),
+                allow_origins=["*"],  # Configure for production
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        ],
     )
 
     # Include API routers

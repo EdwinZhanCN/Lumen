@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -28,7 +28,7 @@ async def log_websocket(websocket: WebSocket):
         await websocket.send_json(
             {
                 "type": "connected",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "message": "Connected to log stream",
             }
         )
@@ -43,7 +43,7 @@ async def log_websocket(websocket: WebSocket):
                     {
                         "type": "log",
                         "timestamp": log_entry.get(
-                            "timestamp", datetime.utcnow().isoformat()
+                            "timestamp", datetime.now(timezone.utc).isoformat()
                         ),
                         "level": log_entry.get("level", "INFO"),
                         "message": log_entry.get("message", ""),
@@ -56,7 +56,7 @@ async def log_websocket(websocket: WebSocket):
                 await websocket.send_json(
                     {
                         "type": "heartbeat",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                 )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException
 from lumen_resources.exceptions import ConfigError
@@ -55,7 +55,10 @@ async def generate_config(request: ConfigRequest):
         elif request.config_type == "light_weight":
             # Ensure clip_model is one of the valid types for light_weight
             light_clip_model: Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"] = (
-                request.clip_model  # type: ignore
+                cast(
+                    Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"],
+                    request.clip_model,
+                )
                 if request.clip_model in ["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"]
                 else "MobileCLIP2-S2"
             )
@@ -63,7 +66,10 @@ async def generate_config(request: ConfigRequest):
         elif request.config_type == "basic":
             # Ensure clip_model is one of the valid types for basic
             basic_clip_model: Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"] = (
-                request.clip_model  # type: ignore
+                cast(
+                    Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"],
+                    request.clip_model,
+                )
                 if request.clip_model in ["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"]
                 else "MobileCLIP2-S4"
             )

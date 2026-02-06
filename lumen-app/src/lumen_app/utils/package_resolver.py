@@ -132,7 +132,7 @@ class GitHubPackageResolver:
                 # Find matching wheel
                 for asset in assets:
                     name = asset.get("name", "")
-                    if name.startswith(package_name) and name.endswith(
+                    if name.startswith(f"{package_name}-") and name.endswith(
                         "-py3-none-any.whl"
                     ):
                         download_url = asset.get("browser_download_url")
@@ -225,11 +225,21 @@ class LumenPackageResolver:
         # Get deployment services
         deployment = lumen_config.deployment
 
+        logger.info(
+            "[LumenPackageResolver] deployment.services=%s",
+            getattr(deployment, "services", None),
+        )
+
         if hasattr(deployment, "services") and deployment.services:
             for service in deployment.services:
                 if hasattr(service, "root"):
                     root = service.root
                     package_name = f"lumen_{root}"
+                    logger.info(
+                        "[LumenPackageResolver] Resolved service root=%s -> package=%s",
+                        root,
+                        package_name,
+                    )
                     packages.append(package_name)
 
         packages.append("lumen")

@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from lumen_app.services.config import DeviceConfig
 from lumen_resources.lumen_config import Region
 
-from ...core.config import DeviceConfig
 from ..package_resolver import GitHubPackageResolver, LumenPackageResolver
 from .env_manager import PythonEnvManager
 
