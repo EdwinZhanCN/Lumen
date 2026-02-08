@@ -46,11 +46,15 @@ jobs:
 
             - name: Verify Version matches Tag
               run: |
-                  cd lumen-resources
-                  uv run --with setuptools_scm python -m setuptools_scm
-                  cd ..
-
                   VERSION=${GITHUB_REF#refs/tags/v}
+                  cd packages/lumen-resources
+                  SCM_VERSION=$(uv run --with setuptools_scm python -m setuptools_scm)
+                  cd ..
+                  if [ "$SCM_VERSION" != "$VERSION" ]; then
+                    echo "Version mismatch: tag=$VERSION scm=$SCM_VERSION"
+                    exit 1
+                  fi
+
                   echo "VERSION=$VERSION" >> $GITHUB_ENV
                   echo "SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION" >> $GITHUB_ENV
                   echo "SETUPTOOLS_SCM_PRETEND_NAMED=true" >> $GITHUB_ENV
