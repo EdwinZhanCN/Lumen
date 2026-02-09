@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, "../src/lumen_app/web/static"),
+    outDir: path.resolve(__dirname, "../src/lumen_app/static"),
     emptyOutDir: true,
   },
   server: {

@@ -37,8 +37,8 @@ export type WizardStep = {
 };
 
 export const WIZARD_STEPS: WizardStep[] = [
-  { id: "welcome", name: "欢迎", path: "/welcome" },
-  { id: "hardware", name: "硬件配置", path: "/hardware" },
-  { id: "config", name: "服务配置", path: "/config" },
-  { id: "install", name: "安装下载", path: "/install" },
+  { id: "welcome", name: "基础配置", path: "/setup/welcome" },
+  { id: "hardware", name: "硬件配置", path: "/setup/hardware" },
+  { id: "config", name: "服务配置", path: "/setup/config" },
+  { id: "install", name: "安装下载", path: "/setup/install" },
 ];

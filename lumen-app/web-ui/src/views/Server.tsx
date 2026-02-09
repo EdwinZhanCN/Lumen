@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Play,
   Square,
@@ -7,7 +7,6 @@ import {
   RefreshCw,
   AlertCircle,
   Loader2,
-  ArrowLeft,
   Settings,
   FileText,
   Copy,
@@ -25,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLumenSession } from "@/hooks/useLumenSession";
 import {
   getServerStatus,
   startServer,
@@ -39,22 +39,17 @@ import {
 } from "@/lib/api";
 
 export function Server() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { currentPath } = useLumenSession();
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [showYamlDialog, setShowYamlDialog] = useState(false);
   const [yamlContent, setYamlContent] = useState("");
   const [copied, setCopied] = useState(false);
 
-  // Get install path from URL params (passed from Welcome page)
-  const installPathFromUrl = searchParams.get("path");
-
-  // Load config mutation (call once when path is provided)
   const loadConfigMutation = useMutation({
     mutationFn: (configPath: string) => loadConfig(configPath),
   });
 
-  // Query current config from app_state
   const {
     data: currentConfig,
     isLoading: configLoading,
@@ -66,33 +61,29 @@ export function Server() {
     enabled: !loadConfigMutation.isPending,
   });
 
-  // Load config when URL has path parameter (only once)
   useEffect(() => {
-    if (installPathFromUrl) {
-      const configPath = `${installPathFromUrl}/lumen-config.yaml`;
-      loadConfigMutation.mutate(configPath, {
-        onSuccess: () => {
-          refetchConfig();
-        },
-      });
+    if (!currentPath) {
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [installPathFromUrl]);
 
-  // Derive config values (prefer URL params, fallback to API config)
+    const configPath = `${currentPath}/lumen-config.yaml`;
+    loadConfigMutation.mutate(configPath, {
+      onSuccess: () => {
+        refetchConfig();
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath]);
+
   const loadedConfig = currentConfig?.loaded ? currentConfig : null;
-  const installPath =
-    installPathFromUrl || loadedConfig?.cache_dir || "~/.lumen";
+  const installPath = currentPath || loadedConfig?.cache_dir || "~/.lumen";
   const configPath = loadedConfig?.config_path || undefined;
   const envName = loadedConfig?.env_name || "lumen_env";
   const port = loadedConfig?.port || 50051;
 
-  // Check if we have a valid configuration to start the server
-  // Valid if we have a resolved config path from the backend
   const hasValidConfig = !!configPath;
   const isConfigLoaded = !configLoading && loadedConfig !== null;
 
-  // Query server status
   const {
     data: serverStatus,
     refetch: refetchStatus,
@@ -103,7 +94,6 @@ export function Server() {
     refetchInterval: autoRefresh ? 2000 : false,
   });
 
-  // Query server logs
   const { data: serverLogs, refetch: refetchLogs } = useQuery({
     queryKey: ["serverLogs"],
     queryFn: () => getServerLogs({ lines: 100 }),
@@ -111,7 +101,6 @@ export function Server() {
     refetchInterval: autoRefresh && serverStatus?.running ? 2000 : false,
   });
 
-  // Start server mutation
   const {
     mutate: startServerMutation,
     isPending: isStarting,
@@ -125,7 +114,6 @@ export function Server() {
     },
   });
 
-  // Stop server mutation
   const {
     mutate: stopServerMutation,
     isPending: isStopping,
@@ -137,7 +125,6 @@ export function Server() {
     },
   });
 
-  // Restart server mutation
   const {
     mutate: restartServerMutation,
     isPending: isRestarting,
@@ -154,7 +141,7 @@ export function Server() {
   const handleStartServer = () => {
     startServerMutation({
       config_path: configPath,
-      port: port,
+      port,
       host: "0.0.0.0",
       environment: envName,
     });
@@ -170,7 +157,7 @@ export function Server() {
   const handleRestartServer = () => {
     restartServerMutation({
       config_path: configPath,
-      port: port,
+      port,
       host: "0.0.0.0",
       environment: envName,
       force: false,
@@ -196,7 +183,6 @@ export function Server() {
   const isOperating = isStarting || isStopping || isRestarting;
   const operationError = startError || stopError || restartError;
 
-  // Handle view YAML
   const handleViewYaml = async () => {
     try {
       const response = await getConfigYaml();
@@ -209,7 +195,6 @@ export function Server() {
     }
   };
 
-  // Handle copy YAML
   const handleCopyYaml = async () => {
     try {
       await navigator.clipboard.writeText(yamlContent);
@@ -220,370 +205,300 @@ export function Server() {
     }
   };
 
-  // Show setup prompt if no valid config
   const showSetupPrompt = !configLoading && !hasValidConfig;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => navigate("/welcome")}
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <div>
-                <h1 className="text-xl font-semibold flex items-center gap-2">
-                  <ServerIcon className="h-5 w-5" />
-                  Lumen 服务管理
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  管理和监控 Lumen 推理服务器
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleViewYaml}
-                disabled={!hasValidConfig}
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                查看配置
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/welcome")}
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                重新配置
-              </Button>
-            </div>
-          </div>
+    <div className="container mx-auto px-4 py-6">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <ServerIcon className="h-5 w-5" />
+            Lumen 服务管理
+          </h1>
+          <p className="text-sm text-muted-foreground">管理和监控 Lumen 推理服务器</p>
         </div>
-      </header>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleViewYaml}
+            disabled={!hasValidConfig}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            查看配置
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/session")}>
+            <Settings className="mr-2 h-4 w-4" />
+            重新配置
+          </Button>
+        </div>
+      </div>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left Column - Controls and Status */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Setup Required Alert */}
-            {showSetupPrompt && (
-              <Alert className="border-yellow-500 bg-yellow-50">
-                <AlertCircle className="h-4 w-4 text-yellow-600" />
-                <AlertDescription className="text-yellow-800">
-                  <div className="flex items-center justify-between">
-                    <span>
-                      未检测到有效配置，请先完成安装向导或指定正确的安装路径。
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate("/welcome")}
-                      className="ml-4 border-yellow-600 text-yellow-700 hover:bg-yellow-100"
-                    >
-                      前往配置
-                    </Button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <div className="space-y-6 lg:col-span-2">
+          {showSetupPrompt && (
+            <Alert className="border-yellow-500 bg-yellow-50">
+              <AlertCircle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription className="text-yellow-800">
+                <div className="flex items-center justify-between">
+                  <span>未检测到有效配置，请先完成会话入口中的配置流程。</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate("/session")}
+                    className="ml-4 border-yellow-600 text-yellow-700 hover:bg-yellow-100"
+                  >
+                    前往会话入口
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
-            {/* Installation Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">当前配置</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {configLoading ? (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    加载配置中...
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">当前配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {configLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  加载配置中...
+                </div>
+              ) : isConfigLoaded ? (
+                <dl className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <dt className="text-muted-foreground">安装路径</dt>
+                    <dd className="font-mono font-medium">{installPath}</dd>
                   </div>
-                ) : isConfigLoaded ? (
-                  <dl className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <dt className="text-muted-foreground">安装路径</dt>
-                      <dd className="font-mono font-medium">{installPath}</dd>
+                  <div>
+                    <dt className="text-muted-foreground">服务端口</dt>
+                    <dd className="font-mono font-medium">0.0.0.0:{port}</dd>
+                  </div>
+                  {configPath && (
+                    <div className="col-span-2">
+                      <dt className="text-muted-foreground">配置文件</dt>
+                      <dd className="truncate font-mono text-xs">{configPath}</dd>
                     </div>
-                    <div>
-                      <dt className="text-muted-foreground">服务端口</dt>
-                      <dd className="font-mono font-medium">0.0.0.0:{port}</dd>
-                    </div>
-                    {configPath && (
-                      <div className="col-span-2">
-                        <dt className="text-muted-foreground">配置文件</dt>
-                        <dd className="font-mono text-xs truncate">
-                          {configPath}
-                        </dd>
+                  )}
+                </dl>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  暂无配置信息，请从会话入口重新进入配置流程。
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>服务器状态</CardTitle>
+              <CardDescription>
+                {statusLoading ? "正在获取状态..." : "查看服务器实时运行状态"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {statusLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : serverStatus ? (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border bg-muted/50 p-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`h-3 w-3 rounded-full ${
+                          serverStatus.running ? "bg-green-500 animate-pulse" : "bg-red-500"
+                        }`}
+                      />
+                      <div>
+                        <p className="font-medium">{serverStatus.running ? "运行中" : "已停止"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {serverStatus.running
+                            ? `PID: ${serverStatus.pid} • 运行时间: ${Math.floor((serverStatus.uptime_seconds || 0) / 60)} 分钟`
+                            : "服务器未运行"}
+                        </p>
                       </div>
-                    )}
-                  </dl>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    暂无配置信息。请通过安装向导完成配置，或确保已正确指定安装路径。
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Server Status */}
-            <Card>
-              <CardHeader>
-                <CardTitle>服务器状态</CardTitle>
-                <CardDescription>
-                  {statusLoading ? "正在获取状态..." : "查看服务器实时运行状态"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {statusLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {serverStatus.running && getHealthBadge(serverStatus.health)}
+                      <Badge
+                        variant={serverStatus.running ? "default" : "secondary"}
+                        className={serverStatus.running ? "bg-green-500" : ""}
+                      >
+                        {serverStatus.running ? "运行中" : "已停止"}
+                      </Badge>
+                    </div>
                   </div>
-                ) : serverStatus ? (
+
+                  {serverStatus.running && (
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">监听地址</p>
+                        <p className="font-mono font-medium">
+                          {serverStatus.host}:{serverStatus.port}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">服务名称</p>
+                        <p className="font-medium">{serverStatus.service_name}</p>
+                      </div>
+                      {serverStatus.config_path && (
+                        <div className="col-span-2">
+                          <p className="text-muted-foreground">配置文件</p>
+                          <p className="truncate font-mono text-xs">
+                            {serverStatus.config_path}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-muted-foreground">环境</p>
+                        <p className="font-medium">{serverStatus.environment}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {serverStatus.last_error && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{serverStatus.last_error}</AlertDescription>
+                    </Alert>
+                  )}
+                </>
+              ) : (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>无法获取服务器状态</AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>服务器控制</CardTitle>
+              <CardDescription>启动、停止或重启 Lumen 推理服务器</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {operationError && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{operationError.message || "操作失败"}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex gap-3">
+                {!serverStatus?.running ? (
+                  <Button
+                    onClick={handleStartServer}
+                    disabled={isOperating || !hasValidConfig}
+                    className="flex-1"
+                    size="lg"
+                  >
+                    {isStarting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-2 h-4 w-4" />
+                    )}
+                    {isStarting ? "启动中..." : !hasValidConfig ? "需要配置" : "启动服务器"}
+                  </Button>
+                ) : (
                   <>
-                    {/* Status Overview */}
-                    <div className="flex items-center justify-between p-4 rounded-lg border bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`h-3 w-3 rounded-full ${
-                            serverStatus.running
-                              ? "bg-green-500 animate-pulse"
-                              : "bg-red-500"
-                          }`}
-                        />
-                        <div>
-                          <p className="font-medium">
-                            {serverStatus.running ? "运行中" : "已停止"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {serverStatus.running
-                              ? `PID: ${serverStatus.pid} • 运行时间: ${Math.floor((serverStatus.uptime_seconds || 0) / 60)} 分钟`
-                              : "服务器未运行"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {serverStatus.running &&
-                          getHealthBadge(serverStatus.health)}
-                        <Badge
-                          variant={
-                            serverStatus.running ? "default" : "secondary"
-                          }
-                          className={serverStatus.running ? "bg-green-500" : ""}
-                        >
-                          {serverStatus.running ? "运行中" : "已停止"}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    {/* Server Details */}
-                    {serverStatus.running && (
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-muted-foreground">监听地址</p>
-                          <p className="font-mono font-medium">
-                            {serverStatus.host}:{serverStatus.port}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">服务名称</p>
-                          <p className="font-medium">
-                            {serverStatus.service_name}
-                          </p>
-                        </div>
-                        {serverStatus.config_path && (
-                          <div className="col-span-2">
-                            <p className="text-muted-foreground">配置文件</p>
-                            <p className="font-mono text-xs truncate">
-                              {serverStatus.config_path}
-                            </p>
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-muted-foreground">环境</p>
-                          <p className="font-medium">
-                            {serverStatus.environment}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Error Message */}
-                    {serverStatus.last_error && (
-                      <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>
-                          {serverStatus.last_error}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </>
-                ) : (
-                  <Alert>
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>无法获取服务器状态</AlertDescription>
-                  </Alert>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Server Control */}
-            <Card>
-              <CardHeader>
-                <CardTitle>服务器控制</CardTitle>
-                <CardDescription>
-                  启动、停止或重启 Lumen 推理服务器
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Operation Error */}
-                {operationError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      {operationError.message || "操作失败"}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Control Buttons */}
-                <div className="flex gap-3">
-                  {!serverStatus?.running ? (
                     <Button
-                      onClick={handleStartServer}
-                      disabled={isOperating || !hasValidConfig}
+                      onClick={handleStopServer}
+                      disabled={isOperating}
+                      variant="destructive"
                       className="flex-1"
                       size="lg"
                     >
-                      {isStarting ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      {isStopping ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <Play className="h-4 w-4 mr-2" />
+                        <Square className="mr-2 h-4 w-4" />
                       )}
-                      {isStarting
-                        ? "启动中..."
-                        : !hasValidConfig
-                          ? "需要配置"
-                          : "启动服务器"}
+                      {isStopping ? "停止中..." : "停止服务器"}
                     </Button>
-                  ) : (
-                    <>
-                      <Button
-                        onClick={handleStopServer}
-                        disabled={isOperating}
-                        variant="destructive"
-                        className="flex-1"
-                        size="lg"
-                      >
-                        {isStopping ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <Square className="h-4 w-4 mr-2" />
-                        )}
-                        {isStopping ? "停止中..." : "停止服务器"}
-                      </Button>
-                      <Button
-                        onClick={handleRestartServer}
-                        disabled={isOperating}
-                        variant="outline"
-                        className="flex-1 border-orange-500 text-orange-600 hover:bg-orange-50"
-                        size="lg"
-                      >
-                        {isRestarting ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                        )}
-                        {isRestarting ? "重启中..." : "重启服务器"}
-                      </Button>
-                    </>
-                  )}
-                </div>
+                    <Button
+                      onClick={handleRestartServer}
+                      disabled={isOperating}
+                      variant="outline"
+                      className="flex-1 border-orange-500 text-orange-600 hover:bg-orange-50"
+                      size="lg"
+                    >
+                      {isRestarting ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      {isRestarting ? "重启中..." : "重启服务器"}
+                    </Button>
+                  </>
+                )}
+              </div>
 
-                {/* Auto Refresh Toggle */}
-                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
-                  <div>
-                    <p className="text-sm font-medium">自动刷新</p>
-                    <p className="text-xs text-muted-foreground">
-                      每 2 秒更新状态和日志
-                    </p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoRefresh}
-                      onChange={(e) => setAutoRefresh(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
+              <div className="flex items-center justify-between rounded-lg border bg-muted/50 p-3">
+                <div>
+                  <p className="text-sm font-medium">自动刷新</p>
+                  <p className="text-xs text-muted-foreground">每 2 秒更新状态和日志</p>
+                </div>
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={autoRefresh}
+                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20"></div>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="lg:col-span-3">
+          {serverStatus?.running && serverLogs && serverLogs.logs ? (
+            <Card className="sticky top-20">
+              <CardHeader>
+                <CardTitle className="text-base">服务器日志</CardTitle>
+                <CardDescription className="text-xs">
+                  最近 {serverLogs.logs.length} 行 / 共 {serverLogs.total_lines} 行
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[calc(100vh-16rem)] overflow-y-auto rounded-md bg-muted p-3 font-mono text-xs">
+                  {serverLogs.logs.length > 0 ? (
+                    serverLogs.logs.map((log, idx) => (
+                      <div key={idx} className="mb-1 text-muted-foreground">
+                        {log}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-4 text-center text-muted-foreground">暂无日志</div>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </div>
-
-          {/* Right Column - Server Logs */}
-          <div className="lg:col-span-3">
-            {serverStatus?.running && serverLogs && serverLogs.logs ? (
-              <Card className="sticky top-6">
-                <CardHeader>
-                  <CardTitle className="text-base">服务器日志</CardTitle>
-                  <CardDescription className="text-xs">
-                    最近 {serverLogs.logs.length} 行 / 共{" "}
-                    {serverLogs.total_lines} 行
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md bg-muted p-3 font-mono text-xs h-[calc(100vh-16rem)] overflow-y-auto">
-                    {serverLogs.logs.length > 0 ? (
-                      serverLogs.logs.map((log, idx) => (
-                        <div key={idx} className="text-muted-foreground mb-1">
-                          {log}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-muted-foreground text-center py-4">
-                        暂无日志
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="sticky top-6">
-                <CardHeader>
-                  <CardTitle className="text-base">服务器日志</CardTitle>
-                  <CardDescription className="text-xs">
-                    服务器运行时显示日志
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md bg-muted p-4 text-center text-muted-foreground text-sm">
-                    服务器未运行
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+          ) : (
+            <Card className="sticky top-20">
+              <CardHeader>
+                <CardTitle className="text-base">服务器日志</CardTitle>
+                <CardDescription className="text-xs">服务器运行时显示日志</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md bg-muted p-4 text-center text-sm text-muted-foreground">
+                  服务器未运行
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      </main>
+      </div>
 
-      {/* YAML Dialog */}
       {showYamlDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
-            {/* Dialog Header */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[80vh] w-full max-w-4xl flex-col rounded-lg border bg-background text-foreground shadow-xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
                 <FileText className="h-5 w-5" />
                 配置文件内容
               </h2>
@@ -596,12 +511,12 @@ export function Server() {
                 >
                   {copied ? (
                     <>
-                      <Check className="h-4 w-4 mr-2" />
+                      <Check className="mr-2 h-4 w-4" />
                       已复制
                     </>
                   ) : (
                     <>
-                      <Copy className="h-4 w-4 mr-2" />
+                      <Copy className="mr-2 h-4 w-4" />
                       复制
                     </>
                   )}
@@ -616,19 +531,14 @@ export function Server() {
               </div>
             </div>
 
-            {/* Dialog Content */}
             <div className="flex-1 overflow-auto p-4">
-              <pre className="bg-muted p-4 rounded-md text-xs font-mono overflow-x-auto">
+              <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs font-mono">
                 {yamlContent}
               </pre>
             </div>
 
-            {/* Dialog Footer */}
-            <div className="flex justify-end gap-2 p-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => setShowYamlDialog(false)}
-              >
+            <div className="flex justify-end gap-2 border-t p-4">
+              <Button variant="outline" onClick={() => setShowYamlDialog(false)}>
                 关闭
               </Button>
             </div>

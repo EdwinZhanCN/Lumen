@@ -168,7 +168,7 @@ class ServerManager:
             self._log_task = asyncio.create_task(self._capture_logs())
 
             # Wait for server to be ready (with timeout)
-            ready = await self._wait_for_ready(timeout=30.0)
+            ready = await self._wait_for_ready(timeout=None)
 
             if not ready:
                 logger.error("Server failed to start within timeout")
@@ -338,21 +338,24 @@ class ServerManager:
         except Exception as e:
             logger.error(f"Error capturing logs: {e}", exc_info=True)
 
-    async def _wait_for_ready(self, timeout: float = 30.0) -> bool:
+    async def _wait_for_ready(self, timeout: float | None = None) -> bool:
         """
         Wait for the server to be ready.
 
         Args:
-            timeout: Maximum time to wait
+            timeout: Maximum time to wait (None means no timeout)
 
         Returns:
             True if server is ready, False if timeout or error
         """
-        logger.info(f"Waiting for server to be ready (timeout: {timeout}s)...")
+        if timeout is None:
+            logger.info("Waiting for server to be ready (no timeout)...")
+        else:
+            logger.info(f"Waiting for server to be ready (timeout: {timeout}s)...")
 
         start_time = time.time()
 
-        while time.time() - start_time < timeout:
+        while True:
             # Check if process died
             if not self.is_running:
                 logger.error("Server process died during startup")
@@ -373,8 +376,9 @@ class ServerManager:
             # Wait a bit before checking again
             await asyncio.sleep(0.5)
 
-        logger.error(f"Server did not start within {timeout}s")
-        return False
+            if timeout is not None and time.time() - start_time >= timeout:
+                logger.error(f"Server did not start within {timeout}s")
+                return False
 
     def _cleanup(self):
         """Clean up server state after shutdown."""
