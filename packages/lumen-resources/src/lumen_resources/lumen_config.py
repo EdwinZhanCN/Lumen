@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 class Region(Enum):
     """
-    Platform region selection (cn=ModelScope, other=HuggingFace)
+    Platform region selection.
+
+    `cn` uses ModelScope. `other` is reserved for future Hugging Face routing
+    and currently also falls back to ModelScope until those artifacts are
+    uploaded.
     """
 
     cn = 'cn'
@@ -31,7 +35,8 @@ class Metadata(BaseModel):
     """
     region: Region
     """
-    Platform region selection (cn=ModelScope, other=HuggingFace)
+    Platform region selection. `cn` uses ModelScope. `other` is reserved for
+    future Hugging Face routing and currently also falls back to ModelScope.
     """
     cache_dir: str = Field(..., examples=['~/.lumen/models', '/opt/lumen/models'])
     """

@@ -5,8 +5,6 @@ This backend:
 - Loads ONNX models from local files with precision-aware naming:
   - FP32: vision.onnx, text.onnx (default fallback)
   - FP16: vision.fp16.onnx, text.fp16.onnx
-  - INT8: vision.int8.onnx, text.int8.onnx
-  - Q4FP16: vision.q4fp16.onnx, text.q4fp16.onnx
 - Auto-detects model input/output precision and adapts preprocessing
 - Uses config.json for model configuration
 - Uses tokenizer.json or falls back to SimpleTokenizer

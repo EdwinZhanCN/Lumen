@@ -3,7 +3,7 @@
 
 metadata:
     version: "1.0.0"
-    region: "cn" # "cn" for ModelScope, "other" for HuggingFace
+    region: "cn" # `cn` uses ModelScope; `other` is reserved for future Hugging Face routing and currently also falls back to ModelScope
     cache_dir: "~/.lumen" # ~/.lumen by default
 
 deployment:

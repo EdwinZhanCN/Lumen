@@ -70,7 +70,7 @@ model_info = load_and_validate_model_info("model_info.json")
 
 ```yaml
 metadata:
-  region: "other"      # or "cn" to prefer ModelScope
+  region: "other"      # "cn" and "other" currently both resolve to ModelScope; "other" is reserved for future Hugging Face routing
   cache_dir: "~/.lumen/models"
 
 deployment:
@@ -94,7 +94,7 @@ services:
         runtime: "onnx"
 ```
 
-- `metadata.region` decides whether downloads prefer ModelScope or Hugging Face.
+- `metadata.region` controls region-aware download policy. `cn` uses ModelScope, and `other` currently also falls back to ModelScope until Hugging Face artifacts are uploaded.
 - `backend_settings` lets you declare execution providers, batch sizes, devices, etc.
 - Each entry in `models` becomes a cache namespace (`clip/default`, `clip/fp16`, …).
 

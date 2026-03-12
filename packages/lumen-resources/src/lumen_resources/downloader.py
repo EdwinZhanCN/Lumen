@@ -78,6 +78,9 @@ class Downloader:
         ...     print(f"{model_type}: {'✅' if result.success else '❌'}")
     """
 
+    _MODELSCOPE_OWNER = "LumilioPhotos"
+    _HUGGINGFACE_OWNER = "Lumilio-Photos"
+
     def __init__(self, config: LumenConfig, verbose: bool = True):
         """Initialize downloader with configuration.
 
@@ -92,14 +95,8 @@ class Downloader:
         self.config: LumenConfig = config
         self.verbose: bool = verbose
 
-        # Determine platform type and owner from region
-        platform_type = (
-            PlatformType.MODELSCOPE
-            if config.metadata.region == Region.cn
-            else PlatformType.HUGGINGFACE
-        )
-        platform_owner = (
-            "LumilioPhotos" if config.metadata.region == Region.cn else "Lumilio-Photos"
+        platform_type, platform_owner = self._resolve_platform(
+            config.metadata.region
         )
 
         self.platform: Platform = Platform(platform_type, platform_owner)
@@ -108,6 +105,20 @@ class Downloader:
         cache_dir = Path(config.metadata.cache_dir).expanduser()
         cache_dir.mkdir(parents=True, exist_ok=True)
         (cache_dir / "models").mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def _resolve_platform(cls, region: Region) -> tuple[PlatformType, str]:
+        """Resolve the download platform for a configured region.
+
+        Region.other is temporarily routed to ModelScope because the Hugging Face
+        artifacts are not uploaded yet. Keep this routing isolated here so the
+        original Hugging Face branch can be restored without changing callers.
+        """
+        if region == Region.cn:
+            return PlatformType.MODELSCOPE, cls._MODELSCOPE_OWNER
+
+        # Temporary fallback for non-CN regions until Hugging Face repos are ready.
+        return PlatformType.MODELSCOPE, cls._MODELSCOPE_OWNER
 
     def download_all(self, force: bool = False) -> dict[str, DownloadResult]:
         """Download all enabled models from all enabled services.
@@ -344,7 +355,7 @@ class Downloader:
                             except DownloadError as e:
                                 raise DownloadError(
                                     f"Failed to download dataset file {file_rel}: {e}"
-                                )
+                                ) from e
 
             # Final: File integrity validation
             missing = self._validate_files(model_path, model_info, model_config)
@@ -389,7 +400,7 @@ class Downloader:
         try:
             return load_and_validate_model_info(info_path)
         except Exception as e:
-            raise ModelInfoError(f"Failed to load model_info.json: {e}")
+            raise ModelInfoError(f"Failed to load model_info.json: {e}") from e
 
     def _validate_model_config(
         self, model_info: ModelInfo, model_config: ModelConfig

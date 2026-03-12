@@ -34,7 +34,7 @@ properties:
             region:
                 type: string
                 enum: ["cn", "other"]
-                description: Platform region selection (cn=ModelScope, other=HuggingFace)
+                description: Platform region selection (`cn` uses ModelScope; `other` is reserved for future Hugging Face routing and currently also falls back to ModelScope)
 
             cache_dir:
                 type: string

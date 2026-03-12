@@ -926,7 +926,7 @@ export interface components {
         };
         /**
          * Region
-         * @description Platform region selection (cn=ModelScope, other=HuggingFace)
+         * @description Platform region selection (`cn` uses ModelScope; `other` is reserved for future Hugging Face routing and currently also falls back to ModelScope)
          * @enum {string}
          */
         Region: "cn" | "other";
