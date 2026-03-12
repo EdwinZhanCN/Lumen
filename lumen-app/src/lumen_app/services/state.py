@@ -14,12 +14,6 @@ from lumen_app.services.server_manager import ServerManager
 from lumen_app.utils.env_checker import EnvironmentReport
 from lumen_app.utils.logger import get_logger
 
-# Optional import - AppService may not be available if gRPC is not installed
-try:
-    from lumen.service import AppService
-except ImportError:
-    AppService = None  # type: ignore[misc,assignment]
-
 logger = get_logger("lumen.web.state")
 
 
@@ -58,7 +52,7 @@ class AppState:
         self.cache_dir: str | None = None
         self.environment_report: EnvironmentReport | None = None
         self.server_status = ServerStatus()
-        self.app_service: AppService | None = None
+        self.app_service: Any | None = None
 
         # Server manager for gRPC ML server
         self.server_manager = ServerManager()

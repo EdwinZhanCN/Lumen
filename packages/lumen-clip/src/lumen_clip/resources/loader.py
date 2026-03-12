@@ -171,10 +171,10 @@ class ResourceLoader:
             model_info = lumen_resources.load_and_validate_model_info(
                 model_root_path / "model_info.json"
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             raise ResourceNotFoundError(
                 f"model_info.json not found in {model_root_path}"
-            )
+            ) from exc
         except ValidationError as e:
             raise ModelInfoError(f"model_info.json is invalid: {e}") from e
 
@@ -275,8 +275,8 @@ class ResourceLoader:
         try:
             with path.open("r", encoding="utf-8") as f:
                 return json.load(f)
-        except FileNotFoundError:
-            raise ResourceNotFoundError(f"Required file not found: {path}")
+        except FileNotFoundError as exc:
+            raise ResourceNotFoundError(f"Required file not found: {path}") from exc
         except json.JSONDecodeError as e:
             raise ResourceValidationError(f"Invalid JSON in {path.name}: {e}") from e
         except OSError as e:

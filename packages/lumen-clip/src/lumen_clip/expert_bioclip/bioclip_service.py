@@ -19,6 +19,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any, cast
 
 import grpc
 from google.protobuf import empty_pb2
@@ -291,7 +292,7 @@ class BioCLIPService(rpc.InferenceServicer):
     def Health(self, request, context):
         # Extend to provide richer health information if needed. The current
         # protocol expects an empty response.
-        return empty_pb2.Empty()
+        return cast(Any, empty_pb2).Empty()
 
     # -------- IOTask：embed / classify ----------
     def _handle_bioclip_embed(
@@ -411,7 +412,7 @@ class BioCLIPService(rpc.InferenceServicer):
         extra_metadata = {
             "device": info.device,
             "embedding_dim": str(info.embedding_dim),
-            "model_version": info.model_version,
+            "model_version": info.model_version or "",
             "supports_classification": str(info.supports_classification),
         }
 

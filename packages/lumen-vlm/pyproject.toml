@@ -89,11 +89,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"proto/*" = [
-    "E402",   # module level import not at top of file
-    "F401",   # unused imports (generated files)
-    "F403",   # star imports (generated files)
-    "F405",   # undefined names from star imports (generated files)
+"**/*_pb2.py" = ["ALL"]
+"**/*_pb2_grpc.py" = ["ALL"]
+"**/*_pb2.pyi" = ["ALL"]
+
+[tool.ty.src]
+exclude = [
+    "src/lumen_vlm/proto/**",
 ]
 
 [tool.uv.sources]

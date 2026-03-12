@@ -70,18 +70,19 @@ class DeviceConfig:
     os: str | None = None  # 操作系统约束 (linux/win/darwin)
     dependency_metadata: DependencyMetadata | None = None  # Python 依赖元数据
 
-    @classmethod
-    def rockchip(cls, rknn_device: str):
-        return cls(
-            runtime=Runtime.rknn,
-            onnx_providers=None,
-            rknn_device=rknn_device,
-            batch_size=1,  # NPU fixed to 1 batch size
-            description="Preset for Rockchip NPU",
-            precision="int8",
-            env="default",
-            dependency_metadata=DependencyMetadata(extra_deps=["rknn"]),
-        )
+    # Rockchip support is temporarily disabled in lumen-app.
+    # @classmethod
+    # def rockchip(cls, rknn_device: str):
+    #     return cls(
+    #         runtime=Runtime.rknn,
+    #         onnx_providers=None,
+    #         rknn_device=rknn_device,
+    #         batch_size=1,  # NPU fixed to 1 batch size
+    #         description="Preset for Rockchip NPU",
+    #         precision="int8",
+    #         env="default",
+    #         dependency_metadata=DependencyMetadata(extra_deps=["rknn"]),
+    #     )
 
     @classmethod
     def apple_silicon(cls, cache_dir: str = "."):
@@ -164,7 +165,7 @@ class DeviceConfig:
                 "CPUExecutionProvider",
             ],
             description="Preset for Intel iGPU or Arc GPU",
-            precision="fp16",
+            # precision="fp16",
             env="openvino",
             dependency_metadata=DependencyMetadata(extra_deps=["openvino"]),
         )
@@ -296,6 +297,22 @@ class Config:
         self.unified_rknn_device: str | None = device_config.rknn_device
         self.device_config: DeviceConfig = device_config
 
+    def default_light_weight_clip_model(
+        self,
+    ) -> Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"]:
+        """Return the default lightweight CLIP model for the selected region."""
+        if self.region == Region.cn:
+            return "CN-CLIP_ViT-B-16"
+        return "MobileCLIP2-S2"
+
+    def default_basic_clip_model(
+        self,
+    ) -> Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"]:
+        """Return the default basic CLIP model for the selected region."""
+        if self.region == Region.cn:
+            return "CN-CLIP_ViT-L-14"
+        return "MobileCLIP2-S4"
+
     def minimal(self) -> LumenConfig:
         return LumenConfig(
             metadata=Metadata(
@@ -422,7 +439,8 @@ class Config:
                             model="buffalo_l",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "fp16",
+                            # precision=self.device_config.precision or "fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -516,7 +534,8 @@ class Config:
                             model="antelopev2",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "fp16",
+                            # precision=self.device_config.precision or "fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },
@@ -538,7 +557,8 @@ class Config:
                             model="FastVLM-0.5B",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "int8",
+                            # precision=self.device_config.precision or "int8",
+                            precision="fp16",
                             dataset=None,
                         )
                     },
@@ -630,7 +650,8 @@ class Config:
                             model="antelopev2",
                             runtime=self.unified_runtime,
                             rknn_device=self.unified_rknn_device,
-                            precision=self.device_config.precision or "fp16",
+                            # precision=self.device_config.precision or "fp16",
+                            precision="fp32",
                             dataset=None,
                         )
                     },

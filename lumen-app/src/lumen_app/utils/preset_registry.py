@@ -54,12 +54,14 @@ class PresetRegistry:
                 description="Preset for high RAM (>= 12GB) Nvidia GPUs",
                 factory=DeviceConfig.nvidia_gpu_high,
                 priority=5,
+                supported_systems=("Linux", "Windows"),
             ),
             PresetInfo(
                 name="nvidia_gpu",
                 description="Preset for low RAM (< 12GB) Nvidia GPUs",
                 factory=DeviceConfig.nvidia_gpu,
                 priority=10,
+                supported_systems=("Linux", "Windows"),
             ),
             PresetInfo(
                 name="nvidia_jetson_high",
@@ -82,20 +84,22 @@ class PresetRegistry:
                 priority=20,
                 supported_systems=("Darwin",),
             ),
-            PresetInfo(
-                name="rockchip",
-                description="Preset for Rockchip NPU (RK3588)",
-                factory=DeviceConfig.rockchip,
-                default_kwargs={"rknn_device": "rk3588"},
-                priority=25,
-                aliases=("rockchip_rk3588",),
-                supported_systems=("Linux",),
-            ),
+            # Rockchip support is temporarily disabled in lumen-app.
+            # PresetInfo(
+            #     name="rockchip",
+            #     description="Preset for Rockchip NPU (RK3588)",
+            #     factory=DeviceConfig.rockchip,
+            #     default_kwargs={"rknn_device": "rk3588"},
+            #     priority=25,
+            #     aliases=("rockchip_rk3588",),
+            #     supported_systems=("Linux",),
+            # ),
             PresetInfo(
                 name="intel_gpu",
                 description="Preset for Intel iGPU or Arc GPU",
                 factory=DeviceConfig.intel_gpu,
                 priority=30,
+                supported_systems=("Linux", "Windows"),
             ),
             PresetInfo(
                 name="amd_gpu_win",

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from lumen_resources.lumen_config import ModelConfig
 
@@ -31,7 +31,7 @@ class ModelResources:
         model_root_path: Path,
         model_info: Any,
         model_config: ModelConfig,
-        tokenizer_config: Optional[Dict[str, Any]] = None,
+        tokenizer_config: dict[str, Any] | None = None,
     ) -> None:
         self.model_root_path = model_root_path
         self.model_info = model_info
@@ -90,7 +90,7 @@ class ResourceLoader:
             raise ResourceNotFoundError(f"Model info file not found: {info_path}")
 
         try:
-            with open(info_path, "r", encoding="utf-8") as f:
+            with open(info_path, encoding="utf-8") as f:
                 model_info_data = json.load(f)
             model_info = ModelInfo(**model_info_data)
         except Exception as exc:
@@ -103,7 +103,7 @@ class ResourceLoader:
         tokenizer_path = model_path / "tokenizer_config.json"
         if tokenizer_path.exists():
             try:
-                with open(tokenizer_path, "r", encoding="utf-8") as f:
+                with open(tokenizer_path, encoding="utf-8") as f:
                     tokenizer_config = json.load(f)
             except Exception as exc:
                 logger.warning(f"Failed to load tokenizer config: {exc}")

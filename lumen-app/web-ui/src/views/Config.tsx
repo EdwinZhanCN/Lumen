@@ -54,8 +54,9 @@ type ConfigType = ServicePreset["id"];
 const servicePresets: ServicePreset[] = [
   {
     id: "minimal",
-    name: "最小化",
-    description: "仅包含 OCR 服务",
+    name: "极简",
+    description:
+      "仅包含图片文字识别服务，可以对文档/票据进行识别分类，可以搜索图片中的文字",
     icon: <StickyNote />,
     services: ["ocr"],
     recommended: false,
@@ -64,7 +65,7 @@ const servicePresets: ServicePreset[] = [
   {
     id: "light_weight",
     name: "轻量级",
-    description: "OCR + CLIP + Face",
+    description: "提供照片文字识别，语义搜索，人脸识别，场景识别",
     icon: <Feather />,
     services: ["ocr", "clip", "face"],
     recommended: true,
@@ -73,16 +74,16 @@ const servicePresets: ServicePreset[] = [
   {
     id: "basic",
     name: "基础版",
-    description: "OCR + CLIP + Face + VLM",
+    description: "提供照片文字识别，语义搜索，人脸识别，场景识别，照片描述",
     icon: <Package />,
     services: ["ocr", "clip", "face", "vlm"],
     recommended: true,
-    requirements: "完整功能，推荐用于生产环境",
+    requirements: "完整功能，推荐用于体验高级生态",
   },
   {
     id: "brave",
-    name: "完整版",
-    description: "所有服务 + 高性能模型",
+    name: "激进版",
+    description: "比基础版更加精确",
     icon: <Rocket />,
     services: ["ocr", "clip", "face", "vlm"],
     recommended: false,
@@ -93,32 +94,32 @@ const servicePresets: ServicePreset[] = [
 const availableServices: Service[] = [
   {
     id: "ocr",
-    name: "OCR",
-    description: "文字识别服务 (PP-OCRv5)",
+    name: "文字识别服务",
+    description: "识别图片中的文字，用于分类和检索",
     package: "lumen-ocr",
     icon: <ScanText />,
     required: true,
   },
   {
     id: "clip",
-    name: "CLIP",
-    description: "视觉-语言理解 (MobileCLIP/CN-CLIP)",
+    name: "图文理解服务",
+    description: "提取图像和文本特征，用于分类、检索和相似度匹配",
     package: "lumen-clip",
     icon: <Image />,
     required: false,
   },
   {
     id: "face",
-    name: "Face",
-    description: "人脸检测与识别 (Buffalo/Antelope)",
+    name: "人脸识别服务",
+    description: "检测图片中的人脸，对不同人物的照片进行分类",
     package: "lumen-face",
     icon: <ScanFace />,
     required: false,
   },
   {
     id: "vlm",
-    name: "VLM",
-    description: "视觉语言模型 (FastVLM-0.5B)",
+    name: "图片描述服务",
+    description: "理解图片内容，并根据图片内容生成描述",
     package: "lumen-vlm",
     icon: <Bot />,
     required: false,
@@ -446,19 +447,35 @@ export function Config() {
           </CardHeader>
           <CardContent>
             {wizardData.selectedServices.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="grid gap-3 md:grid-cols-2">
                 {wizardData.selectedServices.map((serviceId) => {
                   const service = availableServices.find(
                     (s) => s.id === serviceId,
                   );
+                  if (!service) {
+                    return null;
+                  }
                   return (
-                    <Badge
+                    <div
                       key={serviceId}
-                      variant="secondary"
-                      className="flex text-xs gap-2"
+                      className="rounded-lg border bg-background px-3 py-3"
                     >
-                      {service?.icon} {service?.name}
-                    </Badge>
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        {service.icon}
+                        <span>{service.name}</span>
+                        {service.required && (
+                          <Badge
+                            variant="secondary"
+                            className="ml-auto text-[11px]"
+                          >
+                            必选
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {service.description}
+                      </p>
+                    </div>
                   );
                 })}
               </div>

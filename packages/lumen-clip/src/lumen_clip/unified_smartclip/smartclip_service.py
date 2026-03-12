@@ -15,6 +15,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any, cast
 
 import grpc
 from google.protobuf import empty_pb2
@@ -344,7 +345,7 @@ class SmartCLIPService(rpc.InferenceServicer):
     @override
     def Health(self, request, context):
         """Simple health check endpoint."""
-        return empty_pb2.Empty()
+        return cast(Any, empty_pb2).Empty()
 
     # -------- Task Handlers ----------
 

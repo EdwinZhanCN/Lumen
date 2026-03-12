@@ -223,6 +223,15 @@ async def get_install_task(task_id: str):
     return task
 
 
+@router.post("/tasks/{task_id}/cancel", response_model=InstallTaskResponse)
+async def cancel_install_task(task_id: str):
+    """Cancel a running installation task and clear cache_dir contents."""
+    task = await install_orchestrator.cancel_installation(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return task
+
+
 @router.get("/tasks/{task_id}/logs", response_model=InstallLogsResponse)
 async def get_install_logs(task_id: str, tail: int = 100):
     """Get installation task logs."""

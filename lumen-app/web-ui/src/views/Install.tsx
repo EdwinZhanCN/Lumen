@@ -6,6 +6,7 @@ import {
   Loader2,
   AlertCircle,
   Play,
+  Square,
 } from "lucide-react";
 import {
   Card,
@@ -20,8 +21,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
 import { useLumenSession } from "@/hooks/useLumenSession";
 import { useWizard } from "@/context/useWizard";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelInstallation,
   getInstallStatus,
   startInstallation,
   getInstallTask,
@@ -39,7 +41,9 @@ export function Install() {
   const { wizardData, updateWizardData } = useWizard();
   const { currentPath } = useLumenSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [finishError, setFinishError] = useState<ErrorPresentation | null>(
     null,
@@ -67,7 +71,26 @@ export function Install() {
   } = useMutation({
     mutationFn: startInstallation,
     onSuccess: (data) => {
+      setCancelRequested(false);
       setTaskId(data.task_id);
+    },
+  });
+
+  const { mutate: cancelInstall, isPending: isCancelling } = useMutation({
+    mutationFn: cancelInstallation,
+    onSuccess: async () => {
+      updateWizardData({
+        installationComplete: false,
+        configGenerated: false,
+        configPath: undefined,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["installTask", taskId] }),
+        queryClient.invalidateQueries({ queryKey: ["installLogs", taskId] }),
+        queryClient.invalidateQueries({
+          queryKey: ["installStatus", installPath],
+        }),
+      ]);
     },
   });
 
@@ -110,11 +133,24 @@ export function Install() {
     }
   }, [taskStatus?.status, updateWizardData]);
 
+  useEffect(() => {
+    const taskStatusValue = String(taskStatus?.status ?? "");
+    if (
+      taskId === null ||
+      taskStatusValue === "completed" ||
+      taskStatusValue === "failed" ||
+      taskStatusValue === "cancelled"
+    ) {
+      setCancelRequested(false);
+    }
+  }, [taskId, taskStatus?.status]);
+
   const handleStartInstall = () => {
     if (!wizardData.hardwarePreset) {
       return;
     }
 
+    setCancelRequested(false);
     startInstall({
       preset: wizardData.hardwarePreset,
       cache_dir: installPath,
@@ -125,8 +161,17 @@ export function Install() {
 
   const handleRetryInstall = () => {
     setTaskId(null);
+    setCancelRequested(false);
     updateWizardData({ installationComplete: false });
     handleStartInstall();
+  };
+
+  const handleCancelInstall = () => {
+    if (!taskId || isCancelling || cancelRequested) {
+      return;
+    }
+    setCancelRequested(true);
+    cancelInstall(taskId);
   };
 
   const handleFinishInstall = async () => {
@@ -198,6 +243,10 @@ export function Install() {
   const hasFailed = taskStatus?.status === "failed";
   const isCancelled = String(taskStatus?.status ?? "") === "cancelled";
   const isInstalling = taskStatus?.status === "running" || isStarting;
+  const showCancelButton =
+    !!taskId &&
+    !cancelRequested &&
+    (taskStatus?.status === "running" || taskStatus?.status === "pending");
   const startErrorInfo = startError
     ? describeUiError(startError, "安装启动失败")
     : null;
@@ -224,11 +273,13 @@ export function Install() {
             </CardTitle>
             <CardDescription>
               {isInstalling
-                ? "正在安装，请稍候..."
+                ? cancelRequested
+                  ? "正在取消并清理安装目录，请稍候..."
+                  : "正在安装，请稍候..."
                 : allCompleted
                   ? "所有任务已完成！"
                   : isCancelled
-                    ? "任务已取消，可重新执行安装"
+                    ? "任务已取消，安装目录内容已清空"
                     : hasFailed
                       ? "安装失败，请查看错误信息"
                       : "点击开始按钮开始安装"}
@@ -299,7 +350,7 @@ export function Install() {
             )}
 
             {/* Start Button */}
-            {!isInstalling && !allCompleted && !hasFailed && (
+            {!isInstalling && !allCompleted && !hasFailed && !isCancelled && (
               <button
                 onClick={handleStartInstall}
                 disabled={!wizardData.hardwarePreset}
@@ -310,14 +361,56 @@ export function Install() {
               </button>
             )}
 
-            {(hasFailed || isCancelled) && (
+            {showCancelButton && (
+              <button
+                onClick={handleCancelInstall}
+                disabled={isCancelling || cancelRequested}
+                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2 border border-red-500 text-red-600 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCancelling ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+                取消安装
+              </button>
+            )}
+
+            {cancelRequested && !isCancelled && (
+              <Alert>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <AlertDescription>
+                  已提交取消请求，正在等待当前步骤结束并清理安装目录。
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {hasFailed && (
               <button
                 onClick={handleRetryInstall}
-                disabled={!wizardData.hardwarePreset || isStarting}
+                disabled={!wizardData.hardwarePreset || isStarting || isCancelling}
                 className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-md hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Play className="h-4 w-4" />
                 重试安装
+              </button>
+            )}
+
+            {isCancelled && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  已取消安装，并清空安装目录下的文件。请返回上一步重新生成配置后，再重新开始安装。
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {isCancelled && (
+              <button
+                onClick={() => navigate("/setup/config")}
+                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-md hover:bg-primary/10 transition-colors"
+              >
+                返回重新配置
               </button>
             )}
 

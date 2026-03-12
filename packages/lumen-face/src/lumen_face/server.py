@@ -16,7 +16,7 @@ import sys
 import uuid
 from concurrent import futures
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import colorlog
 import grpc
@@ -220,6 +220,7 @@ def serve(config_path: str, port_override: int | None = None) -> None:
         if not service_config or not service_config.models:
             logger.error("Configuration error: 'services.face.models' is not defined.")
             sys.exit(1)
+        assert service_config is not None
 
         service_display_name = "General Face Recognition"
         cache_dir = Path(config.metadata.cache_dir).expanduser()
@@ -279,7 +280,8 @@ def serve(config_path: str, port_override: int | None = None) -> None:
 
             startup_context = _StartupServicerContext()
             capabilities = service_instance.GetCapabilities(
-                empty_pb2.Empty(), cast(grpc.ServicerContext, startup_context)
+                cast(Any, empty_pb2).Empty(),
+                cast(grpc.ServicerContext, startup_context),
             )
             supported_tasks = [cap.name for cap in capabilities.tasks]
             logger.info(f"✓ Supported tasks: {', '.join(supported_tasks)}")

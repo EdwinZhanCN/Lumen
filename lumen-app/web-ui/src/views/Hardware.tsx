@@ -10,7 +10,7 @@ import {
   Info,
   Laptop,
   Loader2,
-  Mountain,
+  // Mountain,
   Rocket,
   Sparkles,
   Wrench,
@@ -40,6 +40,19 @@ interface HardwarePresetWithIcon extends HardwarePreset {
   recommended?: boolean;
 }
 
+function isPresetSelectable(
+  preset: Pick<HardwarePreset, "availability" | "ready" | "supported_on_current_platform"> | null | undefined,
+): boolean {
+  if (!preset || preset.supported_on_current_platform === false) {
+    return false;
+  }
+
+  const availability = String(
+    preset.availability ?? (preset.ready ? "ready" : "not_checked"),
+  );
+  return availability !== "incompatible";
+}
+
 const presetIcons: Record<string, React.ReactElement> = {
   cpu: <Cpu />,
   apple_silicon: <Laptop />,
@@ -50,7 +63,8 @@ const presetIcons: Record<string, React.ReactElement> = {
   intel_gpu: <Hexagon />,
   amd_gpu_win: <Circle />,
   amd_npu: <Zap />,
-  rockchip: <Mountain />,
+  // Rockchip support is temporarily disabled in lumen-app.
+  // rockchip: <Mountain />,
 };
 
 function getAvailability(preset: HardwarePresetWithIcon): {
@@ -136,14 +150,21 @@ export function Hardware() {
         setSelectedPreset((current) => {
           if (current) {
             const selected = presetsWithIcons.find((preset) => preset.name === current);
-            if (selected && selected.supported_on_current_platform !== false) {
+            if (isPresetSelectable(selected)) {
               return current;
             }
           }
           if (info.recommended_preset) {
-            return info.recommended_preset;
+            const recommended = presetsWithIcons.find(
+              (preset) => preset.name === info.recommended_preset,
+            );
+            if (isPresetSelectable(recommended)) {
+              return info.recommended_preset;
+            }
           }
-          return current;
+          return (
+            presetsWithIcons.find((preset) => isPresetSelectable(preset))?.name ?? null
+          );
         });
       } catch (err) {
         console.error("Failed to fetch hardware info:", err);
@@ -169,7 +190,7 @@ export function Hardware() {
     if (!selectedPresetInfo) {
       return;
     }
-    if (selectedPresetInfo.supported_on_current_platform === false) {
+    if (!isPresetSelectable(selectedPresetInfo)) {
       return;
     }
     updateWizardData({
@@ -179,13 +200,15 @@ export function Hardware() {
         selectedPresetInfo.providers && selectedPresetInfo.providers.length > 0
           ? selectedPresetInfo.providers
           : null,
-      rknnDevice: selectedPresetInfo.runtime === "rknn" ? "rk3588" : null,
+      // Rockchip support is temporarily disabled in lumen-app.
+      // rknnDevice: selectedPresetInfo.runtime === "rknn" ? "rk3588" : null,
+      rknnDevice: null,
     });
   }, [selectedPresetInfo, updateWizardData]);
 
   const handleSelectPreset = (presetName: string) => {
     const preset = hardwarePresets.find((item) => item.name === presetName);
-    if (!preset || preset.supported_on_current_platform === false) {
+    if (!isPresetSelectable(preset)) {
       return;
     }
     setSelectedPreset(presetName);
@@ -200,15 +223,18 @@ export function Hardware() {
     const missingInstallable = preset.missing_installable || [];
     const isSelected = selectedPreset === preset.name;
     const isUnsupported = preset.supported_on_current_platform === false;
+    const isUnavailable = !isPresetSelectable(preset);
 
     return (
       <Card
         key={preset.name}
-        className={`cursor-pointer transition-all hover:shadow-md ${
+        className={`transition-all ${
           isSelected
             ? "border-primary bg-primary/5 shadow-md"
-            : "hover:border-primary/50"
-        } ${isUnsupported ? "opacity-70 border-dashed" : ""}`}
+            : isUnavailable
+              ? ""
+              : "hover:border-primary/50 hover:shadow-md"
+        } ${isUnavailable ? "cursor-not-allowed opacity-70 border-dashed" : "cursor-pointer"}`}
         onClick={() => handleSelectPreset(preset.name)}
       >
         <CardHeader>
@@ -237,6 +263,11 @@ export function Hardware() {
               {isUnsupported && (
                 <Badge variant="outline" className="text-xs border-red-600 text-red-700">
                   当前系统不可用
+                </Badge>
+              )}
+              {!isUnsupported && isUnavailable && (
+                <Badge variant="outline" className="text-xs border-red-600 text-red-700">
+                  当前环境不兼容
                 </Badge>
               )}
             </div>

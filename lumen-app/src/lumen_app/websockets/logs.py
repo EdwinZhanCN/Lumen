@@ -71,14 +71,14 @@ async def log_websocket(websocket: WebSocket):
                     "message": str(e),
                 }
             )
-        except:
+        except Exception:
             pass
     finally:
         # Unsubscribe from logs
         await app_state.unsubscribe_logs(log_queue)
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 
@@ -149,10 +149,10 @@ async def install_progress_websocket(websocket: WebSocket, task_id: str):
                     "message": str(e),
                 }
             )
-        except:
+        except Exception:
             pass
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass

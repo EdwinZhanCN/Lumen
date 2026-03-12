@@ -12,9 +12,9 @@ import importlib.util
 import io
 import logging
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -147,7 +147,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         self._initialized = False
 
     @override
-    def get_info(self) -> "BackendInfo":
+    def get_info(self) -> BackendInfo:
         if self._backend_info is None:
             raise BackendNotInitializedError(
                 "Backend must be initialized before getting info. Call initialize() first."
@@ -311,7 +311,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
         current_token = first_token
         current_seq_len = past_seq_len
 
-        for step in range(request.max_new_tokens - 1):
+        for _step in range(request.max_new_tokens - 1):
             # Embed single token
             token_embed = self._run_text_embedding([current_token])
 
@@ -511,8 +511,8 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
             return int(np.argmax(next_token_logits))
 
         # Temp Scaling
-        next_token_logits = next_token_logits / temp
-        probs = self._softmax(next_token_logits)
+        scaled_logits = np.asarray(next_token_logits / temp, dtype=np.float32)
+        probs = self._softmax(scaled_logits)
 
         # Top-P (Simple implementation)
         if top_p < 1.0:

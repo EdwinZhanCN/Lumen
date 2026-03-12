@@ -52,25 +52,27 @@ async def generate_config(request: ConfigRequest):
         if request.config_type == "minimal":
             lumen_config = config.minimal()
         elif request.config_type == "light_weight":
-            # Ensure clip_model is one of the valid types for light_weight
+            # Default to the region-appropriate CLIP family when the UI does not
+            # explicitly choose a model.
             light_clip_model: Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"] = (
                 cast(
                     Literal["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"],
                     request.clip_model,
                 )
                 if request.clip_model in ["MobileCLIP2-S2", "CN-CLIP_ViT-B-16"]
-                else "MobileCLIP2-S2"
+                else config.default_light_weight_clip_model()
             )
             lumen_config = config.light_weight(clip_model=light_clip_model)
         elif request.config_type == "basic":
-            # Ensure clip_model is one of the valid types for basic
+            # Default to the region-appropriate CLIP family when the UI does not
+            # explicitly choose a model.
             basic_clip_model: Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"] = (
                 cast(
                     Literal["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"],
                     request.clip_model,
                 )
                 if request.clip_model in ["MobileCLIP2-S4", "CN-CLIP_ViT-L-14"]
-                else "MobileCLIP2-S4"
+                else config.default_basic_clip_model()
             )
             lumen_config = config.basic(clip_model=basic_clip_model)
         elif request.config_type == "brave":

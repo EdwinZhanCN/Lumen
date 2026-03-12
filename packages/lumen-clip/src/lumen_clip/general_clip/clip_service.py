@@ -15,6 +15,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any, cast
 
 import grpc
 from google.protobuf import empty_pb2
@@ -281,7 +282,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
     @override
     def Health(self, request, context):
         """A simple health check endpoint. [cite: 22]"""
-        return empty_pb2.Empty()
+        return cast(Any, empty_pb2).Empty()
 
     # -------- Task Handlers ----------
 
@@ -400,7 +401,7 @@ class GeneralCLIPService(rpc.InferenceServicer):
         extra_metadata = {
             "device": info.device,
             "embedding_dim": str(info.embedding_dim),
-            "model_version": info.model_version,
+            "model_version": info.model_version or "",
             "supports_classification": str(info.supports_classification),
         }
 

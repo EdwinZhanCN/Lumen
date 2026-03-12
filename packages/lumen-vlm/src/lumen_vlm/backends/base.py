@@ -22,9 +22,10 @@ from __future__ import annotations
 import abc
 import json
 import logging
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from jinja2 import Environment, StrictUndefined, TemplateError
@@ -82,7 +83,7 @@ class GenerationConfig:
     max_position_embeddings: int | None = None
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "GenerationConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> GenerationConfig:
         required = [
             "bos_token_id",
             "eos_token_id",
@@ -116,7 +117,7 @@ class KVCacheConfig:
     head_dim: int
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "KVCacheConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> KVCacheConfig:
         required = [
             "num_hidden_layers",
             "num_attention_heads",
@@ -146,7 +147,7 @@ class VisionConfig:
     std: tuple[float, float, float]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "VisionConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> VisionConfig:
         required = ["image_size", "patch_size", "mean", "std"]
         missing = [key for key in required if key not in data]
         if missing:

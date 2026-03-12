@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Optional, Union
+from typing import Any, cast
 
 from ..backends.backend_exceptions import (
     BackendNotInitializedError,
@@ -107,8 +107,8 @@ class FastVLMModelManager:
         self._backend = backend
         self._resources = resources
         self._initialized = False
-        self._load_time: Optional[float] = None
-        self._init_start_time: Optional[float] = None
+        self._load_time: float | None = None
+        self._init_start_time: float | None = None
 
         logger.debug(
             "FastVLM Model Manager created for %s with %s backend",
@@ -168,19 +168,19 @@ class FastVLMModelManager:
 
     def generate(
         self,
-        messages: Union[Sequence[ChatMessage], Sequence[Mapping[str, str]]],
+        messages: Sequence[ChatMessage] | Sequence[Mapping[str, str]],
         image_bytes: bytes,
         *,
         max_new_tokens: int = 512,
         temperature: float = 0.0,
         top_p: float = 1.0,
         repetition_penalty: float = 1.0,
-        stop_sequences: Optional[list[str]] = None,
+        stop_sequences: list[str] | None = None,
         do_sample: bool = False,
         add_generation_prompt: bool = True,
         stream: bool = False,
         **extra_kwargs: Any,
-    ) -> Union[GenerationResult, Iterable[GenerationChunk]]:
+    ) -> GenerationResult | Iterable[GenerationChunk]:
         """Generate text from multimodal input.
 
         Args:
@@ -233,14 +233,14 @@ class FastVLMModelManager:
 
     def generate_stream(
         self,
-        messages: Union[Sequence[ChatMessage], Sequence[Mapping[str, str]]],
+        messages: Sequence[ChatMessage] | Sequence[Mapping[str, str]],
         image_bytes: bytes,
         *,
         max_new_tokens: int = 512,
         temperature: float = 0.0,
         top_p: float = 1.0,
         repetition_penalty: float = 1.0,
-        stop_sequences: Optional[list[str]] = None,
+        stop_sequences: list[str] | None = None,
         do_sample: bool = False,
         add_generation_prompt: bool = True,
         **extra_kwargs: Any,
@@ -268,7 +268,7 @@ class FastVLMModelManager:
         )
 
         if isinstance(result, Iterable):
-            return result
+            return cast(Iterable[GenerationChunk], result)
 
         raise InferenceError("Backend returned a non-streaming result in stream mode")
 
@@ -337,7 +337,7 @@ class FastVLMModelManager:
 
     def _normalize_messages(
         self,
-        messages: Union[Sequence[ChatMessage], Sequence[Mapping[str, str]]],
+        messages: Sequence[ChatMessage] | Sequence[Mapping[str, str]],
     ) -> list[ChatMessage]:
         """Normalize heterogeneous message payloads into ChatMessage objects."""
         if not messages:

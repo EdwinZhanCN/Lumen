@@ -367,6 +367,17 @@ export async function getInstallTask(
   );
 }
 
+export async function cancelInstallation(
+  taskId: string,
+): Promise<InstallTaskResponse> {
+  return fetchApi<InstallTaskResponse>(
+    buildUrl(`/api/v1/install/tasks/${encodeURIComponent(taskId)}/cancel`),
+    {
+      method: "POST",
+    },
+  );
+}
+
 export type GetInstallLogsQuery = {
   tail?: number;
 };

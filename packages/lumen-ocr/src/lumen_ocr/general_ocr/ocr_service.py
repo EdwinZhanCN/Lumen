@@ -9,7 +9,7 @@ between the gRPC interface and the backend model logic.
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import grpc
 from google.protobuf import empty_pb2
@@ -230,10 +230,7 @@ class GeneralOcrService(ml_service_pb2_grpc.InferenceServicer):
 
     def Health(self, request, context):
         """Health check."""
-        if self._initialized:
-            return empty_pb2.Empty()
-        else:
-            return empty_pb2.Empty()
+        return cast(Any, empty_pb2).Empty()
 
     # -------------------------------------------------------------------------
     # Task Handlers

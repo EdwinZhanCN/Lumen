@@ -21,7 +21,7 @@ import io
 import logging
 import time
 from collections.abc import Callable, Sequence
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import open_clip
@@ -39,7 +39,13 @@ from typing_extensions import override
 
 from lumen_clip.resources.loader import ModelResources
 
-from .backend_exceptions import *
+from .backend_exceptions import (
+    BackendError,
+    DeviceUnavailableError,
+    InferenceError,
+    InvalidInputError,
+    ModelLoadingError,
+)
 from .base import BackendInfo, BaseClipBackend
 
 logger = logging.getLogger(__name__)
@@ -107,18 +113,18 @@ class TorchBackend(BaseClipBackend):
         # Runtime objects
         self._device: torch.device = self._select_device(device_preference)
         # OpenCLIP model and preprocess
-        self._openclip_model: torch.nn.Module | None = None
+        self._openclip_model: Any | None = None
         self._openclip_preprocess: Callable[[Image.Image], torch.Tensor] | None = None
         self._openclip_tokenizer: Callable[[list[str]], torch.Tensor] | None = None
         # HuggingFace model and processor (Auto classes)
-        self._hf_model: AutoModel | None = None
-        self._hf_processor: AutoProcessor | None = None
-        self._hf_tokenizer: AutoTokenizer | None = None
+        self._hf_model: Any | None = None
+        self._hf_processor: Callable[..., Any] | None = None
+        self._hf_tokenizer: Callable[..., Any] | None = None
 
         self._load_time_seconds: float | None = None
 
         # Mixed precision settings
-        self._use_amp: bool = self._device.type in "cuda"
+        self._use_amp: bool = self._device.type == "cuda"
         self._amp_dtype: torch.dtype = torch.float16
         self._current_precision: str = "fp32"  # Will be updated after init
 
@@ -341,10 +347,11 @@ class TorchBackend(BaseClipBackend):
         assert self._hf_tokenizer is not None
 
         # Use tokenizer for text-only processing
-        if hasattr(self._hf_tokenizer, "__call__"):
+        if callable(self._hf_tokenizer):
             inputs = self._hf_tokenizer(text, return_tensors="pt", padding=True)
         else:
             # Fallback to processor for tokenization
+            assert self._hf_processor is not None
             inputs = self._hf_processor(text=text, return_tensors="pt", padding=True)
         inputs = {key: value.to(self._device) for key, value in inputs.items()}
 
@@ -377,7 +384,7 @@ class TorchBackend(BaseClipBackend):
                 logger.error(f"get_text_features failed: {e}")
                 raise TorchBackendError(
                     f"Cannot extract text features from model: {type(self._hf_model)}"
-                )
+                ) from e
         else:
             raise TorchBackendError(
                 f"Cannot extract text features from model: {type(self._hf_model)}"
@@ -504,6 +511,7 @@ class TorchBackend(BaseClipBackend):
             if self.resources.source_format == "openclip":
                 assert self._openclip_tokenizer is not None
                 tokens = self._openclip_tokenizer([text]).to(self._device)
+                assert self._openclip_model is not None
                 features = self._openclip_model.encode_text(tokens)
             elif self.resources.source_format == "huggingface":
                 features = self._get_text_features_from_auto_model(text)
@@ -564,6 +572,7 @@ class TorchBackend(BaseClipBackend):
                 image_tensor = (
                     self._openclip_preprocess(image).unsqueeze(0).to(self._device)
                 )
+                assert self._openclip_model is not None
                 features = self._openclip_model.encode_image(image_tensor)
             elif self.resources.source_format == "huggingface":
                 # Convert bytes to PIL Image before passing to AutoModel
@@ -617,7 +626,8 @@ class TorchBackend(BaseClipBackend):
             InferenceError: If encoding fails.
         """
         if not images:
-            return np.empty((0, self.get_info().image_embedding_dim), dtype=np.float32)
+            image_dim = int(self.get_info().image_embedding_dim or 0)
+            return np.empty((0, image_dim), dtype=np.float32)
 
         self._ensure_initialized()
 
@@ -663,9 +673,11 @@ class TorchBackend(BaseClipBackend):
                     with torch.autocast(
                         device_type=self._device.type, dtype=self._amp_dtype
                     ):
-                        feats = self._openclip_model.encode_image(batch)  # type: ignore
+                        assert self._openclip_model is not None
+                        feats = self._openclip_model.encode_image(batch)
                 else:
-                    feats = self._openclip_model.encode_image(batch)  # type: ignore
+                    assert self._openclip_model is not None
+                    feats = self._openclip_model.encode_image(batch)
 
             feats = feats / feats.norm(dim=-1, keepdim=True)
 
@@ -700,7 +712,8 @@ class TorchBackend(BaseClipBackend):
         """
         self._ensure_initialized()
         if not texts:
-            return np.empty((0, self.get_info().text_embedding_dim), dtype=np.float32)
+            text_dim = int(self.get_info().text_embedding_dim or 0)
+            return np.empty((0, text_dim), dtype=np.float32)
 
         try:
             # Validate inputs
@@ -715,11 +728,12 @@ class TorchBackend(BaseClipBackend):
                 assert self._hf_tokenizer is not None
 
                 # Process all texts using get_text_features method
-                if hasattr(self._hf_tokenizer, "__call__"):
+                if callable(self._hf_tokenizer):
                     inputs = self._hf_tokenizer(
                         texts, return_tensors="pt", padding=True
                     )
                 else:
+                    assert self._hf_processor is not None
                     inputs = self._hf_processor(
                         text=texts, return_tensors="pt", padding=True
                     )
@@ -751,9 +765,11 @@ class TorchBackend(BaseClipBackend):
                     with torch.autocast(
                         device_type=self._device.type, dtype=self._amp_dtype
                     ):
-                        feats = self._openclip_model.encode_text(tokens)  # type: ignore
+                        assert self._openclip_model is not None
+                        feats = self._openclip_model.encode_text(tokens)
                 else:
-                    feats = self._openclip_model.encode_text(tokens)  # type: ignore
+                    assert self._openclip_model is not None
+                    feats = self._openclip_model.encode_text(tokens)
 
             feats = feats / feats.norm(dim=-1, keepdim=True)
 

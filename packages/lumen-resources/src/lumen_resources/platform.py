@@ -99,20 +99,20 @@ class Platform:
                 import huggingface_hub
 
                 self._hf_hub: ModuleType = huggingface_hub
-            except ImportError:
+            except ImportError as exc:
                 raise PlatformUnavailableError(
                     "HuggingFace Hub SDK not available. "
                     + "Install with: pip install huggingface_hub"
-                )
+                ) from exc
         elif self.platform_type == PlatformType.MODELSCOPE:
             try:
                 from modelscope.hub.snapshot_download import snapshot_download
 
                 self._ms_snapshot_download = snapshot_download
-            except ImportError:
+            except ImportError as exc:
                 raise PlatformUnavailableError(
                     "ModelScope SDK not available. Install with: pip install modelscope"
-                )
+                ) from exc
 
     def download_model(
         self,

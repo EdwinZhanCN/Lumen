@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import yaml
 from lumen_resources import LumenConfig
@@ -105,6 +105,8 @@ class CoreInstaller:
         lumen_config: LumenConfig,
         device_config: DeviceConfig,
         quiet: bool = True,
+        log_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[int, str | None], None] | None = None,
     ) -> tuple[bool, str]:
         """Install Lumen packages derived from LumenConfig.
 
@@ -115,11 +117,16 @@ class CoreInstaller:
             lumen_config: Lumen configuration with deployment services
             device_config: Device configuration with dependency metadata
             quiet: Whether to suppress pip output
+            log_callback: Optional callback for installation log messages
+            progress_callback: Optional callback for coarse-grained install progress
 
         Returns:
             Tuple of (success, message)
         """
         logger.info("Installing Lumen packages from GitHub Releases")
+        log_callback = log_callback or (lambda _message: None)
+        progress_callback = progress_callback or (lambda _progress, _message=None: None)
+        progress_callback(5, "Resolving installation package list...")
 
         # Check environment exists
         env_manager = PythonEnvManager(
@@ -133,12 +140,14 @@ class CoreInstaller:
         try:
             # Resolve package names from config
             package_list = LumenPackageResolver.resolve_packages(lumen_config)
+            log_callback("Resolving packages from generated configuration...")
 
             if not package_list:
                 logger.info("No packages to install.")
                 return True, "No packages to install"
 
             logger.info("Packages to install: %s", ", ".join(package_list))
+            log_callback(f"Will install packages: {', '.join(package_list)}")
 
             # Create wheel download directory
             wheel_dir = self.cache_dir / "wheels"
@@ -149,18 +158,31 @@ class CoreInstaller:
 
             # Download all wheels first
             wheel_paths = {}
-            for package in package_list:
+            total_packages = len(package_list)
+            for idx, package in enumerate(package_list, start=1):
+                progress_callback(
+                    10 + int(((idx - 1) / max(total_packages, 1)) * 55),
+                    f"Downloading package wheel {idx}/{total_packages}: {package}",
+                )
                 logger.info("Downloading wheel for %s...", package)
                 try:
                     url, version = github_resolver.resolve_package_url(package)
-                    wheel_path = github_resolver.download_wheel(url, wheel_dir)
+                    log_callback(f"Downloading {package} ({version})...")
+                    wheel_path = github_resolver.download_wheel(
+                        url, wheel_dir, log_callback
+                    )
                     wheel_paths[package] = wheel_path
                     logger.info("Downloaded %s version %s", package, version)
+                    progress_callback(
+                        10 + int((idx / max(total_packages, 1)) * 55),
+                        f"Downloaded package wheel {idx}/{total_packages}: {package}",
+                    )
                 except Exception as e:
                     logger.error("Failed to download %s: %s", package, e)
                     return False, f"Failed to download {package}: {e}"
 
             # Build pip install command with device-specific extras
+            progress_callback(72, "Preparing pip installation command...")
             pip_args = LumenPackageResolver.build_pip_install_args(
                 packages=package_list,
                 device_config=device_config,
@@ -173,10 +195,13 @@ class CoreInstaller:
 
             # Run pip install
             logger.info("Running pip install with device-specific extras")
+            log_callback("Running pip install in the managed environment...")
+            progress_callback(82, "Installing downloaded packages...")
             result = env_manager.run_pip(*pip_args)
 
             if result.returncode == 0:
                 logger.info("All packages installed successfully")
+                progress_callback(95, "Package installation completed, finalizing...")
                 return True, "All packages installed successfully"
             else:
                 error_msg = result.stderr or result.stdout

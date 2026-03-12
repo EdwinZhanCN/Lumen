@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any, cast
 
 import grpc
 from google.protobuf import empty_pb2
@@ -341,7 +342,7 @@ class GeneralFaceService(rpc.InferenceServicer):
 
     @override
     def GetCapabilities(
-        self, request: empty_pb2.Empty, context: grpc.ServicerContext
+        self, request: Any, context: grpc.ServicerContext
     ) -> pb.Capability:
         """
         Returns the service capabilities including supported tasks and model info.
@@ -405,7 +406,7 @@ class GeneralFaceService(rpc.InferenceServicer):
     @override
     def Health(self, request, context):
         """Simple health check endpoint."""
-        return empty_pb2.Empty()
+        return cast(Any, empty_pb2).Empty()
 
     # -------- Task Handlers ----------
 
