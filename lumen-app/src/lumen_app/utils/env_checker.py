@@ -6,8 +6,11 @@ Provides driver validation for different hardware platforms.
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
+import tempfile
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -517,6 +520,8 @@ class DependencyInstaller:
         mamba_configs_dir: str | Path | None = None,
         micromamba_path: str | None = None,
         root_prefix: str | Path | None = None,
+        cleanup_cache: bool = True,
+        use_temp_pkg_cache: bool = True,
     ):
         """
         Initialize installer with mamba config directory and micromamba path.
@@ -528,6 +533,9 @@ class DependencyInstaller:
                             If None, uses 'micromamba' from PATH
             root_prefix: Optional micromamba root prefix (MAMBA_ROOT_PREFIX).
                          If None, micromamba default is used.
+            cleanup_cache: Whether to clean micromamba package cache after install
+            use_temp_pkg_cache: Whether to use a temporary package cache directory
+                for micromamba operations
         """
         if mamba_configs_dir is None:
             current_file = Path(__file__)
@@ -536,9 +544,18 @@ class DependencyInstaller:
         self.configs_dir = Path(mamba_configs_dir)
         self.micromamba_path = micromamba_path or "micromamba"
         self.root_prefix = Path(root_prefix).expanduser() if root_prefix else None
+        self.cleanup_cache = cleanup_cache
+        self.use_temp_pkg_cache = use_temp_pkg_cache
 
         logger.info(
-            f"[DependencyInstaller] Initialized with configs_dir={self.configs_dir}, micromamba_path={self.micromamba_path}, root_prefix={self.root_prefix}"
+            "[DependencyInstaller] Initialized with "
+            "configs_dir=%s, micromamba_path=%s, root_prefix=%s, "
+            "cleanup_cache=%s, use_temp_pkg_cache=%s",
+            self.configs_dir,
+            self.micromamba_path,
+            self.root_prefix,
+            self.cleanup_cache,
+            self.use_temp_pkg_cache,
         )
 
     def install_driver(
@@ -601,12 +618,25 @@ class DependencyInstaller:
 
         try:
             logger.info("[DependencyInstaller] Executing installation (timeout=600s)")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minutes timeout
-            )
+            with ExitStack() as stack:
+                env = os.environ.copy()
+                if self.use_temp_pkg_cache:
+                    temp_pkg_cache_dir = stack.enter_context(
+                        tempfile.TemporaryDirectory(prefix="lumen-mamba-pkgs-")
+                    )
+                    env["CONDA_PKGS_DIRS"] = temp_pkg_cache_dir
+                    logger.debug(
+                        "[DependencyInstaller] Using temporary package cache: %s",
+                        temp_pkg_cache_dir,
+                    )
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,  # 10 minutes timeout
+                    env=env,
+                )
 
             if result.returncode == 0:
                 logger.info(
@@ -632,6 +662,9 @@ class DependencyInstaller:
                 f"[DependencyInstaller] Installation error: {type(e).__name__}: {e}"
             )
             return False, f"Installation error: {str(e)}"
+        finally:
+            if not self.use_temp_pkg_cache and self.cleanup_cache:
+                self._clean_micromamba_cache()
 
     def get_install_command(self, driver_name: str, env_name: str = "lumen_env") -> str:
         """Get the installation command for manual execution."""
@@ -660,6 +693,47 @@ class DependencyInstaller:
         cmd = f"micromamba install -y -n {env_name} -f {config_file}"
         logger.debug(f"[DependencyInstaller] Generated command: {cmd}")
         return cmd
+
+    def _clean_micromamba_cache(self):
+        """Clean micromamba package cache under configured root prefix."""
+        if self.root_prefix is None:
+            logger.debug(
+                "[DependencyInstaller] Skip cache cleanup because root_prefix is not set"
+            )
+            return
+
+        cmd = [
+            self.micromamba_path,
+            "--root-prefix",
+            str(self.root_prefix),
+            "clean",
+            "--all",
+            "--yes",
+        ]
+        logger.debug("[DependencyInstaller] Cache cleanup command: %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if result.returncode == 0:
+                logger.info("[DependencyInstaller] Micromamba cache cleaned")
+            else:
+                logger.warning(
+                    "[DependencyInstaller] Failed to clean micromamba cache: %s",
+                    result.stderr or result.stdout,
+                )
+        except subprocess.TimeoutExpired:
+            logger.warning("[DependencyInstaller] Micromamba cache cleanup timed out")
+        except Exception as e:
+            logger.warning(
+                "[DependencyInstaller] Micromamba cache cleanup error: %s: %s",
+                type(e).__name__,
+                e,
+            )
 
 
 class EnvironmentChecker:

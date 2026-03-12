@@ -21,6 +21,11 @@ import { WizardLayout } from "@/components/wizard/WizardLayout";
 import { useLumenSession } from "@/hooks/useLumenSession";
 import { useWizard } from "@/context/useWizard";
 import type { Region } from "@/context/wizardConfig";
+import {
+  getPortValidationMessage,
+  getServiceNameValidationMessage,
+  parseValidPort,
+} from "@/lib/wizardValidation";
 
 export function Welcome() {
   const { currentPath } = useLumenSession();
@@ -29,17 +34,25 @@ export function Welcome() {
   const [region, setRegion] = useState<Region>(wizardData.region);
   const [serviceName, setServiceName] = useState(wizardData.serviceName);
   const [port, setPort] = useState(wizardData.port.toString());
+  const serviceNameError = getServiceNameValidationMessage(serviceName);
+  const portError = getPortValidationMessage(port);
+  const isFormValid =
+    Boolean(currentPath && currentPath.trim() !== "") &&
+    !serviceNameError &&
+    !portError;
 
   useEffect(() => {
     if (!currentPath) {
       return;
     }
 
+    const parsedPort = parseValidPort(port);
+
     updateWizardData({
       installPath: currentPath,
       region,
-      serviceName,
-      port: parseInt(port, 10) || 50051,
+      serviceName: serviceName.trim(),
+      port: parsedPort ?? 0,
     });
   }, [currentPath, port, region, serviceName, updateWizardData]);
 
@@ -57,17 +70,14 @@ export function Welcome() {
     if (updates.port !== undefined) {
       setPort(updates.port);
     }
-
-    updateWizardData({
-      installPath: currentPath ?? "",
-      region: updates.region ?? region,
-      serviceName: updates.serviceName ?? serviceName,
-      port: parseInt(updates.port ?? port, 10) || 50051,
-    });
   };
 
   return (
-    <WizardLayout title="基础配置" description="当前会话路径已固定，继续配置服务参数">
+    <WizardLayout
+      title="基础配置"
+      description="当前会话路径已固定，继续配置服务参数"
+      nextButtonDisabled={!isFormValid}
+    >
       <div className="space-y-6">
         <Alert>
           <Info className="h-4 w-4" />
@@ -127,6 +137,9 @@ export function Welcome() {
                   value={port}
                   onChange={(e) => handleConfigChange({ port: e.target.value })}
                 />
+                {portError && (
+                  <p className="text-sm text-red-600">{portError}</p>
+                )}
               </div>
             </div>
 
@@ -140,6 +153,9 @@ export function Welcome() {
                   handleConfigChange({ serviceName: e.target.value })
                 }
               />
+              {serviceNameError && (
+                <p className="text-sm text-red-600">{serviceNameError}</p>
+              )}
             </div>
           </CardContent>
         </Card>

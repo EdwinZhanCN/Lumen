@@ -1,7 +1,10 @@
 """Python environment manager for creating and managing micromamba environments."""
 
 import logging
+import os
 import subprocess
+import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -12,21 +15,33 @@ class PythonEnvManager:
 
     ENV_NAME = "lumen_env"
 
-    def __init__(self, cache_dir: Path | str, micromamba_exe: Path | str):
+    def __init__(
+        self,
+        cache_dir: Path | str,
+        micromamba_exe: Path | str,
+        cleanup_cache: bool = True,
+        use_temp_pkg_cache: bool = True,
+    ):
         """Initialize environment manager.
 
         Args:
             cache_dir: Cache directory
             micromamba_exe: Path to micromamba executable
+            cleanup_cache: Whether to clean micromamba package cache after env creation
+            use_temp_pkg_cache: Whether to use a temporary package cache directory
+                for micromamba operations
         """
         self.cache_dir = Path(cache_dir).expanduser()
         self.micromamba_exe = Path(micromamba_exe)
         self.mamba_configs_dir = Path(__file__).parent.parent / "mamba"
         self.target_name = "micromamba"
+        self.cleanup_cache = cleanup_cache
+        self.use_temp_pkg_cache = use_temp_pkg_cache
 
         logger.debug(
             f"[PythonEnvManager] Initialized with cache_dir={self.cache_dir}, "
-            f"micromamba_exe={self.micromamba_exe}"
+            f"micromamba_exe={self.micromamba_exe}, "
+            f"use_temp_pkg_cache={self.use_temp_pkg_cache}"
         )
 
     def create_env(self, yaml_config: str = "default") -> Path:
@@ -77,12 +92,25 @@ class PythonEnvManager:
         )
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minutes
-            )
+            with ExitStack() as stack:
+                env = os.environ.copy()
+                if self.use_temp_pkg_cache:
+                    temp_pkg_cache_dir = stack.enter_context(
+                        tempfile.TemporaryDirectory(prefix="lumen-mamba-pkgs-")
+                    )
+                    env["CONDA_PKGS_DIRS"] = temp_pkg_cache_dir
+                    logger.debug(
+                        "[PythonEnvManager] Using temporary package cache: %s",
+                        temp_pkg_cache_dir,
+                    )
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,  # 10 minutes
+                    env=env,
+                )
 
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout
@@ -91,12 +119,47 @@ class PythonEnvManager:
                 )
                 raise Exception(f"Failed to create environment: {error_msg}")
 
+            if not self.use_temp_pkg_cache and self.cleanup_cache:
+                self._clean_micromamba_cache()
+
             logger.info(f"[PythonEnvManager] Environment created: {env_path}")
             return env_path
 
         except subprocess.TimeoutExpired:
             logger.error("[PythonEnvManager] Environment creation timed out")
             raise Exception("Environment creation timed out")
+
+    def _clean_micromamba_cache(self) -> None:
+        """Clean micromamba package cache under current root prefix."""
+        root_prefix = self.cache_dir / self.target_name
+        cmd = [
+            str(self.micromamba_exe),
+            "--root-prefix",
+            str(root_prefix),
+            "clean",
+            "--all",
+            "--yes",
+        ]
+        logger.debug(f"[PythonEnvManager] Cleaning micromamba cache: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if result.returncode == 0:
+                logger.info("[PythonEnvManager] Micromamba cache cleaned")
+            else:
+                logger.warning(
+                    "[PythonEnvManager] Failed to clean micromamba cache: %s",
+                    result.stderr or result.stdout,
+                )
+        except subprocess.TimeoutExpired:
+            logger.warning("[PythonEnvManager] Micromamba cache cleanup timed out")
+        except Exception as e:
+            logger.warning("[PythonEnvManager] Micromamba cache cleanup error: %s", e)
 
     def get_env_path(self) -> Path:
         """Get the path to the lumen_env environment.

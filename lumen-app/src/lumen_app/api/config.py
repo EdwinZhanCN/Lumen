@@ -30,10 +30,9 @@ async def generate_config(request: ConfigRequest):
 
     # Validate preset
     if not PresetRegistry.preset_exists(request.preset):
-        return ConfigResponse(
-            success=False,
-            preset=request.preset,
-            message=f"Unknown preset: {request.preset}",
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preset: {request.preset}",
         )
 
     try:
@@ -85,7 +84,7 @@ async def generate_config(request: ConfigRequest):
         success, message = installer.save_config(lumen_config)
 
         if not success:
-            raise ValueError(message)
+            raise HTTPException(status_code=500, detail=message)
 
         config_path = str(Path(request.cache_dir).expanduser() / "lumen-config.yaml")
 
@@ -100,12 +99,13 @@ async def generate_config(request: ConfigRequest):
             message=f"Configuration generated successfully at {config_path}",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to generate config: {e}", exc_info=True)
-        return ConfigResponse(
-            success=False,
-            preset=request.preset,
-            message=f"Failed to generate configuration: {str(e)}",
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate configuration: {str(e)}",
         )
 
 

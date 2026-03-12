@@ -28,6 +28,15 @@ class HardwarePresetResponse(BaseModel):
     requires_drivers: bool = True
     runtime: str
     providers: list[str] = Field(default_factory=list)
+    supported_on_current_platform: bool = True
+    supported_systems: list[str] = Field(default_factory=list)
+    environment_checked: bool = False
+    availability: Literal["not_checked", "ready", "missing_drivers", "incompatible"] = (
+        "not_checked"
+    )
+    ready: bool = False
+    drivers: list[DriverCheckResponse] = Field(default_factory=list)
+    missing_installable: list[str] = Field(default_factory=list)
 
 
 class HardwareInfoResponse(BaseModel):

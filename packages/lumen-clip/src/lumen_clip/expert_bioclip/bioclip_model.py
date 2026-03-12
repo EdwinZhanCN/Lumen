@@ -17,9 +17,9 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from lumen_clip.backends import BaseClipBackend
-from lumen_clip.models import BackendInfo, RuntimeModelInfo
+from lumen_clip.backends import BackendInfo, BaseClipBackend
 from lumen_clip.resources.loader import ModelResources
+from lumen_clip.runtime_info import RuntimeModelInfo
 
 logger = logging.getLogger(__name__)
 

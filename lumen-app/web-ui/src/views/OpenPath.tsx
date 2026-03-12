@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, CheckCircle2, FolderOpen, Loader2, AlertCircle } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  FolderOpen,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,13 +20,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { validatePath, type PathValidationResponse } from "@/lib/api";
+import { describeUiError } from "@/lib/errorPresentation";
 import { useLumenSession } from "@/hooks/useLumenSession";
 
 type ValidationState =
   | { status: "idle" }
   | { status: "validating" }
   | { status: "validated"; result: PathValidationResponse }
-  | { status: "error"; message: string };
+  | { status: "error"; title: string; message: string };
 
 export function OpenPath() {
   const navigate = useNavigate();
@@ -34,7 +41,11 @@ export function OpenPath() {
 
   const handleValidate = async () => {
     if (!path.trim()) {
-      setValidationState({ status: "error", message: "请输入安装路径" });
+      setValidationState({
+        status: "error",
+        title: "输入校验失败",
+        message: "请输入安装路径",
+      });
       return;
     }
 
@@ -51,9 +62,11 @@ export function OpenPath() {
       setCurrentPath(path);
       navigate("/session");
     } catch (error) {
+      const parsed = describeUiError(error, "路径验证失败");
       setValidationState({
         status: "error",
-        message: error instanceof Error ? error.message : "路径验证失败",
+        title: parsed.title,
+        message: parsed.message,
       });
     }
   };
@@ -119,14 +132,24 @@ export function OpenPath() {
             {validationState.status === "error" && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{validationState.message}</AlertDescription>
+                <AlertDescription>
+                  <div className="space-y-1">
+                    <p className="font-medium">{validationState.title}</p>
+                    <p>{validationState.message}</p>
+                  </div>
+                </AlertDescription>
               </Alert>
             )}
 
             {isValidated && validationState.result.error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{validationState.result.error}</AlertDescription>
+                <AlertDescription>
+                  <div className="space-y-1">
+                    <p className="font-medium">业务校验失败</p>
+                    <p>{validationState.result.error}</p>
+                  </div>
+                </AlertDescription>
               </Alert>
             )}
 
@@ -134,7 +157,8 @@ export function OpenPath() {
               <Alert className="border-green-500 bg-green-50">
                 <CheckCircle2 className="h-4 w-4 text-green-600" />
                 <AlertDescription className="text-green-800">
-                  路径有效 • 可用空间: {validationState.result.free_space_gb?.toFixed(1)} GB
+                  路径有效 • 可用空间:{" "}
+                  {validationState.result.free_space_gb?.toFixed(1)} GB
                 </AlertDescription>
               </Alert>
             )}

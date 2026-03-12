@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bot,
   Feather,
@@ -22,11 +22,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
 import { useWizard } from "@/context/useWizard";
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
 import { generateConfig } from "@/lib/api";
+import { describeUiError } from "@/lib/errorPresentation";
 
 interface ServicePreset {
   id: "minimal" | "light_weight" | "basic" | "brave";
@@ -46,6 +48,8 @@ interface Service {
   icon: React.ReactElement;
   required: boolean;
 }
+
+type ConfigType = ServicePreset["id"];
 
 const servicePresets: ServicePreset[] = [
   {
@@ -123,7 +127,7 @@ const availableServices: Service[] = [
 
 export function Config() {
   const { wizardData, updateWizardData } = useWizard();
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(
+  const [selectedPreset, setSelectedPreset] = useState<ConfigType | null>(
     wizardData.servicePreset,
   );
   const lastConfigKeyRef = useRef<string | null>(null);
@@ -131,24 +135,93 @@ export function Config() {
   // Use generated schema types with custom hook
   const {
     mutate: generateConfigMutate,
+    reset: resetConfigMutation,
     data: configResult,
     isPending: generatingConfig,
     error: configError,
   } = useMutation({
     mutationFn: generateConfig,
     onSuccess: (data) => {
+      if (!data.success) {
+        updateWizardData({
+          configGenerated: false,
+          configPath: undefined,
+        });
+        return;
+      }
+
       updateWizardData({
         configGenerated: true,
         configPath: data.config_path || undefined,
       });
     },
     onError: () => {
-      updateWizardData({ configGenerated: false });
+      updateWizardData({
+        configGenerated: false,
+        configPath: undefined,
+      });
     },
   });
-  const error =
-    configError?.message ||
-    (configResult && !configResult.success ? configResult.message : null);
+  const mutationErrorInfo = configError
+    ? describeUiError(configError, "配置生成失败")
+    : null;
+  const businessErrorInfo =
+    configResult && !configResult.success
+      ? { title: "业务校验失败", message: configResult.message }
+      : null;
+  const errorInfo = mutationErrorInfo || businessErrorInfo;
+
+  const requestConfigGeneration = useCallback(
+    (presetId: ConfigType, force: boolean) => {
+      const preset = servicePresets.find((item) => item.id === presetId);
+      if (!preset || !wizardData.hardwarePreset || generatingConfig) {
+        return;
+      }
+
+      const nextConfigKey = [
+        presetId,
+        wizardData.hardwarePreset,
+        wizardData.installPath || "~/.lumen",
+        wizardData.region,
+        String(wizardData.port),
+        wizardData.serviceName,
+      ].join("|");
+
+      if (!force && nextConfigKey === lastConfigKeyRef.current) {
+        return;
+      }
+
+      lastConfigKeyRef.current = nextConfigKey;
+      resetConfigMutation();
+      updateWizardData({
+        servicePreset: preset.id,
+        selectedServices: preset.services,
+        configGenerated: false,
+        configPath: undefined,
+      });
+
+      generateConfigMutate({
+        preset: wizardData.hardwarePreset,
+        region: wizardData.region,
+        cache_dir: wizardData.installPath || "~/.lumen",
+        port: wizardData.port,
+        service_name: wizardData.serviceName,
+        config_type: preset.id,
+        clip_model: null,
+      });
+    },
+    [
+      generatingConfig,
+      generateConfigMutate,
+      resetConfigMutation,
+      updateWizardData,
+      wizardData.hardwarePreset,
+      wizardData.installPath,
+      wizardData.port,
+      wizardData.region,
+      wizardData.serviceName,
+    ],
+  );
 
   // Auto-generate config when preset is selected
   useEffect(() => {
@@ -156,59 +229,23 @@ export function Config() {
       return;
     }
 
-    const preset = servicePresets.find((p) => p.id === selectedPreset);
-    if (!preset) {
+    requestConfigGeneration(selectedPreset, false);
+  }, [selectedPreset, requestConfigGeneration]);
+
+  const handleSelectPreset = (presetId: ConfigType) => {
+    if (presetId === selectedPreset) {
+      requestConfigGeneration(presetId, true);
       return;
     }
 
-    if (!wizardData.hardwarePreset) {
-      return;
-    }
-
-    const nextConfigKey = [
-      selectedPreset,
-      wizardData.hardwarePreset,
-      wizardData.installPath || "~/.lumen",
-      wizardData.region,
-      String(wizardData.port),
-      wizardData.serviceName,
-    ].join("|");
-
-    if (nextConfigKey === lastConfigKeyRef.current || generatingConfig) {
-      return;
-    }
-
-    lastConfigKeyRef.current = nextConfigKey;
-
-    updateWizardData({
-      servicePreset: preset.id,
-      selectedServices: preset.services,
-      configGenerated: false,
-    });
-
-    generateConfigMutate({
-      preset: wizardData.hardwarePreset,
-      region: wizardData.region,
-      cache_dir: wizardData.installPath || "~/.lumen",
-      port: wizardData.port,
-      service_name: wizardData.serviceName,
-      config_type: preset.id,
-      clip_model: null,
-    });
-  }, [
-    selectedPreset,
-    wizardData.hardwarePreset,
-    wizardData.installPath,
-    wizardData.region,
-    wizardData.port,
-    wizardData.serviceName,
-    generateConfigMutate,
-    updateWizardData,
-    generatingConfig,
-  ]);
-
-  const handleSelectPreset = (presetId: string) => {
     setSelectedPreset(presetId);
+  };
+
+  const handleRetryGenerate = () => {
+    if (!selectedPreset) {
+      return;
+    }
+    requestConfigGeneration(selectedPreset, true);
   };
 
   const recommendedPresets = servicePresets.filter((p) => p.recommended);
@@ -245,10 +282,26 @@ export function Config() {
         )}
 
         {/* Error Alert */}
-        {error && (
+        {errorInfo && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="font-medium">{errorInfo.title}</p>
+                  <p>{errorInfo.message}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryGenerate}
+                  disabled={!selectedPreset || generatingConfig}
+                >
+                  重试生成配置
+                </Button>
+              </div>
+            </AlertDescription>
           </Alert>
         )}
 

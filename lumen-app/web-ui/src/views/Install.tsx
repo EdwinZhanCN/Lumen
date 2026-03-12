@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
+import { useLumenSession } from "@/hooks/useLumenSession";
 import { useWizard } from "@/context/useWizard";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -29,18 +30,33 @@ import {
   type InstallTaskResponse,
   type InstallStep,
 } from "@/lib/api";
+import {
+  type ErrorPresentation,
+  describeUiError,
+} from "@/lib/errorPresentation";
 
 export function Install() {
   const { wizardData, updateWizardData } = useWizard();
+  const { currentPath } = useLumenSession();
   const navigate = useNavigate();
   const [taskId, setTaskId] = useState<string | null>(null);
   const [isFinishing, setIsFinishing] = useState(false);
-  const [finishError, setFinishError] = useState<string | null>(null);
+  const [finishError, setFinishError] = useState<ErrorPresentation | null>(
+    null,
+  );
+  const installPath = wizardData.installPath || currentPath || "~/.lumen";
+
+  useEffect(() => {
+    if (!wizardData.installPath && currentPath) {
+      updateWizardData({ installPath: currentPath });
+    }
+  }, [currentPath, wizardData.installPath, updateWizardData]);
 
   // Query install status
   const { data: installStatus } = useQuery({
-    queryKey: ["installStatus"],
-    queryFn: getInstallStatus,
+    queryKey: ["installStatus", installPath],
+    queryFn: () => getInstallStatus({ cache_dir: installPath }),
+    enabled: !!installPath,
   });
 
   // Start installation mutation
@@ -62,8 +78,13 @@ export function Install() {
     enabled: taskId !== null,
     refetchInterval: (query) => {
       const data = query.state.data as InstallTaskResponse | undefined;
+      const status = String(data?.status ?? "");
       // Stop polling if completed or failed
-      if (data?.status === "completed" || data?.status === "failed") {
+      if (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled"
+      ) {
         return false;
       }
       return 1000; // Poll every second
@@ -76,7 +97,9 @@ export function Install() {
     queryFn: () => getInstallLogs(taskId!, { tail: 100 }),
     enabled:
       taskId !== null &&
-      (taskStatus?.status === "running" || taskStatus?.status === "pending"),
+      (taskStatus?.status === "running" ||
+        taskStatus?.status === "pending" ||
+        taskStatus?.status === "failed"),
     refetchInterval: 2000, // Refresh logs every 2 seconds
   });
 
@@ -94,10 +117,16 @@ export function Install() {
 
     startInstall({
       preset: wizardData.hardwarePreset,
-      cache_dir: wizardData.installPath || "~/.lumen",
+      cache_dir: installPath,
       environment_name: "lumen_env",
       force_reinstall: false,
     });
+  };
+
+  const handleRetryInstall = () => {
+    setTaskId(null);
+    updateWizardData({ installationComplete: false });
+    handleStartInstall();
   };
 
   const handleFinishInstall = async () => {
@@ -106,27 +135,26 @@ export function Install() {
     try {
       const configPath =
         wizardData.configPath ||
-        (wizardData.installPath
-          ? `${wizardData.installPath}/lumen-config.yaml`
-          : undefined);
+        (installPath ? `${installPath}/lumen-config.yaml` : undefined);
 
       if (!configPath) {
-        setFinishError("未找到配置文件路径，请返回上一步重新生成配置。");
+        setFinishError({
+          title: "业务校验失败",
+          message: "未找到配置文件路径，请返回上一步重新生成配置。",
+        });
         return;
       }
 
       await loadConfig(configPath);
       navigate("/server");
     } catch (error) {
-      setFinishError(
-        error instanceof Error ? error.message : "完成步骤失败，请重试。",
-      );
+      setFinishError(describeUiError(error, "完成步骤失败，请重试。"));
     } finally {
       setIsFinishing(false);
     }
   };
 
-  const getStatusIcon = (status: InstallStep["status"]) => {
+  const getStatusIcon = (status: InstallStep["status"] | string) => {
     switch (status) {
       case "completed":
         return <CheckCircle className="h-5 w-5 text-green-500" />;
@@ -134,6 +162,8 @@ export function Install() {
         return <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />;
       case "failed":
         return <AlertCircle className="h-5 w-5 text-red-500" />;
+      case "cancelled":
+        return <AlertCircle className="h-5 w-5 text-yellow-500" />;
       case "skipped":
         return (
           <div className="h-5 w-5 rounded-full border-2 border-muted-foreground" />
@@ -143,7 +173,7 @@ export function Install() {
     }
   };
 
-  const getStatusBadge = (status: InstallStep["status"]) => {
+  const getStatusBadge = (status: InstallStep["status"] | string) => {
     switch (status) {
       case "completed":
         return (
@@ -155,6 +185,8 @@ export function Install() {
         return <Badge variant="secondary">进行中</Badge>;
       case "failed":
         return <Badge variant="destructive">错误</Badge>;
+      case "cancelled":
+        return <Badge variant="outline">已取消</Badge>;
       case "skipped":
         return <Badge variant="outline">跳过</Badge>;
       default:
@@ -164,7 +196,16 @@ export function Install() {
 
   const allCompleted = taskStatus?.status === "completed";
   const hasFailed = taskStatus?.status === "failed";
+  const isCancelled = String(taskStatus?.status ?? "") === "cancelled";
   const isInstalling = taskStatus?.status === "running" || isStarting;
+  const startErrorInfo = startError
+    ? describeUiError(startError, "安装启动失败")
+    : null;
+  const taskErrorInfo =
+    hasFailed && taskStatus?.error
+      ? { title: "安装任务失败", message: taskStatus.error }
+      : null;
+  const runtimeErrorInfo = startErrorInfo || taskErrorInfo;
 
   return (
     <WizardLayout
@@ -186,9 +227,11 @@ export function Install() {
                 ? "正在安装，请稍候..."
                 : allCompleted
                   ? "所有任务已完成！"
-                  : hasFailed
-                    ? "安装失败，请查看错误信息"
-                    : "点击开始按钮开始安装"}
+                  : isCancelled
+                    ? "任务已取消，可重新执行安装"
+                    : hasFailed
+                      ? "安装失败，请查看错误信息"
+                      : "点击开始按钮开始安装"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -214,9 +257,7 @@ export function Install() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">安装路径</p>
-                <p className="font-mono font-medium truncate">
-                  {wizardData.installPath}
-                </p>
+                <p className="font-mono font-medium truncate">{installPath}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">硬件预设</p>
@@ -269,12 +310,26 @@ export function Install() {
               </button>
             )}
 
+            {(hasFailed || isCancelled) && (
+              <button
+                onClick={handleRetryInstall}
+                disabled={!wizardData.hardwarePreset || isStarting}
+                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-md hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Play className="h-4 w-4" />
+                重试安装
+              </button>
+            )}
+
             {/* Error Alert */}
-            {(startError || hasFailed) && (
+            {runtimeErrorInfo && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  {startError?.message || taskStatus?.error || "安装失败"}
+                  <div className="space-y-1">
+                    <p className="font-medium">{runtimeErrorInfo.title}</p>
+                    <p>{runtimeErrorInfo.message}</p>
+                  </div>
                 </AlertDescription>
               </Alert>
             )}
@@ -292,7 +347,12 @@ export function Install() {
             {finishError && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{finishError}</AlertDescription>
+                <AlertDescription>
+                  <div className="space-y-1">
+                    <p className="font-medium">{finishError.title}</p>
+                    <p>{finishError.message}</p>
+                  </div>
+                </AlertDescription>
               </Alert>
             )}
           </CardContent>

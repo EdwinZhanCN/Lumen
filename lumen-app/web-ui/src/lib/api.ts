@@ -3,6 +3,25 @@ import type { paths, components } from "@/types/schema";
 // Base URL for API requests
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+export type ApiErrorKind =
+  | "network"
+  | "permission"
+  | "business"
+  | "server"
+  | "unknown";
+
+export class ApiError extends Error {
+  kind: ApiErrorKind;
+  status?: number;
+
+  constructor(message: string, kind: ApiErrorKind, status?: number) {
+    super(message);
+    this.name = "ApiError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
 // Helper to build URL with query parameters
 function buildUrl(
   path: string,
@@ -21,19 +40,30 @@ function buildUrl(
 
 // Generic fetch wrapper
 async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+      ...options,
+    });
+  } catch {
+    throw new ApiError(
+      "网络连接失败，请确认 Lumen App 后端可访问。",
+      "network",
+    );
+  }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({
-      message: `HTTP ${response.status}: ${response.statusText}`,
-    }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`;
+    const errorPayload = await response.json().catch(() => null);
+    throw new ApiError(
+      resolveErrorMessage(errorPayload, fallbackMessage),
+      resolveErrorKind(response.status),
+      response.status,
+    );
   }
 
   // Handle 204 No Content
@@ -42,6 +72,56 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+function resolveErrorMessage(
+  payload: unknown,
+  fallbackMessage: string,
+): string {
+  if (typeof payload === "string" && payload.trim() !== "") {
+    return payload;
+  }
+
+  if (payload && typeof payload === "object") {
+    const errorObj = payload as Record<string, unknown>;
+
+    if (
+      typeof errorObj.message === "string" &&
+      errorObj.message.trim() !== ""
+    ) {
+      return errorObj.message;
+    }
+
+    const detail = errorObj.detail;
+    if (typeof detail === "string" && detail.trim() !== "") {
+      return detail;
+    }
+
+    if (detail && typeof detail === "object") {
+      const detailObj = detail as Record<string, unknown>;
+      if (
+        typeof detailObj.message === "string" &&
+        detailObj.message.trim() !== ""
+      ) {
+        return detailObj.message;
+      }
+    }
+  }
+
+  return fallbackMessage;
+}
+
+function resolveErrorKind(status: number): ApiErrorKind {
+  if (status === 401 || status === 403) {
+    return "permission";
+  }
+  if (status >= 400 && status < 500) {
+    return "business";
+  }
+  if (status >= 500) {
+    return "server";
+  }
+  return "unknown";
 }
 
 // ===== Health API =====
@@ -156,9 +236,21 @@ export async function validatePath(
 
 // ===== Hardware APIs =====
 
-export type HardwareInfo = components["schemas"]["HardwareInfoResponse"];
-export type HardwarePreset = components["schemas"]["HardwarePresetResponse"];
 export type DriverStatus = components["schemas"]["DriverCheckResponse"];
+type BaseHardwareInfo = components["schemas"]["HardwareInfoResponse"];
+type BaseHardwarePreset = components["schemas"]["HardwarePresetResponse"];
+export type HardwarePreset = BaseHardwarePreset & {
+  supported_on_current_platform?: boolean;
+  supported_systems?: string[];
+  environment_checked?: boolean;
+  availability?: "not_checked" | "ready" | "missing_drivers" | "incompatible";
+  ready?: boolean;
+  drivers?: DriverStatus[];
+  missing_installable?: string[];
+};
+export type HardwareInfo = Omit<BaseHardwareInfo, "presets"> & {
+  presets?: HardwarePreset[];
+};
 
 export async function getHardwareInfo(): Promise<HardwareInfo> {
   return fetchApi<HardwareInfo>(buildUrl("/api/v1/hardware/info"), {
@@ -204,6 +296,9 @@ export type InstallTaskListResponse =
   components["schemas"]["InstallTaskListResponse"];
 export type InstallLogsResponse = components["schemas"]["InstallLogsResponse"];
 export type InstallStep = components["schemas"]["InstallStep"];
+export type GetInstallStatusQuery = {
+  cache_dir?: string;
+};
 
 // New types for check-path endpoint
 export type ServiceStatus = {
@@ -221,10 +316,18 @@ export type CheckInstallationPathResponse = {
   message: string;
 };
 
-export async function getInstallStatus(): Promise<InstallStatusResponse> {
-  return fetchApi<InstallStatusResponse>(buildUrl("/api/v1/install/status"), {
-    method: "GET",
-  });
+export async function getInstallStatus(
+  query?: GetInstallStatusQuery,
+): Promise<InstallStatusResponse> {
+  return fetchApi<InstallStatusResponse>(
+    buildUrl(
+      "/api/v1/install/status",
+      query as Record<string, string | number | boolean | undefined | null>,
+    ),
+    {
+      method: "GET",
+    },
+  );
 }
 
 export async function checkInstallationPath(

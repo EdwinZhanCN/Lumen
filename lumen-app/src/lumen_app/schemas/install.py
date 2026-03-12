@@ -56,8 +56,11 @@ class InstallSetupRequest(BaseModel):
 class InstallStep(BaseModel):
     """A single step in the installation process."""
 
+    step_id: str
     name: str
-    status: Literal["pending", "running", "completed", "failed", "skipped"] = "pending"
+    status: Literal[
+        "pending", "running", "completed", "failed", "skipped", "cancelled"
+    ] = "pending"
     progress: int = Field(0, ge=0, le=100)
     message: str = ""
     started_at: float | None = None
@@ -69,7 +72,9 @@ class InstallTaskResponse(BaseModel):
 
     task_id: str
     preset: str
-    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    status: Literal["pending", "running", "completed", "failed", "cancelled"] = (
+        "pending"
+    )
     progress: int = Field(0, ge=0, le=100)
     current_step: str = ""
     steps: list[InstallStep] = Field(default_factory=list)
@@ -88,12 +93,14 @@ class InstallTaskResponse(BaseModel):
                 "current_step": "Installing CUDA drivers",
                 "steps": [
                     {
+                        "step_id": "check_micromamba",
                         "name": "Check micromamba",
                         "status": "completed",
                         "progress": 100,
                         "message": "micromamba already installed",
                     },
                     {
+                        "step_id": "create_environment",
                         "name": "Create environment",
                         "status": "running",
                         "progress": 60,
