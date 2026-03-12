@@ -25,6 +25,7 @@ from typing_extensions import override
 
 import lumen_vlm.proto.ml_service_pb2 as pb
 import lumen_vlm.proto.ml_service_pb2_grpc as rpc
+from lumen_vlm.backends import create_backend
 from lumen_vlm.backends.base import (
     BaseFastVLMBackend,
     ChatMessage,
@@ -153,16 +154,7 @@ class GeneralFastVLMService(rpc.InferenceServicer):
         logger.info(f"Loading resources for FastVLM model: {model_config.model}")
         resources = ResourceLoader.load_model_resource(cache_dir, model_config)
 
-        # Create backend based on runtime
         runtime = model_config.runtime.value
-        device_pref = (
-            getattr(backend_settings, "device", "cpu") if backend_settings else "cpu"
-        )
-        max_new_tokens = (
-            getattr(backend_settings, "max_new_tokens", 512)
-            if backend_settings
-            else 512
-        )
 
         # Determine precision preference from ModelConfig
         # Only applies to Runtime.onnx and Runtime.rknn
@@ -170,24 +162,15 @@ class GeneralFastVLMService(rpc.InferenceServicer):
         if model_config.precision and runtime in ["onnx", "rknn"]:
             prefer_fp16 = model_config.precision in ["fp16", "q4fp16"]
 
-        providers = (
-            getattr(backend_settings, "onnx_providers", None)
-            if backend_settings
-            else None
-        )
-
-        if runtime == "onnx":
-            from lumen_vlm.backends.onnxrt_backend import FastVLMONNXBackend
-
-            backend = FastVLMONNXBackend(
-                resources=resources,
-                device_preference=device_pref,
-                providers=providers,
-                max_new_tokens=max_new_tokens,
+        try:
+            backend = create_backend(
+                backend_settings,
+                resources,
+                runtime,
                 prefer_fp16=prefer_fp16,
             )
-        else:
-            raise ConfigError(f"Unsupported runtime: {runtime}")
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
 
         # Create service
         service = cls(backend, resources)

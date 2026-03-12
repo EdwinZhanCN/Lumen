@@ -203,6 +203,10 @@ class OcrModelManager:
             extra_metadata=extra,
         )
 
+    def get_info(self) -> RuntimeModelInfo:
+        """Compatibility wrapper for service layers expecting `get_info()`."""
+        return self.info()
+
     def __repr__(self) -> str:
         return (
             f"<OcrModelManager(model={self.config.model}, "

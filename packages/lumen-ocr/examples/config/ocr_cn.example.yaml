@@ -21,7 +21,7 @@ services:
     face:
         enabled: true
         package: lumen_ocr
-        import:
+        import_info:
             registry_class: "lumen_ocr.general_ocr.GeneralOcrService"
             add_to_server: "lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:

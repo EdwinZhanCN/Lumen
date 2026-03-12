@@ -120,7 +120,7 @@ class FastVLMONNXBackend(BaseFastVLMBackend):
             self._sess_decoder = self._build_session(runtime_root, "decoder")
 
             self._wire_io_metadata()
-            backend_info = self._default_backend_info(runtime="onnxruntime")
+            backend_info = self._default_backend_info(runtime="onnx")
             backend_info.precisions = self._detect_precisions()
             backend_info.extra.update(
                 {

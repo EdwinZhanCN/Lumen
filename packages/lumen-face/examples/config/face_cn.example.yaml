@@ -21,7 +21,7 @@ services:
     face:
         enabled: true
         package: lumen_face
-        import:
+        import_info:
             registry_class: "lumen_face.general_face.GeneralFaceService"
             add_to_server: "lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server"
         backend_settings:

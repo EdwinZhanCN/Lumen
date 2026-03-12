@@ -353,22 +353,32 @@ class GeneralFaceService(rpc.InferenceServicer):
         # Get model info
         model_info = self.model.get_info()
         backend_info = model_info.backend_info
+        if backend_info is None:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "Backend info not available"
+            )
+            raise RuntimeError("Backend info not available")
 
         # Use registry to build capability automatically
         extra_metadata = {
             "model_name": model_info.model_name,
             "model_id": model_info.model_id,
-            "face_embedding_dim": str(backend_info.get("face_embedding_dim", 512)),
-            "supports_landmarks": str(
-                backend_info.get("supports_landmarks", False)
-            ).lower(),
+            "face_embedding_dim": str(model_info.embedding_dim or 512),
+            "supports_landmarks": "true",
         }
+        extra_metadata.update(
+            {
+                key: str(value)
+                for key, value in backend_info.extra.items()
+                if value is not None
+            }
+        )
 
         return self.registry.build_capability(
             service_name=self.SERVICE_NAME,
             model_id=model_info.model_id,
-            runtime=backend_info.get("runtime", "unknown"),
-            precisions=backend_info.get("precisions", ["fp32"]),
+            runtime=backend_info.runtime,
+            precisions=backend_info.precisions,
             extra_metadata=extra_metadata,
         )
 
@@ -384,22 +394,32 @@ class GeneralFaceService(rpc.InferenceServicer):
         # Get model info
         model_info = self.model.get_info()
         backend_info = model_info.backend_info
+        if backend_info is None:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "Backend info not available"
+            )
+            raise RuntimeError("Backend info not available")
 
         # Use registry to build capability automatically
         extra_metadata = {
             "model_name": model_info.model_name,
             "model_id": model_info.model_id,
-            "face_embedding_dim": str(backend_info.get("face_embedding_dim", 512)),
-            "supports_landmarks": str(
-                backend_info.get("supports_landmarks", False)
-            ).lower(),
+            "face_embedding_dim": str(model_info.embedding_dim or 512),
+            "supports_landmarks": "true",
         }
+        extra_metadata.update(
+            {
+                key: str(value)
+                for key, value in backend_info.extra.items()
+                if value is not None
+            }
+        )
 
         yield self.registry.build_capability(
             service_name=self.SERVICE_NAME,
             model_id=model_info.model_id,
-            runtime=backend_info.get("runtime", "unknown"),
-            precisions=backend_info.get("precisions", ["fp32"]),
+            runtime=backend_info.runtime,
+            precisions=backend_info.precisions,
             extra_metadata=extra_metadata,
         )
 

@@ -311,6 +311,10 @@ class FastVLMModelManager:
             extra_metadata=extra,
         )
 
+    def get_info(self) -> RuntimeModelInfo:
+        """Compatibility wrapper for service layers expecting `get_info()`."""
+        return self.info()
+
     def get_backend_info(self) -> BackendInfo:
         """Get backend runtime information.
 

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class RuntimeKind:
     """Runtime kinds for CLIP backends."""
 
-    ONNXRT = "onnxrt"
+    ONNX = "onnx"
     TORCH = "torch"
     RKNN = "rknn"
 
@@ -39,13 +39,13 @@ def get_available_backends() -> list[str]:
     """Get a list of available runtime kinds."""
     available = []
 
-    # Check ONNXRT (base dependency)
+    # Check ONNX Runtime (base dependency)
     if importlib.util.find_spec("onnxruntime") is not None:
         try:
             from .onnxrt_backend import ONNXRTBackend
 
-            register_backend(RuntimeKind.ONNXRT, ONNXRTBackend)
-            available.append(RuntimeKind.ONNXRT)
+            register_backend(RuntimeKind.ONNX, ONNXRTBackend)
+            available.append(RuntimeKind.ONNX)
         except ImportError:
             pass
 
@@ -84,7 +84,7 @@ def create_backend(
     Args:
         backend_config: Backend configuration containing runtime kind, device, etc.
         resources: Model resources containing model files and configurations
-        runtime: The runtime kind to use (e.g., "onnxrt", "torch", "rknn")
+        runtime: The runtime kind to use (e.g., "onnx", "torch", "rknn")
         precision: Model precision for ONNX file selection (e.g., "fp32", "fp16", "int8", "q4fp16").
                    If None, uses default precision (fp32). Only applies to ONNX and RKNN runtimes.
 
@@ -109,7 +109,7 @@ def create_backend(
         )
 
     # Create backend instance based on runtime
-    if runtime_normalized == RuntimeKind.ONNXRT:
+    if runtime_normalized == RuntimeKind.ONNX:
         from .onnxrt_backend import ONNXRTBackend
 
         providers = getattr(backend_config, "onnx_providers", None)

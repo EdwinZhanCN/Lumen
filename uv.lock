@@ -1226,6 +1226,7 @@ openvino = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
@@ -1248,7 +1249,10 @@ requires-dist = [
 provides-extras = ["cpu", "cuda", "apple", "openvino"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.14.9" }]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = ">=0.14.9" },
+]
 
 [[package]]
 name = "markupsafe"

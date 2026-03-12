@@ -159,11 +159,13 @@ class FaceModelManager:
                 logger.info("Initializing face recognition backend...")
                 self._backend.initialize()
                 self._load_time = time.time() - t0
+                self.is_initialized = True
                 logger.info(
                     f"✅ Face Model Manager initialized in {self._load_time:.2f}s"
                 )
             else:
                 logger.info("Face recognition backend already initialized.")
+                self.is_initialized = True
         except Exception as e:
             logger.error(f"Failed to initialize Face Model Manager: {e}")
             raise RuntimeError(f"Model initialization failed: {e}") from e
@@ -502,6 +504,10 @@ class FaceModelManager:
             recognition_model=backend_info.pretrained,
             extra_metadata=extra,
         )
+
+    def get_info(self) -> RuntimeModelInfo:
+        """Compatibility wrapper for service layers expecting `get_info()`."""
+        return self.info()
 
     def __repr__(self) -> str:
         """String representation of FaceModelManager."""

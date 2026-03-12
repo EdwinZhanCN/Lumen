@@ -1,0 +1,119 @@
+deployment:
+  mode: hub
+  service: null
+  services:
+  - ocr
+  - clip
+  - face
+  - vlm
+metadata:
+  cache_dir: /Volumes/CodeBase/Lumen
+  region: cn
+  version: 1.0.0
+server:
+  host: 0.0.0.0
+  mdns:
+    enabled: true
+    service_name: lumen-server
+  port: 50051
+services:
+  clip:
+    backend_settings:
+      batch_size: 1
+      device: null
+      onnx_providers:
+      - - CoreMLExecutionProvider
+        - EnableOnSubgraphs: '0'
+          MLComputeUnits: ALL
+          ModelCacheDirectory: ./cache/coreml
+          ModelFormat: MLProgram
+          RequireStaticInputShapes: '0'
+          SpecializationStrategy: FastPrediction
+      - CPUExecutionProvider
+    enabled: true
+    import_info:
+      add_to_server: lumen_clip.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server
+      registry_class: lumen_clip.general_clip.clip_service.GeneralCLIPService
+    models:
+      general:
+        dataset: ImageNet_1k
+        model: CN-CLIP_ViT-L-14
+        precision: fp16
+        rknn_device: null
+        runtime: onnx
+    package: lumen_clip
+  face:
+    backend_settings:
+      batch_size: 1
+      device: null
+      onnx_providers:
+      - - CoreMLExecutionProvider
+        - EnableOnSubgraphs: '0'
+          MLComputeUnits: ALL
+          ModelCacheDirectory: ./cache/coreml
+          ModelFormat: MLProgram
+          RequireStaticInputShapes: '0'
+          SpecializationStrategy: FastPrediction
+      - CPUExecutionProvider
+    enabled: true
+    import_info:
+      add_to_server: lumen_face.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server
+      registry_class: lumen_face.general_face.GeneralFaceService
+    models:
+      general:
+        dataset: null
+        model: antelopev2
+        precision: fp32
+        rknn_device: null
+        runtime: onnx
+    package: lumen_face
+  ocr:
+    backend_settings:
+      batch_size: 1
+      device: null
+      onnx_providers:
+      - - CoreMLExecutionProvider
+        - EnableOnSubgraphs: '0'
+          MLComputeUnits: ALL
+          ModelCacheDirectory: ./cache/coreml
+          ModelFormat: MLProgram
+          RequireStaticInputShapes: '0'
+          SpecializationStrategy: FastPrediction
+      - CPUExecutionProvider
+    enabled: true
+    import_info:
+      add_to_server: lumen_ocr.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server
+      registry_class: lumen_ocr.general_ocr.GeneralOcrService
+    models:
+      general:
+        dataset: null
+        model: PP-OCRv5
+        precision: fp32
+        rknn_device: null
+        runtime: onnx
+    package: lumen_ocr
+  vlm:
+    backend_settings:
+      batch_size: 1
+      device: null
+      onnx_providers:
+      - - CoreMLExecutionProvider
+        - EnableOnSubgraphs: '0'
+          MLComputeUnits: ALL
+          ModelCacheDirectory: ./cache/coreml
+          ModelFormat: MLProgram
+          RequireStaticInputShapes: '0'
+          SpecializationStrategy: FastPrediction
+      - CPUExecutionProvider
+    enabled: true
+    import_info:
+      add_to_server: lumen_vlm.proto.ml_service_pb2_grpc.add_InferenceServicer_to_server
+      registry_class: lumen_vlm.fastvlm.GeneralFastVLMService
+    models:
+      general:
+        dataset: null
+        model: FastVLM-0.5B
+        precision: fp16
+        rknn_device: null
+        runtime: onnx
+    package: lumen_vlm

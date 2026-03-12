@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class RuntimeKind:
     """Runtime kinds for face recognition backends."""
 
-    ONNXRT = "onnxrt"
+    ONNX = "onnx"
     TORCH = "torch"
     RKNN = "rknn"
 
@@ -39,13 +39,13 @@ def get_available_backends() -> list[str]:
     """Get a list of available runtime kinds."""
     available = []
 
-    # Check ONNXRT (base dependency)
+    # Check ONNX Runtime (base dependency)
     if importlib.util.find_spec("onnxruntime") is not None:
         try:
             from .onnxrt_backend import ONNXRTBackend
 
-            register_backend(RuntimeKind.ONNXRT, ONNXRTBackend)
-            available.append(RuntimeKind.ONNXRT)
+            register_backend(RuntimeKind.ONNX, ONNXRTBackend)
+            available.append(RuntimeKind.ONNX)
         except ImportError:
             pass
 
@@ -100,8 +100,6 @@ def create_backend(
 
     # Normalize runtime name
     runtime_normalized = runtime.lower()
-    if runtime_normalized == "onnx":
-        runtime_normalized = RuntimeKind.ONNXRT
 
     if runtime_normalized not in _BACKEND_REGISTRY:
         available = list(_BACKEND_REGISTRY.keys())
@@ -110,7 +108,7 @@ def create_backend(
         )
 
     # Create backend instance based on runtime
-    if runtime_normalized == RuntimeKind.ONNXRT:
+    if runtime_normalized == RuntimeKind.ONNX:
         from .onnxrt_backend import ONNXRTBackend
 
         providers = getattr(backend_config, "onnx_providers", None)
