@@ -1,6 +1,7 @@
 ## Lumen
 
 ### Modules
+- [LumNN v1](./docs/lumnn-v1.md)
 - [lumen-clip](./packages/lumen-clip/README.md)
 - [lumen-face](./packages/lumen-face/README.md)
 - [lumen-ocr](./packages/lumen-ocr/README.md)

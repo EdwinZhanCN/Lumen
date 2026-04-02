@@ -5,9 +5,10 @@ This package hosts the hub runtime components that aggregate Lumen services
 into a single gRPC server.
 """
 
-from . import router, server, service
+from . import nn, router, server, service
 
 __all__ = [
+    "nn",
     "router",
     "server",
     "service",
